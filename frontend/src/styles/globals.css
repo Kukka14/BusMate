@@ -1,0 +1,14 @@
+@import "./variables.css";
+@import "./theme.css";
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+.main-content { flex: 1; padding: 1.5rem; }

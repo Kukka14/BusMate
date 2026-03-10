@@ -1,0 +1,15 @@
+flask
+tensorflow
+opencv-python
+numpy
+flask-socketio
+ultralytics
+pillow
+pymongo
+PyJWT
+bcrypt
+python-dotenv
+flask-cors
+torch
+transformers
+safetensors

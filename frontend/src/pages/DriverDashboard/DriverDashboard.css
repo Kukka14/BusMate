@@ -1,0 +1,850 @@
+/* ───────────────────────────────────────────────
+   DriverDashboard.css
+   Dark-navy, sidebar-left dashboard layout
+──────────────────────────────────────────────── */
+
+/* Loading / error screens */
+.dd-loading {
+  min-height: 100vh;
+  background: #0f1623;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  font-family: Inter, system-ui, sans-serif;
+}
+.dd-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #1e293b;
+  border-top-color: #22c55e;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.dd-error-screen {
+  min-height: 100vh;
+  background: #0f1623;
+  color: #f87171;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  font-family: Inter, system-ui, sans-serif;
+}
+.dd-error-screen button {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+}
+
+/* ── Root layout ─────────────────────────────── */
+.dd-root {
+  display: flex;
+  min-height: 100vh;
+  background: #0f1623;
+  font-family: Inter, system-ui, sans-serif;
+  color: #f1f5f9;
+}
+
+/* ── Sidebar ─────────────────────────────────── */
+.dd-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: #111827;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.dd-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0 1.25rem 1.75rem;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #f1f5f9;
+}
+.dd-logo-icon {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dd-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0.75rem;
+  flex: 1;
+}
+.dd-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-align: left;
+  width: 100%;
+}
+.dd-nav-btn:hover {
+  background: rgba(255,255,255,0.05);
+  color: #cbd5e1;
+}
+.dd-nav-btn.active {
+  background: rgba(34,197,94,0.1);
+  color: #4ade80;
+}
+
+.dd-sidebar-foot {
+  padding: 0 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.dd-tip-box {
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.15);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.dd-tip-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #4ade80;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.35rem;
+}
+.dd-tip-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.dd-signout {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.5rem;
+  border: 1px solid #1e293b;
+  background: transparent;
+  color: #64748b;
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.dd-signout:hover {
+  color: #f87171;
+  border-color: rgba(248,113,113,0.3);
+}
+
+/* ── Main panel ──────────────────────────────── */
+.dd-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* ── Top bar ─────────────────────────────────── */
+.dd-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.75rem;
+  background: rgba(17,24,39,0.8);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+.dd-topbar-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+.dd-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.dd-driver-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.dd-driver-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.dd-driver-id {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+.dd-active-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(34,197,94,0.12);
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #4ade80;
+}
+.dd-active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 4px #22c55e; }
+  50%       { box-shadow: 0 0 10px #22c55e; }
+}
+.dd-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* ── Content padding ─────────────────────────── */
+.dd-content {
+  padding: 1.5rem 1.75rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* ── Welcome row ─────────────────────────────── */
+.dd-welcome-h1 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0 0 0.2rem;
+  color: #f1f5f9;
+}
+.dd-welcome-sub {
+  font-size: 0.82rem;
+  color: #64748b;
+  margin: 0;
+}
+
+/* ── Stat cards ──────────────────────────────── */
+.dd-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+.dd-stat-card {
+  background: #1a1f2e;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.75rem;
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  transition: border-color 0.2s;
+}
+.dd-stat-card:hover {
+  border-color: rgba(255,255,255,0.12);
+}
+.dd-stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.dd-stat-label {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-bottom: 0.2rem;
+}
+.dd-stat-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+/* ── Shift banner ────────────────────────────── */
+.dd-shift-banner {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  border-radius: 0.875rem;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(59,130,246,0.3);
+  transition: background 0.3s;
+}
+.dd-shift-banner.active {
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+  border-color: rgba(34,197,94,0.3);
+}
+.dd-shift-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+.dd-shift-tags {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.dd-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.74rem;
+  color: rgba(255,255,255,0.85);
+}
+.dd-shift-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 0.65rem 1.4rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.dd-shift-btn:hover { background: rgba(255,255,255,0.22); }
+.dd-shift-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── 3-col cards row ─────────────────────────── */
+.dd-cards-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+}
+
+/* ── Generic card ────────────────────────────── */
+.dd-card {
+  background: #1a1f2e;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.875rem;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.dd-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+.dd-card-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+.dd-card-badge.green {
+  background: rgba(34,197,94,0.12);
+  color: #4ade80;
+  border: 1px solid rgba(34,197,94,0.2);
+}
+.dd-card-badge.yellow {
+  background: rgba(245,158,11,0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245,158,11,0.2);
+}
+.dd-card-badge.red {
+  background: rgba(239,68,68,0.12);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+/* ── 2-col variant ───────────────────────────── */
+.dd-cards-row-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ── Road scene quick links ─────────────────── */
+.dd-rsa-card {
+  gap: 0.6rem;
+}
+.dd-rsa-sub {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+.dd-rsa-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+.dd-rsa-btn {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e2e8f0;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+.dd-rsa-btn:hover {
+  border-color: #38bdf8;
+  background: #0b1220;
+  transform: translateY(-1px);
+}
+
+/* ── Analytics card ──────────────────────────── */
+.dd-analytics-card {
+  gap: 1rem;
+}
+.dd-analytics-head {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start !important;
+}
+.dd-analytics-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.dd-analytics-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+/* Range tabs */
+.dd-range-tabs {
+  display: flex;
+  gap: 4px;
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  padding: 3px;
+}
+.dd-range-tab {
+  padding: 0.3rem 0.75rem;
+  border-radius: 0.35rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dd-range-tab.active {
+  background: rgba(56,189,248,0.15);
+  color: #38bdf8;
+}
+.dd-range-tab:hover:not(.active) {
+  color: #94a3b8;
+}
+
+/* Summary strip */
+.dd-analytics-summary {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+.dd-analytics-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.7rem 0.5rem;
+  gap: 0.2rem;
+}
+.dd-analytics-stat-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+.dd-analytics-stat-lbl {
+  font-size: 0.62rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dd-analytics-divider {
+  width: 1px;
+  height: 36px;
+  background: #1e293b;
+  flex-shrink: 0;
+}
+
+/* Chart tabs */
+.dd-chart-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0;
+}
+.dd-chart-tab {
+  padding: 0.45rem 1rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: -1px;
+}
+.dd-chart-tab.active {
+  color: #38bdf8;
+  border-bottom-color: #38bdf8;
+}
+.dd-chart-tab:hover:not(.active) { color: #94a3b8; }
+
+/* Charts body */
+.dd-charts-body {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 1.25rem;
+  align-items: start;
+}
+.dd-chart-main {
+  min-width: 0;
+}
+.dd-chart-hint {
+  font-size: 0.68rem;
+  color: #475569;
+  margin: 0 0 0.5rem;
+  line-height: 1.4;
+}
+.dd-chart-loading {
+  height: 230px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dd-chart-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.dd-chart-side-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #475569;
+  margin: 0;
+}
+
+/* Emotion mini bars */
+.dd-emo-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.dd-emo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.dd-emo-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dd-emo-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  width: 42px;
+  flex-shrink: 0;
+}
+
+/* Recharts custom tooltip */
+.dd-chart-tooltip {
+  background: #1a1f2e;
+  border: 1px solid #1e293b;
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  font-family: Inter, sans-serif;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.dd-chart-tooltip-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #94a3b8;
+  margin: 0 0 4px;
+}
+
+/* ── Gauge ───────────────────────────────────── */
+.dd-gauge-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0;
+}
+
+/* ── Metric bars ─────────────────────────────── */
+.dd-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.dd-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.dd-metric-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  width: 110px;
+  flex-shrink: 0;
+}
+.dd-metric-track {
+  flex: 1;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dd-metric-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.8s ease;
+}
+.dd-metric-pct {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  width: 28px;
+  text-align: right;
+}
+
+/* ── Route KPIs ──────────────────────────────── */
+.dd-route-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.dd-route-kpi {
+  background: #111827;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.dd-route-kpi-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+.dd-route-kpi-val small {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 400;
+}
+.dd-route-kpi-label {
+  font-size: 0.68rem;
+  color: #64748b;
+}
+
+/* ── Map mock ────────────────────────────────── */
+.dd-map-mock {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  height: 130px;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+}
+
+.dd-route-foot {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+.dd-route-foot span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* ── Safety events ───────────────────────────── */
+.dd-events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.dd-event-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  background: #111827;
+  border-left: 3px solid transparent;
+}
+.dd-event-item.danger  { border-color: #ef4444; }
+.dd-event-item.warning { border-color: #f59e0b; }
+.dd-event-item.info    { border-color: #38bdf8; }
+
+.dd-event-icon-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.dd-event-item.danger  .dd-event-icon-wrap { background: rgba(239,68,68,0.12);  color: #f87171; }
+.dd-event-item.warning .dd-event-icon-wrap { background: rgba(245,158,11,0.12); color: #fbbf24; }
+.dd-event-item.info    .dd-event-icon-wrap { background: rgba(56,189,248,0.12); color: #38bdf8; }
+
+.dd-event-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.dd-event-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.dd-event-detail {
+  font-size: 0.68rem;
+  color: #64748b;
+}
+.dd-event-time {
+  font-size: 0.65rem;
+  color: #475569;
+  white-space: nowrap;
+}
+
+/* ── Status pill ─────────────────────────────── */
+.dd-pill {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* ── Schedule table ──────────────────────────── */
+.dd-table-card {
+  overflow: hidden;
+}
+.dd-table-wrap {
+  overflow-x: auto;
+}
+.dd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.dd-table th {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+  border-bottom: 1px solid #1e293b;
+}
+.dd-table td {
+  padding: 0.7rem 0.75rem;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.dd-table tr:last-child td { border-bottom: none; }
+.dd-table tbody tr:hover td {
+  background: rgba(255,255,255,0.02);
+}
+
+/* ── Responsive ──────────────────────────────── */
+@media (max-width: 1100px) {
+  .dd-cards-row { grid-template-columns: 1fr 1fr; }
+  .dd-rsa-actions { grid-template-columns: 1fr; }
+}
+@media (max-width: 800px) {
+  .dd-sidebar { display: none; }
+  .dd-stats-row { grid-template-columns: 1fr; }
+  .dd-cards-row { grid-template-columns: 1fr; }
+  .dd-rsa-actions { grid-template-columns: 1fr; }
+}
