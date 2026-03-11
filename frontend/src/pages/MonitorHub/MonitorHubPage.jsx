@@ -22,13 +22,7 @@ function Sidebar({ onLogout }) {
   const items = [
     { key: "dashboard", label: "Dashboard",           Icon: IcoHome,    path: "/driver/dashboard" },
     { key: "monitor",   label: "Monitor",              Icon: IcoMonitor, path: "/driver/monitor"   },
-    {
-      key: "drowsiness",
-      label: "Drowsiness Detection",
-      Icon: IcoDrowsy,
-      path: null,
-      disabled: true,
-    },
+    { key: "drowsiness", label: "Drowsiness Detection", Icon: IcoDrowsy, path: "/driver/drowsiness", disabled: false },
     {
       key: "emotion",
       label: "Emotion Shift Analysis",
@@ -118,13 +112,15 @@ const FEATURES = [
     subtitle: "Driver fatigue monitoring",
     description:
       "Real-time eye aspect ratio (EAR) analysis and head-pose estimation to detect driver drowsiness and microsleeps. Triggers alerts before fatigue becomes a safety risk.",
-    tags: ["Eye Tracking", "Head Pose", "Real-time Alert", "Coming Soon"],
-    accent: "#94a3b8",
-    gradient: "linear-gradient(135deg, #94a3b815, #64748b10)",
-    border: "#94a3b8",
-    comingSoon: true,
+    tags: ["Eye Tracking", "Head Pose", "Real-time Alert"],
+    accent: "#818cf8",
+    gradient: "linear-gradient(135deg, #818cf815, #6366f110)",
+    border: "#818cf8",
+    comingSoon: false,
+    path: "/driver/drowsiness",
+    cta: "Start Monitoring",
     icon: (
-      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="1.5">
         <ellipse cx="12" cy="12" rx="10" ry="6"/>
         <circle cx="12" cy="12" r="3"/>
         <line x1="12" y1="2" x2="12" y2="4"/>

@@ -50,7 +50,7 @@ export default function Sidebar({ activeKey }) {
   const items = [
     { key: "dashboard",  label: "Dashboard",              Icon: IcoHome,     path: "/driver/dashboard" },
     { key: "monitor",    label: "Monitor",                 Icon: IcoMonitor,  path: "/driver/monitor"   },
-    { key: "drowsiness", label: "Drowsiness Detection",   Icon: IcoDrowsy,   path: null, disabled: true },
+    { key: "drowsiness", label: "Drowsiness Detection",   Icon: IcoDrowsy,   path: "/driver/drowsiness", disabled: false },
     {
       key: "emotion",
       label: "Emotion Shift Analysis",

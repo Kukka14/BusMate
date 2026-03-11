@@ -206,9 +206,10 @@ export default function DrowsinessMonitorPage() {
   const videoRef   = useRef(null);
   const captureRef = useRef(null);   // hidden canvas for frame capture
   const overlayRef = useRef(null);   // visible bbox canvas
-  const socketRef  = useRef(null);
-  const sendIvRef  = useRef(null);
-  const rafRef     = useRef(null);
+  const socketRef   = useRef(null);
+  const sendIvRef   = useRef(null);
+  const rafRef      = useRef(null);
+  const inFlightRef = useRef(false);  // true while server is processing a frame
 
   const user  = JSON.parse(localStorage.getItem("user")  || "{}");
   const token = localStorage.getItem("token");
@@ -267,12 +268,13 @@ export default function DrowsinessMonitorPage() {
 
   // ── Socket.IO ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ["polling"] });
+    const socket = io(SOCKET_URL, { transports: ["polling", "websocket"] });
     socketRef.current = socket;
     socket.on("connect",    () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
     socket.on("drowsiness_result", payload => {
+      inFlightRef.current = false;   // server responded — ready to send next frame
       if (!payload?.ok) return;
       setResult(payload);
 
@@ -295,28 +297,32 @@ export default function DrowsinessMonitorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Frame send loop — rebuilds when fps or sessionId changes ─────────────
+  // ── Frame send loop ────────────────────────────────────────────────────────
+  // Runs at user-selected FPS but caps to 1 frame in-flight at a time so
+  // frames never pile up regardless of inference speed or transport type.
   useEffect(() => {
     const ms = Math.max(100, Math.round(1000 / fps));
     sendIvRef.current = setInterval(() => {
       const video  = videoRef.current;
       const canvas = captureRef.current;
       const socket = socketRef.current;
-      // Only send when socket is connected, session is active, and video ready
       if (!video || !canvas || !socket || !socket.connected || video.readyState < 2) return;
-      if (!sessionId) return;  // don't send frames until session is started
+      if (inFlightRef.current) return;   // previous frame still processing — skip this tick
       const ctx = canvas.getContext("2d");
-      // 640x480 minimum for reliable MediaPipe face detection (was 320x240)
       canvas.width = 640; canvas.height = 480;
       ctx.drawImage(video, 0, 0, 640, 480);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.80);
+      inFlightRef.current = true;
       socket.emit("drowsiness_frame", {
         image:     dataUrl,
         session_id: sessionId,
         client_ts: Date.now(),
       });
     }, ms);
-    return () => clearInterval(sendIvRef.current);
+    return () => {
+      clearInterval(sendIvRef.current);
+      inFlightRef.current = false;
+    };
   }, [fps, sessionId]);
 
   // ── Bounding-box overlay rAF loop ─────────────────────────────────────────
@@ -495,7 +501,7 @@ export default function DrowsinessMonitorPage() {
                   <>
                     <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
                     <div className="dw-session-meta">
-                      LSTM (60%) + RGB CNN (25%) + IR CNN (15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter · Socket.IO streaming
+                      LSTM (60%) + RGB CNN (25%) + IR CNN (15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter
                     </div>
                   </>
                 )}
@@ -602,7 +608,9 @@ export default function DrowsinessMonitorPage() {
                   <div className="dw-card-head">
                     <div>
                       <span className="dw-card-title">Drowsiness Confidence</span>
-                      <span className="dw-card-hint">Weighted ensemble — LSTM dominates temporal patterns</span>
+                      <span className="dw-card-hint">
+                        Local ensemble · LSTM (60%) + RGB CNN (25%) + IR CNN (15%)
+                      </span>
                     </div>
                     {verdict && (
                       <span className={`dw-verdict-badge ${verdict.toLowerCase()}`}>
@@ -664,15 +672,18 @@ export default function DrowsinessMonitorPage() {
                     )}
                   </div>
                   <div className="dw-feats-grid">
-                    <FeatChip label="EAR"   value={features.ear?.toFixed(3)}   unit=""  warn={features.ear   != null && features.ear < 0.25}/>
-                    <FeatChip label="MAR"   value={features.mar?.toFixed(3)}   unit=""  warn={features.mar   != null && features.mar > 0.60}/>
-                    <FeatChip label="Pitch" value={features.pitch?.toFixed(1)} unit="°" warn={features.pitch != null && Math.abs(features.pitch) > 20}/>
-                    <FeatChip label="Yaw"   value={features.yaw?.toFixed(1)}   unit="°" warn={features.yaw   != null && Math.abs(features.yaw)   > 30}/>
+                    <FeatChip label="EAR"       value={features.ear?.toFixed(3)}        unit=""  warn={features.ear        != null && features.ear < 0.25}/>
+                    <FeatChip label="MAR"       value={features.mar?.toFixed(3)}        unit=""  warn={features.mar        != null && features.mar > 0.60}/>
+                    <FeatChip label="Pitch"     value={features.pitch?.toFixed(1)}      unit="°" warn={features.pitch      != null && Math.abs(features.pitch) > 20}/>
+                    <FeatChip label="Yaw"       value={features.yaw?.toFixed(1)}        unit="°" warn={features.yaw        != null && Math.abs(features.yaw) > 30}/>
+                    <FeatChip label="Eye Blink" value={features.eye_closure?.toFixed(2)} unit="" warn={features.eye_closure != null && features.eye_closure > 0.45}/>
+                    <FeatChip label="PERCLOS"   value={features.perclos   != null ? String(Math.round(features.perclos   * 100)) : null} unit="%" warn={features.perclos   != null && features.perclos   > 0.30}/>
+                    <FeatChip label="Yawn"      value={features.yawn_freq != null ? String(Math.round(features.yawn_freq * 100)) : null} unit="%" warn={features.yawn_freq != null && features.yawn_freq > 0.20}/>
                   </div>
                   <div className="dw-feat-legend">
                     <span>EAR &lt;0.25 → eyes closing</span>
-                    <span>MAR &gt;0.60 → yawning</span>
-                    <span>Pitch &gt;20° → head nodding</span>
+                    <span>PERCLOS &gt;30% → sustained closure</span>
+                    <span>Yawn &gt;20% → frequent yawning</span>
                   </div>
                 </div>
 

@@ -1550,24 +1550,36 @@ def analyze_route():
 
 @socketio.on("drowsiness_frame")
 def on_drowsiness_frame(data):
-    """Process one webcam frame for drowsiness detection."""
-    img_data   = data.get("image")
-    session_id = data.get("session_id") or data.get("driver_id") or "default"
+    """
+    Process one webcam frame for drowsiness detection.
+    Runs the 3-model local ensemble (LSTM + RGB CNN + IR CNN) and emits the result.
+    """
+    try:
+        img_data   = data.get("image")
+        # Use Socket.IO socket-ID as session key — unique per browser tab.
+        session_id = request.sid
 
-    img = decode_base64_image(img_data)
-    if img is None:
-        emit("drowsiness_result", {"ok": False, "error": "Invalid image data"})
-        return
+        img = decode_base64_image(img_data)
+        if img is None:
+            emit("drowsiness_result", {"ok": False, "error": "Invalid image data"})
+            return
 
-    if not _dw_engine.ready:
-        emit("drowsiness_result", {
-            "ok":      False,
-            "error":   "Drowsiness engine not loaded — check server logs.",
-        })
-        return
+        if not _dw_engine.ready:
+            emit("drowsiness_result", {
+                "ok":    False,
+                "error": "Drowsiness engine not loaded — check server logs.",
+            })
+            return
 
-    result = _dw_engine.process_frame(img, session_id=session_id)
-    emit("drowsiness_result", result)
+        # ── 1. Local ensemble inference ───────────────────────────────────────
+        result = _dw_engine.process_frame(img, session_id=session_id)
+
+        emit("drowsiness_result", result)
+
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        emit("drowsiness_result", {"ok": False, "error": str(exc)})
 
 
 @app.route("/analyze-drowsiness-video", methods=["POST"])
