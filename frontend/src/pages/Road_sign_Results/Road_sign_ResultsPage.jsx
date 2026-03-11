@@ -33,13 +33,13 @@ export default function Road_sign_ResultsPage() {
   const navigate  = useNavigate();
 
   // ── Speak full announcement when results load ─────────────────────────────
-  useEffect(() => {
-    if (!state?.class_name) return;
-    const announcement = buildSpeechAnnouncement(state.class_name);
-    // Small delay so the page paints first
-    const t = setTimeout(() => speakText(announcement), 500);
-    return () => clearTimeout(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // useEffect(() => {
+  //   if (!state?.class_name) return;
+  //   const announcement = buildSpeechAnnouncement(state.class_name);
+  //   // Small delay so the page paints first
+  //   const t = setTimeout(() => speakText(announcement), 500);
+  //   return () => clearTimeout(t);
+  // }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) {
     return (
