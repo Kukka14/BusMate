@@ -1,7 +1,20 @@
+import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
+import { buildSpeechAnnouncement } from "../../utils/roadSignInstructions";
 import "./Road_sign_ResultsPage.css";
+
+function speakText(text) {
+  if (!window.speechSynthesis || !text) return;
+  window.speechSynthesis.cancel();
+  const utt    = new SpeechSynthesisUtterance(text);
+  utt.lang     = "en-US";
+  utt.rate     = 0.92;
+  utt.pitch    = 1;
+  utt.volume   = 1;
+  window.speechSynthesis.speak(utt);
+}
 
 const sourceLabel = (type) =>
   type === "webcam" ? "📷 Webcam Capture"
@@ -18,6 +31,15 @@ const statusColor = (s) => {
 export default function Road_sign_ResultsPage() {
   const { state } = useLocation();
   const navigate  = useNavigate();
+
+  // ── Speak full announcement when results load ─────────────────────────────
+  // useEffect(() => {
+  //   if (!state?.class_name) return;
+  //   const announcement = buildSpeechAnnouncement(state.class_name);
+  //   // Small delay so the page paints first
+  //   const t = setTimeout(() => speakText(announcement), 500);
+  //   return () => clearTimeout(t);
+  // }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) {
     return (
