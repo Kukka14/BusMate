@@ -1,0 +1,309 @@
+/* ============================================================
+   MonitorHub.css  –  Monitor selection hub page
+   ============================================================ */
+
+.mh-root {
+  display: flex;
+  min-height: 100vh;
+  background: #0d1117;
+  color: #e2e8f0;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.mh-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #111827;
+  border-right: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 0.75rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.mh-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.5rem 1.25rem;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 1rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+}
+
+.mh-logo-icon {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  border-radius: 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mh-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.mh-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mh-nav-btn:hover { background: #1e293b; color: #e2e8f0; }
+.mh-nav-btn.active { background: #1e40af22; color: #818cf8; font-weight: 600; }
+.mh-nav-btn.mh-nav-disabled { opacity: 0.45; cursor: not-allowed; }
+.mh-nav-btn.mh-nav-disabled:hover { background: transparent; color: #94a3b8; }
+
+.mh-nav-cs-badge {
+  margin-left: auto;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.3rem;
+  background: #94a3b822;
+  color: #94a3b8;
+  border: 1px solid #94a3b844;
+}
+
+.mh-nav-arrow { margin-left: auto; font-size: 0.65rem; }
+
+.mh-nav-sub { padding-left: 2rem; display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.mh-nav-sub-btn {
+  padding: 0.45rem 0.6rem;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 0.76rem;
+  cursor: pointer;
+  border-radius: 0.4rem;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.mh-nav-sub-btn:hover { background: #1e293b; color: #cbd5e1; }
+
+.mh-sidebar-foot { padding-top: 1rem; border-top: 1px solid #1e293b; margin-top: auto; }
+.mh-signout {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  transition: background 0.15s, color 0.15s;
+}
+.mh-signout:hover { background: #1e293b; color: #f87171; }
+
+/* ── Main ────────────────────────────────────────────────── */
+.mh-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+/* ── Topbar ──────────────────────────────────────────────── */
+.mh-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2rem 1rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.mh-topbar-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.mh-topbar-sub {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0.2rem 0 0;
+}
+
+.mh-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.mh-driver-name { font-size: 0.85rem; color: #94a3b8; font-weight: 500; }
+
+.mh-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+}
+
+/* ── Grid ────────────────────────────────────────────────── */
+.mh-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+@media (max-width: 900px) {
+  .mh-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Card ────────────────────────────────────────────────── */
+.mh-card {
+  border: 1px solid transparent;
+  border-radius: 1.25rem;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.mh-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.mh-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.mh-card-icon {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 1rem;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mh-card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 0.25rem;
+}
+
+.mh-card-subtitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mh-card-desc {
+  font-size: 0.83rem;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── Tags ────────────────────────────────────────────────── */
+.mh-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mh-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Footer / CTA ────────────────────────────────────────── */
+.mh-card-footer { margin-top: auto; }
+
+.mh-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.15s;
+}
+
+.mh-cta-btn:hover { filter: brightness(1.15); transform: translateX(2px); }
+
+.mh-coming-soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 0.75rem;
+  border: 1px dashed transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
+.mh-sub-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.mh-sub-btn {
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.65rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+}
+
+.mh-sub-btn:hover { background: rgba(255,255,255,0.06); transform: translateY(-1px); }

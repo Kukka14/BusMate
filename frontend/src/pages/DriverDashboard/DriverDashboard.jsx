@@ -307,7 +307,7 @@ function Sidebar({ active, onNav, onLogout, safetyTip }) {
     { key: "home",     label: "Home",    Icon: IcoHome,  path: null              },
     { key: "monitor",  label: "Monitor", Icon: IcoMonitorIcon, path: "/driver/monitor" },
     { key: "schedule", label: "Schedule",Icon: IcoSched, path: null              },
-    { key: "stats",    label: "Stats",   Icon: IcoStats, path: null              },
+    { key: "stats",    label: "Stats",   Icon: IcoStats, path: "/driver/stats"   },
     { key: "profile",  label: "Profile", Icon: IcoUser,  path: "/driver/profile" },
   ];
   return (
