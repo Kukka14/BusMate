@@ -288,7 +288,8 @@ _RS_SAMPLE_EVERY = 30
 _RS_MAX_DET      = 20
 
 _rs_ready      = False
-_rs_detector   = None
+_rs_detector   = None   # video detector  (det_pt)
+_rs_detector2  = None   # image & webcam detector (det_pt2)
 _rs_mobilenet  = None
 _rs_custom_mdl = None
 _rs_yolo_clf   = None
@@ -297,20 +298,22 @@ _rs_idx2class: dict = {}
 
 def _rs_init():
     """Load all road-sign models once at startup; no-op if weights are missing."""
-    global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class
+    global _rs_ready, _rs_detector, _rs_detector2, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class
 
-    det_pt   = _RS_W / "Detect_Model/RoadSignDetector_v22/weights/best.pt"
+    det_pt   = _RS_W / "Video_weight/yolov8s.pt"          # video detection
+    det_pt2  = _RS_W / "Detect_Model/RoadSignDetector_v22/weights/best.pt"          # image & webcam detection
     mob_h5   = _RS_W / "mobilenet_weights/Mobilenetv2_Retrain_weight/phase2_epoch_015.weights.h5"
     cst_h5   = _RS_W / "Custom_model2_weights/epoch_026.weights.h5"
     clf_pt   = _RS_W / "YOLO8/YOLOv8_Classifier/weights/best.pt"
     map_json = _RS_W / "Custom_model2_weights/class_mapping.json"
 
-    if not all(p.exists() for p in [det_pt, mob_h5, cst_h5, clf_pt, map_json]):
+    if not all(p.exists() for p in [det_pt, det_pt2, mob_h5, cst_h5, clf_pt, map_json]):
         print("\u26a0  Road-sign weights not found \u2014 /upload and related routes disabled.")
         return
 
     try:
-        _rs_detector = YOLO(str(det_pt))
+        _rs_detector  = YOLO(str(det_pt))   # video
+        _rs_detector2 = YOLO(str(det_pt2))  # image & webcam
 
         with open(map_json) as _f:
             _ci = json.load(_f)
@@ -422,17 +425,31 @@ def _rs_ensemble(crop: np.ndarray):
     return _rs_idx2class[idx], float(ens[idx])
 
 
-def rs_process_frame(frame: np.ndarray):
-    """Full pipeline: YOLO detect \u2192 crop \u2192 3-model ensemble. Returns result dict or None."""
+def rs_process_frame(frame: np.ndarray, stop_sign_only: bool = False):
+    """Full pipeline: YOLO detect \u2192 crop \u2192 3-model ensemble. Returns result dict or None.
+
+    Args:
+        stop_sign_only: When True, only process STOP sign detections (COCO class id 11).
+                        Used for video and webcam features.
+    """
     if not _rs_ready:
         return None
-    orig    = frame.copy()
-    res_det = _rs_detector(frame, conf=0.25, verbose=False)
-    boxes   = res_det[0].boxes
+    orig     = frame.copy()
+    # video uses _rs_detector; image & webcam use _rs_detector2
+    _det     = _rs_detector if stop_sign_only else _rs_detector2
+    res_det  = _det(frame, conf=0.25, verbose=False)
+    boxes    = res_det[0].boxes
     if len(boxes) == 0:
         return None
 
-    best = max(boxes, key=lambda b: float(b.conf[0]))
+    if stop_sign_only:
+        # COCO class 11 = stop sign
+        stop_boxes = [b for b in boxes if int(b.cls[0]) == 11]
+        if not stop_boxes:
+            return None
+        best = max(stop_boxes, key=lambda b: float(b.conf[0]))
+    else:
+        best = max(boxes, key=lambda b: float(b.conf[0]))
     x1, y1, x2, y2 = best.xyxy[0].cpu().numpy().astype(int)
     w, h   = x2 - x1, y2 - y1
     mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
@@ -451,13 +468,20 @@ def rs_process_frame(frame: np.ndarray):
     color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
 
     det = orig.copy()
-    cv2.rectangle(det, (x1, y1), (x2, y2), color, 3)
-    cv2.putText(det, f"{class_name.replace('_', ' ')} ({confidence:.2f})",
-                (x1, max(14, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+    if status == "Normal":
+        # High-confidence: solid green box + class name + confidence label
+        cv2.rectangle(det, (x1, y1), (x2, y2), color, 3)
+        cv2.putText(det, f"{class_name.replace('_', ' ')} ({confidence:.2f})",
+                    (x1, max(14, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+    else:
+        # Damaged / Possibly unclear: thin dashed-style red box only — no label
+        cv2.rectangle(det, (x1, y1), (x2, y2), color, 2)
 
     crop_disp = best_crop.copy()
-    cv2.putText(crop_disp, class_name.replace("_", " "),
-                (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    if status == "Normal":
+        # Only annotate crop for Normal detections
+        cv2.putText(crop_disp, class_name.replace("_", " "),
+                    (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
     return {
         "detected":       True,
@@ -493,7 +517,7 @@ def _rs_cam_worker():
         _rs_latest_raw = frame.copy()
         ann = frame.copy()
         if _rs_ready:
-            res_det = _rs_detector(frame, conf=0.25, verbose=False)
+            res_det = _rs_detector2(frame, conf=0.25, verbose=False)
             boxes   = res_det[0].boxes
             if len(boxes) > 0:
                 best = max(boxes, key=lambda b: float(b.conf[0]))
@@ -513,12 +537,17 @@ def _rs_cam_worker():
                     "Possibly unclear"
                 )
                 color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
-                cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
-                lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
-                tw  = len(lbl) * 9
-                cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
-                cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                if status == "Normal":
+                    # High-confidence: box + class name + confidence label
+                    cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
+                    lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
+                    tw  = len(lbl) * 9
+                    cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
+                    cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                else:
+                    # Damaged / Possibly unclear: thin red box only — no class name, no confidence
+                    cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
                 _rs_latest_info = {"class_name": cls, "confidence": conf, "status": status}
             else:
                 _rs_latest_info = {}
@@ -607,7 +636,7 @@ def rs_upload():
                 if not ret:
                     break
                 if fi % _RS_SAMPLE_EVERY == 0:
-                    r = rs_process_frame(frame)
+                    r = rs_process_frame(frame, stop_sign_only=True)
                     if r:
                         r["frame"] = fi
                         results_list.append(r)
@@ -648,7 +677,7 @@ def rs_capture_webcam():
     frame = _rs_latest_raw
     if frame is None:
         return jsonify({"error": "Camera not active \u2014 no frame available"}), 400
-    result = rs_process_frame(frame)
+    result = rs_process_frame(frame, stop_sign_only=True)
     if not result:
         return jsonify({"detected": False, "message": "No road sign in current frame."})
     result["input_type"] = "webcam"
