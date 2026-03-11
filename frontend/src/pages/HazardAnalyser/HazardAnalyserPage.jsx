@@ -471,7 +471,7 @@ export default function HazardAnalyserPage() {
     : null;
 
   return (
-    <div className="hz-layout">
+    <div className="dd-root">
       <Sidebar activeKey="roadscene" />
       <main className="hz-main">
     <div className="hz-page">

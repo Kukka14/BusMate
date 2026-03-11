@@ -75,9 +75,9 @@ export default function Road_sign_VideoResultsPage() {
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!state?.results) {
     return (
-      <div className="dm-root">
+      <div className="dd-root">
         <Sidebar />
-        <main className="dm-page-main">
+        <main className="dd-page-main">
           <div className="rvr-empty">
         <span style={{ fontSize: "3rem" }}>🚫</span>
         <p>No results to display.</p>
@@ -93,9 +93,9 @@ export default function Road_sign_VideoResultsPage() {
   const { results } = state;
 
   return (
-    <div className="dm-root">
+    <div className="dd-root">
       <Sidebar />
-      <main className="dm-page-main">
+      <main className="dd-page-main">
       <div className="rvr-page">
       {/* ── Page header ── */}
       <div className="rvr-header">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
+import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_LivePage.css";
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
@@ -40,109 +41,8 @@ const statusColor = (s) => {
 };
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
-const IcoHome     = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
-const IcoMonitor  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>;
-const IcoSched    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
-const IcoUser     = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
-const IcoLogout   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
-const IcoRoadSign = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l18 18M10.5 10.677a2 2 0 002.828 2.828"/><path d="M13.161 6.843A2 2 0 0115 9a2 2 0 00.8-.167m1.99 1.99C18.954 12.099 20 13.927 20 16a8 8 0 01-8 8 8 8 0 01-8-8c0-4.42 3.579-8 8-8 .786 0 1.547.113 2.268.322"/><path d="M12 4V2"/></svg>;
 const IcoCapture  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M20 7h-2.5l-1-2h-9l-1 2H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/></svg>;
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-
-// ── Sidebar ────────────────────────────────────────────────────────────────────
-function Sidebar({ onLogout }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [rsOpen, setRsOpen] = useState(true); // keep open — we're on webcam page
-  const [roadSceneOpen, setRoadSceneOpen] = useState(
-    location.pathname.startsWith("/road-scene")
-  );
-
-  const items = [
-    { key: "dashboard", label: "Dashboard",                      Icon: IcoHome,    path: "/driver/dashboard", sub: null },
-    { key: "section1",  label: "Section 1",                      Icon: IcoSched,   path: null,                sub: null },
-    { key: "monitor",   label: "Emotion Shift Profile Analysis",  Icon: IcoMonitor, path: "/driver/monitor",   sub: null },
-    {
-      key: "roadsign",
-      label: "Road Sign Detection",
-      Icon: IcoRoadSign,
-      path: null,
-      sub: [
-        { key: "rs-image",  label: "🖼  Image",  path: "/road-sign?mode=image" },
-        { key: "rs-video",  label: "🎥  Video",  path: "/road-sign?mode=video" },
-        { key: "rs-webcam", label: "📷  Webcam", path: "/road-sign/live"       },
-      ],
-    },
-    {
-      key: "roadscene",
-      label: "Road Scene Analysis",
-      Icon: IcoMonitor,
-      path: null,
-      sub: [
-        { key: "rsc-image",  label: "🖼  Image",  path: "/road-scene?mode=image" },
-        { key: "rsc-video",  label: "🎥  Video",  path: "/road-scene?mode=video" },
-        { key: "rsc-hazard", label: "🗺  Hazard", path: "/road-scene/hazard"     },
-      ],
-    },
-    { key: "profile",   label: "Profile",                        Icon: IcoUser,    path: "/driver/profile",   sub: null },
-  ];
-
-  return (
-    <aside className="rsl-sidebar">
-      <div className="rsl-logo">
-        <div className="rsl-logo-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
-        </div>
-        <span>BusMate</span>
-      </div>
-
-      <nav className="rsl-nav">
-        {items.map(({ key, label, Icon, path, sub }) => (
-          <div key={key + label}>
-            <button
-              className={`rsl-nav-btn ${(key === "roadsign" || key === "roadscene") ? "active" : ""}`}
-              onClick={() => {
-                if (sub && key === "roadsign") setRsOpen(o => !o);
-                else if (sub && key === "roadscene") setRoadSceneOpen(o => !o);
-                else if (path) navigate(path);
-              }}
-            >
-              <Icon />
-              <span>{label}</span>
-              {sub && (
-                <span className="rsl-nav-arrow">
-                  {(key === "roadsign" ? rsOpen : roadSceneOpen) ? "▾" : "▸"}
-                </span>
-              )}
-            </button>
-
-            {sub && (key === "roadsign" ? rsOpen : roadSceneOpen) && (
-              <div className="rsl-nav-sub">
-                {sub.map(s => (
-                  <button
-                    key={s.key}
-                    className={`rsl-nav-sub-btn ${s.path === "/road-sign/live" ? "active" : ""}`}
-                    onClick={() => setTimeout(() => navigate(s.path), 150)}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </nav>
-
-      <div className="rsl-sidebar-foot">
-        <div className="rsl-tip-box">
-          <span className="rsl-tip-label">DETECTION TIP</span>
-          <p className="rsl-tip-text">Hold the camera steady facing the sign for best accuracy.</p>
-        </div>
-        <button className="rsl-signout" onClick={onLogout}><IcoLogout />Sign Out</button>
-      </div>
-    </aside>
-  );
-}
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function Road_sign_LivePage() {
@@ -248,8 +148,8 @@ export default function Road_sign_LivePage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="rsl-root">
-      <Sidebar onLogout={logout} />
+    <div className="dd-root">
+      <Sidebar activeKey="monitor" />
 
       <main className="rsl-main">
         {/* ── Topbar ── */}

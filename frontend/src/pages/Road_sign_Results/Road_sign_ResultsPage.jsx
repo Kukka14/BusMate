@@ -21,9 +21,9 @@ export default function Road_sign_ResultsPage() {
 
   if (!state) {
     return (
-      <div className="dm-root">
+      <div className="dd-root">
         <Sidebar />
-        <main className="dm-page-main">
+        <main className="dd-page-main">
           <div className="rs-empty">
         <span style={{ fontSize: "3rem" }}>🚫</span>
         <p>No results to display.</p>
@@ -51,9 +51,9 @@ export default function Road_sign_ResultsPage() {
   } = state;
 
   return (
-    <div className="dm-root">
+    <div className="dd-root">
       <Sidebar />
-      <main className="dm-page-main">
+      <main className="dd-page-main">
       <div className="rs-res-page">
       {/* Header */}
       <div className="rs-res-header">

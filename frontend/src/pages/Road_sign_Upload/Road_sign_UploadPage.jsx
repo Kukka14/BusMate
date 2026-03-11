@@ -113,9 +113,9 @@ export default function Road_sign_UploadPage() {
   };
 
   return (
-    <div className="dm-root">
+    <div className="dd-root">
       <Sidebar />
-      <main className="dm-page-main">
+      <main className="dd-page-main">
       <div className="rs-page">
       {/* Page header */}
       <div className="rs-header">

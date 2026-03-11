@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ReferenceLine, Cell, PieChart, Pie,
 } from "recharts";
+import Sidebar from "../../components/common/Sidebar";
 import "./DriverStats.css";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -36,49 +37,11 @@ function bviColor(s) {
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-const IcoHome    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
-const IcoMonitor = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>;
-const IcoStats   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
-const IcoUser    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
-const IcoLogout  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
 const IcoShield  = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
 const IcoTrend   = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>;
 const IcoBrain   = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.51-2.07A3 3 0 1 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.51-2.07A3 3 0 1 0 14.5 2Z"/></svg>;
 const IcoCamera  = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>;
 const IcoAlert   = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-
-// ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({ onLogout }) {
-  const navigate = useNavigate();
-  const navItems = [
-    { key: "home",    label: "Home",     Icon: IcoHome,    path: "/driver/dashboard" },
-    { key: "monitor", label: "Monitor",  Icon: IcoMonitor, path: "/driver/monitor"   },
-    { key: "stats",   label: "Stats",    Icon: IcoStats,   path: "/driver/stats"     },
-    { key: "profile", label: "Profile",  Icon: IcoUser,    path: "/driver/profile"   },
-  ];
-  return (
-    <aside className="ds-sidebar">
-      <div className="ds-logo">
-        <div className="ds-logo-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
-        </div>
-        <span>BusMate</span>
-      </div>
-      <nav className="ds-nav">
-        {navItems.map(({ key, label, Icon, path }) => (
-          <button key={key}
-            className={`ds-nav-btn ${key === "stats" ? "active" : ""}`}
-            onClick={() => path && navigate(path)}>
-            <Icon /><span>{label}</span>
-          </button>
-        ))}
-      </nav>
-      <div className="ds-sidebar-foot">
-        <button className="ds-signout" onClick={onLogout}><IcoLogout />Sign Out</button>
-      </div>
-    </aside>
-  );
-}
 
 // ── Custom Tooltips ───────────────────────────────────────────────────────────
 function DSSChartTooltip({ active, payload }) {
@@ -173,8 +136,8 @@ export default function DriverStatsPage() {
   const initials = (user.username || "D").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 
   return (
-    <div className="ds-root">
-      <Sidebar onLogout={logout} />
+    <div className="dd-root">
+      <Sidebar activeKey="stats" />
       <main className="ds-main">
 
         {/* Topbar */}

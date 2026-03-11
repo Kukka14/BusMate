@@ -1,5 +1,123 @@
-/* ── Shared Sidebar layout wrapper ───────────────────────── */
-.dm-root {
+/* ── Shared Sidebar (mirrors DriverDashboard dd- styles) ─── */
+/* Uses dd- classes so any page importing <Sidebar /> gets the
+   exact same look as the Dashboard sidebar.                  */
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.dd-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: #111827;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.dd-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0 1.25rem 1.75rem;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #f1f5f9;
+}
+.dd-logo-icon {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dd-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0.75rem;
+  flex: 1;
+}
+.dd-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-align: left;
+  width: 100%;
+}
+.dd-nav-btn:hover {
+  background: rgba(255,255,255,0.05);
+  color: #cbd5e1;
+}
+.dd-nav-btn.active {
+  background: rgba(34,197,94,0.1);
+  color: #4ade80;
+}
+
+.dd-sidebar-foot {
+  padding: 0 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.dd-tip-box {
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.15);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.dd-tip-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #4ade80;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.35rem;
+}
+.dd-tip-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.dd-signout {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.5rem;
+  border: 1px solid #1e293b;
+  background: transparent;
+  color: #64748b;
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.dd-signout:hover {
+  color: #f87171;
+  border-color: rgba(248,113,113,0.3);
+}
+
+/* ── Layout wrapper — pages can wrap content in .dd-root ────── */
+.dd-root {
   display: flex;
   min-height: 100vh;
   background: #0d1117;
@@ -7,148 +125,8 @@
   font-family: "Inter", system-ui, -apple-system, sans-serif;
 }
 
-/* ── Sidebar ─────────────────────────────────────────────── */
-.dm-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  background: #111827;
-  border-right: 1px solid #1e293b;
-  display: flex;
-  flex-direction: column;
-  padding: 1.25rem 0.75rem;
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
-}
-
-.dm-logo {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 0.5rem 1.25rem;
-  border-bottom: 1px solid #1e293b;
-  margin-bottom: 1rem;
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: #f1f5f9;
-}
-
-.dm-logo-icon {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  border-radius: 0.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.dm-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-
-.dm-nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.55rem 0.75rem;
-  border: none;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: #64748b;
-  font-size: 0.8rem;
-  font-family: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
-  width: 100%;
-}
-.dm-nav-btn:hover { background: rgba(255,255,255,0.05); color: #94a3b8; }
-.dm-nav-btn.active {
-  background: rgba(56,189,248,0.1);
-  color: #38bdf8;
-  font-weight: 600;
-}
-
-.dm-nav-arrow {
-  margin-left: auto;
-  font-size: 10px;
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-.dm-nav-btn.dm-nav-disabled { opacity: 0.42; cursor: not-allowed; }
-.dm-nav-btn.dm-nav-disabled:hover { background: transparent !important; color: #64748b !important; }
-
-.dm-nav-cs-badge {
-  margin-left: auto;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.12rem 0.38rem;
-  border-radius: 0.28rem;
-  background: rgba(148,163,184,0.12);
-  color: #94a3b8;
-  border: 1px solid rgba(148,163,184,0.3);
-}
-
-.dm-nav-sub {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-left: 12px;
-  margin: 2px 0 4px 14px;
-  border-left: 2px solid rgba(99,102,241,0.35);
-}
-
-.dm-nav-sub-btn {
-  all: unset;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-radius: 8px;
-  font-size: 0.82rem;
-  color: #94a3b8;
-  transition: background 0.18s, color 0.18s;
-  white-space: nowrap;
-}
-.dm-nav-sub-btn:hover {
-  background: rgba(99,102,241,0.15);
-  color: #e2e8f0;
-}
-
-.dm-sidebar-foot { margin-top: auto; padding-top: 1rem; }
-
-.dm-tip-box {
-  background: rgba(56,189,248,0.06);
-  border: 1px solid rgba(56,189,248,0.15);
-  border-radius: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  margin-bottom: 0.75rem;
-}
-.dm-tip-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; color: #38bdf8; display: block; margin-bottom: 0.3rem; }
-.dm-tip-text  { font-size: 0.72rem; color: #64748b; margin: 0; line-height: 1.5; }
-
-.dm-signout {
-  display: flex; align-items: center; gap: 0.4rem;
-  width: 100%; padding: 0.55rem 0.75rem;
-  border: none; border-radius: 0.4rem;
-  background: transparent; color: #64748b;
-  font-size: 0.8rem; font-family: inherit; cursor: pointer;
-  transition: all 0.15s;
-}
-.dm-signout:hover { background: rgba(239,68,68,0.08); color: #f87171; }
-
 /* ── Page main area ─────────────────────────────────────────── */
-.dm-page-main {
+.dd-page-main {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -156,5 +134,5 @@
 
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .dm-sidebar { display: none; }
+  .dd-sidebar { display: none; }
 }

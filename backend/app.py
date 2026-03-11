@@ -1,8 +1,3 @@
-import threading as _threading_module
-_RealThread = _threading_module.Thread  # save before eventlet patches it
-
-import eventlet
-eventlet.monkey_patch()
 import os
 import json
 import tempfile
@@ -35,7 +30,7 @@ from drowsiness_engine import DrowsinessEngine
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"])
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Register user management blueprints (MongoDB — no table creation needed)
 register_user_management(app)
@@ -543,7 +538,7 @@ def _rs_start_camera() -> bool:
     with _rs_cam_lock:
         _rs_cap = cap
     _rs_cam_running = True
-    _RealThread(target=_rs_cam_worker, daemon=True).start()
+    threading.Thread(target=_rs_cam_worker, daemon=True).start()
     return True
 
 
@@ -1623,7 +1618,7 @@ def analyze_drowsiness_video():
         return jsonify(result)
 
     except Exception as exc:
-        logger.exception("Drowsiness video analysis error: %s", exc)
+        app.logger.exception("Drowsiness video analysis error: %s", exc)
         return jsonify({"error": str(exc)}), 500
 
     finally:
@@ -1643,5 +1638,6 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=5000,
-        debug=False
+        debug=False,
+        allow_unsafe_werkzeug=True,
     )

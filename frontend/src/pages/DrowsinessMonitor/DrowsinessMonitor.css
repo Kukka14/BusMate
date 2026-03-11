@@ -2,106 +2,6 @@
    DrowsinessMonitor.css  –  dark theme, matches DrivingMonitor
    ============================================================ */
 
-/* ── Root layout ─────────────────────────────────────────── */
-.dw-root {
-  display: flex;
-  min-height: 100vh;
-  background: #0d1117;
-  color: #e2e8f0;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
-}
-
-/* ── Sidebar ─────────────────────────────────────────────── */
-.dw-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  background: #111827;
-  border-right: 1px solid #1e293b;
-  display: flex;
-  flex-direction: column;
-  padding: 1.25rem 0.75rem;
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
-}
-.dw-logo {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 0.5rem 1.25rem;
-  border-bottom: 1px solid #1e293b;
-  margin-bottom: 1rem;
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: #f1f5f9;
-}
-.dw-logo-icon {
-  width: 28px; height: 28px;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  border-radius: 0.4rem;
-  display: flex; align-items: center; justify-content: center;
-}
-.dw-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-.dw-nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.55rem 0.75rem;
-  border: none;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: #64748b;
-  font-size: 0.8rem;
-  font-family: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
-  width: 100%;
-}
-.dw-nav-btn:hover  { background: rgba(255,255,255,0.05); color: #94a3b8; }
-.dw-nav-btn.active {
-  background: rgba(239,68,68,0.1);
-  color: #f87171;
-  font-weight: 600;
-}
-.dw-nav-arrow { margin-left: auto; font-size: 0.65rem; }
-.dw-nav-sub   { display: flex; flex-direction: column; gap: 1px; padding-left: 1.5rem; margin-top: 2px; }
-.dw-nav-sub-btn {
-  display: flex; align-items: center;
-  padding: 0.4rem 0.6rem;
-  border: none; border-radius: 0.35rem;
-  background: transparent; color: #475569;
-  font-size: 0.75rem; font-family: inherit; cursor: pointer;
-  transition: all 0.15s; text-align: left; width: 100%;
-}
-.dw-nav-sub-btn:hover { background: rgba(255,255,255,0.04); color: #64748b; }
-.dw-sidebar-foot { margin-top: auto; padding-top: 0.75rem; }
-.dw-tip-box {
-  background: rgba(239,68,68,0.05);
-  border: 1px solid rgba(239,68,68,0.12);
-  border-radius: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  margin-bottom: 0.75rem;
-}
-.dw-tip-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; color: #f87171; display: block; margin-bottom: 0.3rem; }
-.dw-tip-text  { font-size: 0.72rem; color: #64748b; margin: 0; line-height: 1.5; }
-.dw-signout {
-  display: flex; align-items: center; gap: 0.4rem;
-  width: 100%; padding: 0.55rem 0.75rem;
-  border: none; border-radius: 0.4rem;
-  background: transparent; color: #64748b;
-  font-size: 0.8rem; font-family: inherit; cursor: pointer;
-  transition: all 0.15s;
-}
-.dw-signout:hover { background: rgba(239,68,68,0.08); color: #f87171; }
-
 /* ── Main content ─────────────────────────────────────────── */
 .dw-main {
   flex: 1;
@@ -535,7 +435,6 @@
   }
 }
 @media (max-width: 640px) {
-  .dw-sidebar { display: none; }
   .dw-content { padding: 1rem; }
   .dw-video-summary { flex-direction: column; }
   .dw-vs-card { border-right: none; border-bottom: 1px solid #1e293b; }

@@ -49,7 +49,7 @@ export default function RoadSceneVideoResultsPage() {
   };
 
   return (
-    <div className="rsav-layout">
+    <div className="dd-root">
       <Sidebar activeKey="roadscene" />
       <main className="rsav-main">
         {!hasFrames ? (

@@ -10,7 +10,7 @@ export default function RoadSceneResultsPage() {
   const navigate  = useNavigate();
 
   return (
-    <div className="rsa-res-layout">
+    <div className="dd-root">
       <Sidebar activeKey="roadscene" />
       <main className="rsa-res-main">
         {!state ? (

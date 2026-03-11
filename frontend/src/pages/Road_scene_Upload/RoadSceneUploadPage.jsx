@@ -67,7 +67,7 @@ export default function RoadSceneUploadPage() {
   const isVideo = mode === "video";
 
   return (
-    <div className="rsa-layout">
+    <div className="dd-root">
       <Sidebar activeKey="roadscene" />
       <main className="rsa-main">
         <div className="rsa-page">
