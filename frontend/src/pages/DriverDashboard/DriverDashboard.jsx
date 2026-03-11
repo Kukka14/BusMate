@@ -488,6 +488,19 @@ export default function DriverDashboard() {
             </div>
           </div>
 
+          {/* ── Drowsiness Monitor quick link ────────────────────── */}
+          <div className="dd-card dd-rsa-card">
+            <div className="dd-card-head">
+              <span>Drowsiness Monitor</span>
+              <span className="dd-card-badge red">AI Safety</span>
+            </div>
+            <p className="dd-rsa-sub">Real-time drowsiness detection — facial landmarks, LSTM sequence model and CNN fusion.</p>
+            <div className="dd-rsa-actions">
+              <button className="dd-rsa-btn" onClick={() => navigate("/driver/drowsiness")}>👁 Live Monitor</button>
+              <button className="dd-rsa-btn" onClick={() => navigate("/driver/drowsiness?tab=video")}>🎥 Video Analysis</button>
+            </div>
+          </div>
+
           {/* ── Shift banner ─────────────────────────────────────── */}
           <div className={`dd-shift-banner ${shiftActive ? "active" : ""}`}>
             <div className="dd-shift-left">

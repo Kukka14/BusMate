@@ -26,6 +26,12 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/road-sign/, ""),
       },
       "/rsa": "http://localhost:5000",
+      "/socket.io": {
+        target: "http://localhost:5000",
+        ws: true,
+        changeOrigin: true,
+      },
+      "/analyze-drowsiness-video": "http://localhost:5000",
     },
   },
 });
