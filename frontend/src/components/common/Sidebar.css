@@ -83,6 +83,21 @@
   flex-shrink: 0;
 }
 
+.dm-nav-btn.dm-nav-disabled { opacity: 0.42; cursor: not-allowed; }
+.dm-nav-btn.dm-nav-disabled:hover { background: transparent !important; color: #64748b !important; }
+
+.dm-nav-cs-badge {
+  margin-left: auto;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.38rem;
+  border-radius: 0.28rem;
+  background: rgba(148,163,184,0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148,163,184,0.3);
+}
+
 .dm-nav-sub {
   display: flex;
   flex-direction: column;

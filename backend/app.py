@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 import os
 import json
 import tempfile
@@ -29,7 +31,7 @@ from user_management.config import Config
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"])
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # Register user management blueprints (MongoDB — no table creation needed)
 register_user_management(app)
@@ -52,7 +54,7 @@ emotion_model = load_model(MODEL_PATH)
 # YOLO cheating object model
 # -----------------------------
 
-YOLO_MODEL_PATH = "cheating_object_model.pt"
+YOLO_MODEL_PATH = "yolov8n.pt"
 yolo_model = YOLO(YOLO_MODEL_PATH)
 
 CHEATING_LABELS = {
@@ -114,14 +116,20 @@ def preprocess_face_from_bgr(img_bgr, target_size=(48,48)):
 
     x, y, w, h = max(faces, key=lambda f: f[2]*f[3])
 
-    face = gray[y:y+h, x:x+w]
+    margin = int(0.1 * max(w, h))
+    x1 = max(0, x - margin)
+    y1 = max(0, y - margin)
+    x2 = min(gray.shape[1], x + w + margin)
+    y2 = min(gray.shape[0], y + h + margin)
+
+    face = gray[y1:y2, x1:x2]
     face = cv2.resize(face, target_size)
 
     face = face.astype("float32") / 255.0
     face = np.expand_dims(face, axis=-1)
     face = np.expand_dims(face, axis=0)
 
-    bbox = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+    bbox = {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)}
 
     return (face, bbox), None
 
@@ -148,49 +156,42 @@ def decode_base64_image(data_url):
 # YOLO detection
 # -----------------------------
 
-def detect_objects_yolo(img_bgr):
+def detect_objects_yolo(img_bgr: np.ndarray, conf: float = 0.15, imgsz: int = 640):
 
-    results = yolo_model.predict(img_bgr, conf=0.45, imgsz=640)
+    results = yolo_model.predict(img_bgr, imgsz=imgsz, conf=conf)
 
     detections = []
     labels = []
 
-    if results:
+    if not results:
+        return {"detections": [], "labels": [], "cheating": False}
 
-        r0 = results[0]
-        boxes = r0.boxes
+    boxes = results[0].boxes
 
-        if boxes is not None:
+    if boxes is None:
+        return {"detections": [], "labels": [], "cheating": False}
 
-            for i in range(len(boxes.cls)):
+    for box in boxes:
 
-                cls_id = int(boxes.cls[i].item())
-                label = yolo_model.names.get(cls_id)
+        cls_id = int(box.cls[0])
+        label  = yolo_model.names[cls_id]
+        score  = float(box.conf[0])
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                score = float(boxes.conf[i].item())
-                xyxy = boxes.xyxy[i].tolist()
+        if label.lower() in CHEATING_LABELS:
+            detections.append({
+                "label": label,
+                "confidence": score,
+                "box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+            })
+            labels.append(label)
 
-                x1,y1,x2,y2 = [int(v) for v in xyxy]
-
-                detections.append({
-                    "label":label,
-                    "confidence":score,
-                    "box":{
-                        "x1":x1,
-                        "y1":y1,
-                        "x2":x2,
-                        "y2":y2
-                    }
-                })
-
-                labels.append(label)
-
-    cheating = any(lbl.lower() in CHEATING_LABELS for lbl in labels)
+    cheating = len(labels) > 0
 
     return {
-        "detections":detections,
-        "labels":labels,
-        "cheating":cheating
+        "detections": detections,
+        "labels": labels,
+        "cheating": cheating
     }
 
 
@@ -230,6 +231,16 @@ def compute_entropy(labels):
     return float(entropy)
 
 
+def compute_bvi_components(probs_buffer):
+    """Shared helper: compute T, V, E from a list of prediction arrays."""
+    label_ids = [int(np.argmax(p)) for p in probs_buffer]
+    emotions  = [EMOTION_LABELS[i].lower() for i in label_ids]
+    T = compute_transition_rate(emotions)
+    V = compute_emotion_variance(emotions)
+    E = compute_entropy(emotions)
+    return T, V, E
+
+
 def compute_bvi_for_session(session_id):
 
     buffer = session_buffers[session_id]
@@ -237,17 +248,14 @@ def compute_bvi_for_session(session_id):
     if len(buffer) < 5:
         return None
 
-    emotions = [EMOTION_LABELS[int(np.argmax(p))].lower() for p in buffer]
+    probs_list = [np.array(p) for p in buffer]
+    T, V, E = compute_bvi_components(probs_list)
 
-    T = compute_transition_rate(emotions)
-    V = compute_emotion_variance(emotions)
-    E = compute_entropy(emotions)
+    bvi = ALPHA * T + BETA * V + GAMMA * E
 
-    bvi = ALPHA*T + BETA*V + GAMMA*E
-
-    if bvi < 0.30:
+    if bvi < 0.4:
         state = "stable"
-    elif bvi < 0.60:
+    elif bvi < 0.55:
         state = "unstable"
     else:
         state = "erratic"
@@ -643,6 +651,13 @@ def rs_stop_camera_route():
     return jsonify({"stopped": True})
 
 
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "message": "DriveGuard API running — POST image to /predict, socket frames to /socket.io"
+    })
+
+
 # -----------------------------
 # API ROUTE
 # -----------------------------
@@ -825,7 +840,7 @@ def analyze_video_frames():
                         V = compute_emotion_variance(emo_seq)
                         E = compute_entropy(emo_seq)
                         bvi_score = ALPHA * T + BETA * V + GAMMA * E
-                        bvi_state = "stable" if bvi_score < 0.30 else "unstable" if bvi_score < 0.60 else "erratic"
+                        bvi_state = "stable" if bvi_score < 0.4 else "unstable" if bvi_score < 0.55 else "erratic"
                         bvi_result = {
                             "bvi_score":       round(float(bvi_score), 4),
                             "state":           bvi_state,
@@ -885,67 +900,71 @@ def analyze_video_frames():
 # SOCKET STREAM
 # -----------------------------
 
+@socketio.on("connect")
+def on_connect():
+    emit("server_ready", {"ok": True, "message": "Socket connected"})
+
+
 @socketio.on("frame")
 def on_frame(data):
 
-    driver_id = data.get("driver_id","default")
-    img_data = data.get("image")
+    driver_id = data.get("driver_id", "default")
+    img_data  = data.get("image")
 
     img = decode_base64_image(img_data)
 
     if img is None:
-
-        emit("prediction",{
-            "ok":False,
-            "error":"invalid image"
-        })
-
+        emit("prediction", {"ok": False, "error": "invalid image"})
         return
 
     objects = detect_objects_yolo(img)
 
-    processed,err = preprocess_face_from_bgr(img)
+    processed, err = preprocess_face_from_bgr(img)
 
     if err:
-
-        emit("prediction",{
-            "ok":False,
-            "error":err,
-            "objects":objects
+        emit("prediction", {
+            "ok":          True,
+            "driver_id":   driver_id,
+            "emotion":     "No Face Detected",
+            "confidence":  0.0,
+            "probabilities": {},
+            "bbox":        None,
+            "objects":     objects,
+            "error":       err
         })
-
         return
 
-    face_input,bbox = processed
+    face_input, bbox = processed
 
-    preds = emotion_model.predict(face_input)[0]
+    preds = emotion_model.predict(face_input, verbose=0)[0]
 
-    idx = int(np.argmax(preds))
+    idx   = int(np.argmax(preds))
     label = EMOTION_LABELS[idx]
 
     confidence = float(preds[idx])
 
     probs_dict = {
-        lbl:float(p) for lbl,p in zip(EMOTION_LABELS,preds)
+        lbl: float(p) for lbl, p in zip(EMOTION_LABELS, preds)
     }
 
-    session_buffers[driver_id].append(preds)
+    session_buffers[driver_id].append(preds.tolist())
 
     bvi = compute_bvi_for_session(driver_id)
 
     payload = {
-        "ok":True,
-        "emotion":label,
-        "confidence":confidence,
-        "probabilities":probs_dict,
-        "objects":objects,
-        "bbox":bbox
+        "ok":           True,
+        "driver_id":    driver_id,
+        "emotion":      label,
+        "confidence":   confidence,
+        "probabilities": probs_dict,
+        "objects":      objects,
+        "bbox":         bbox
     }
 
     if bvi:
         payload["bvi"] = bvi
 
-    emit("prediction",payload)
+    emit("prediction", payload)
 
 
 # =============================================================================
