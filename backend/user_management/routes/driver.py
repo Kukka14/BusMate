@@ -5,6 +5,58 @@ from ..utils.auth_helpers import token_required
 
 driver_bp = Blueprint("driver", __name__)
 
+
+# ── DSS (Driver Safety Score) ────────────────────────────────────────────────
+
+def _compute_dss(avg_bvi, frames):
+    """
+    Compute Driver Safety Score (0–100) from session data.
+    50 pts emotional  — from avg BVI
+    50 pts distraction — from fraction of frames with YOLO violations
+    Returns (dss_score: int, tier: str)
+    """
+    # Emotional component
+    if avg_bvi is None:
+        emotional_pts = 25
+    elif avg_bvi < 0.40:
+        emotional_pts = 50
+    elif avg_bvi < 0.55:
+        emotional_pts = 28
+    else:
+        # erratic: scale 15→0 as bvi 0.55→1.0
+        emotional_pts = max(0, round(15 * (1.0 - avg_bvi) / 0.45))
+
+    # Distraction component
+    total = len(frames)
+    if total == 0:
+        distraction_pts = 50
+    else:
+        viol_frames = sum(1 for f in frames if f.get("objects_detected"))
+        viol_pct = (viol_frames / total) * 100
+        if viol_pct == 0:
+            distraction_pts = 50
+        elif viol_pct < 5:
+            distraction_pts = 35
+        elif viol_pct < 15:
+            distraction_pts = 20
+        else:
+            distraction_pts = 0
+
+    dss = emotional_pts + distraction_pts
+
+    if dss >= 90:
+        tier = "Elite"
+    elif dss >= 75:
+        tier = "Safe"
+    elif dss >= 60:
+        tier = "Needs Attention"
+    elif dss >= 40:
+        tier = "At Risk"
+    else:
+        tier = "High Risk"
+
+    return dss, tier
+
 # ── Deterministic seeded history generator ───────────────────────────────────
 def _bvi_history(days=30, seed=42):
     """
@@ -385,6 +437,8 @@ def session_stop(current_user):
         from collections import Counter
         dominant = Counter(emotions).most_common(1)[0][0]
 
+    dss, tier = _compute_dss(avg_bvi, frames)
+
     db.driving_sessions.update_one(
         {"_id": ObjectId(sid)},
         {"$set": {
@@ -397,6 +451,8 @@ def session_stop(current_user):
                 "dominant_emotion": dominant,
                 "erratic_count":    erratic,
                 "safety_alerts":    session["summary"].get("safety_alerts", []),
+                "dss_score":        dss,
+                "dss_tier":         tier,
             },
         }}
     )
@@ -410,6 +466,8 @@ def session_stop(current_user):
             "peak_bvi":     peak_bvi,
             "dominant_emotion": dominant,
             "erratic_count":    erratic,
+            "dss_score":        dss,
+            "dss_tier":         tier,
         }
     }), 200
 
@@ -525,3 +583,295 @@ def get_analytics(current_user):
     seed  = sum(ord(c) for c in uid) if uid else 42
     history = _bvi_history(days=days, seed=seed)
     return jsonify({"range": raw, "days": days, "history": history}), 200
+
+
+# ── Driver Safety Score rank ──────────────────────────────────────────────────
+
+TIER_ORDER = ["High Risk", "At Risk", "Needs Attention", "Safe", "Elite"]
+TIER_COLOR = {
+    "Elite":           "#22c55e",
+    "Safe":            "#38bdf8",
+    "Needs Attention": "#f59e0b",
+    "At Risk":         "#f97316",
+    "High Risk":       "#ef4444",
+}
+
+
+@driver_bp.get("/rank")
+@token_required
+def get_rank(current_user):
+    """
+    GET /api/driver/rank
+    Aggregates DSS scores from the last 20 completed sessions,
+    returns avg_dss, tier, trend direction, best/worst, and per-session details.
+    """
+    from ..database import get_db
+
+    db = get_db()
+    sessions = list(
+        db.driving_sessions.find(
+            {"driver_id": str(current_user.id), "status": "completed"},
+            {"summary": 1, "started_at": 1, "ended_at": 1, "_id": 1}
+        ).sort("started_at", -1).limit(20)
+    )
+
+    scored = [
+        s for s in sessions
+        if s.get("summary", {}).get("dss_score") is not None
+    ]
+
+    if not scored:
+        return jsonify({
+            "sessions_analysed": 0,
+            "avg_dss":           None,
+            "tier":              None,
+            "tier_color":        None,
+            "trend":             "stable",
+            "best_dss":          None,
+            "worst_dss":         None,
+            "session_scores":    [],
+        }), 200
+
+    # dss_scores[0] = most recent
+    dss_scores = [s["summary"]["dss_score"] for s in scored]
+    avg_dss    = round(sum(dss_scores) / len(dss_scores), 1)
+    best_dss   = max(dss_scores)
+    worst_dss  = min(dss_scores)
+
+    # Trend: compare avg of last 3 vs avg of previous 3
+    if len(dss_scores) >= 6:
+        recent_avg = sum(dss_scores[:3]) / 3
+        older_avg  = sum(dss_scores[3:6]) / 3
+        if recent_avg > older_avg + 3:
+            trend = "improving"
+        elif recent_avg < older_avg - 3:
+            trend = "declining"
+        else:
+            trend = "stable"
+    elif len(dss_scores) >= 2:
+        trend = "improving" if dss_scores[0] > dss_scores[-1] else ("declining" if dss_scores[0] < dss_scores[-1] else "stable")
+    else:
+        trend = "stable"
+
+    if avg_dss >= 90:
+        tier = "Elite"
+    elif avg_dss >= 75:
+        tier = "Safe"
+    elif avg_dss >= 60:
+        tier = "Needs Attention"
+    elif avg_dss >= 40:
+        tier = "At Risk"
+    else:
+        tier = "High Risk"
+
+    # Reverse so oldest first for the chart (chronological)
+    session_scores = [
+        {
+            "id":        str(s["_id"]),
+            "date":      (s.get("started_at") or "")[:10],
+            "time":      (s.get("started_at") or "")[11:16],
+            "dss":       s["summary"]["dss_score"],
+            "tier":      s["summary"].get("dss_tier", "—"),
+            "avg_bvi":   round(s["summary"]["avg_bvi"], 3) if s["summary"].get("avg_bvi") is not None else None,
+            "dominant":  s["summary"].get("dominant_emotion"),
+            "erratic":   s["summary"].get("erratic_count", 0),
+            "frames":    s["summary"].get("total_frames", 0),
+        }
+        for s in reversed(scored)   # chronological order
+    ]
+
+    return jsonify({
+        "sessions_analysed": len(scored),
+        "avg_dss":           avg_dss,
+        "best_dss":          best_dss,
+        "worst_dss":         worst_dss,
+        "trend":             trend,
+        "tier":              tier,
+        "tier_color":        TIER_COLOR[tier],
+        "session_scores":    session_scores,
+    }), 200
+
+
+# ── Driver Stats (comprehensive analytics) ────────────────────────────────────
+
+@driver_bp.get("/stats")
+@token_required
+def get_stats(current_user):
+    """
+    GET /api/driver/stats
+    Aggregates all completed sessions into a rich stats payload:
+    - overview counts/averages
+    - DSS history per session
+    - BVI distribution & history
+    - emotion breakdown totals
+    - distraction stats
+    - per-session table (last 30)
+    """
+    from ..database import get_db
+    from collections import Counter
+
+    db  = get_db()
+    uid = str(current_user.id)
+
+    sessions = list(
+        db.driving_sessions.find(
+            {"driver_id": uid, "status": "completed"},
+            {"frames": 0}
+        ).sort("started_at", 1)   # oldest first for charts
+    )
+
+    # Also fetch one session's frames for the emotion detail (most recent)
+    latest_frames = []
+    if sessions:
+        latest_session = db.driving_sessions.find_one(
+            {"_id": sessions[-1]["_id"]},
+            {"frames": 1}
+        )
+        latest_frames = latest_session.get("frames", []) if latest_session else []
+
+    total_sessions = len(sessions)
+
+    if total_sessions == 0:
+        # Return empty payload so UI can show empty state
+        return jsonify({
+            "total_sessions": 0,
+            "total_frames":   0,
+            "overview":       {},
+            "dss_chart":      [],
+            "bvi_chart":      [],
+            "emotion_totals": {},
+            "distraction":    {},
+            "tier_dist":      {},
+            "sessions_table": [],
+            "bvi_history":    _bvi_history(days=30, seed=sum(ord(c) for c in uid)),
+        }), 200
+
+    # ── Aggregate over all sessions ─────────────────────────────────────
+    total_frames   = 0
+    all_dss        = []
+    all_avg_bvi    = []
+    all_peak_bvi   = []
+    all_erratic    = []
+    all_dominants  = []
+    tier_dist      = {t: 0 for t in TIER_ORDER}
+    emotion_counts = Counter()
+    total_distraction_frames = 0
+
+    dss_chart   = []   # [{date, dss, tier, avg_bvi, session_num}]
+    bvi_chart   = []   # [{date, avg_bvi, peak_bvi, erratic_count}]
+    sessions_table = []
+
+    for i, s in enumerate(sessions):
+        sm = s.get("summary", {})
+        tf = sm.get("total_frames", 0)
+        ab = sm.get("avg_bvi")
+        pb = sm.get("peak_bvi")
+        ec = sm.get("erratic_count", 0)
+        dom = sm.get("dominant_emotion")
+        dss = sm.get("dss_score")
+        tier = sm.get("dss_tier", "—")
+        date_raw = (s.get("started_at") or "")
+        date_str = date_raw[:10]
+        time_str = date_raw[11:16]
+
+        total_frames += tf
+        if ab is not None: all_avg_bvi.append(ab)
+        if pb is not None: all_peak_bvi.append(pb)
+        all_erratic.append(ec)
+        if dom: all_dominants.append(dom)
+        if dss is not None: all_dss.append(dss)
+        if tier in tier_dist: tier_dist[tier] += 1
+
+        if dss is not None:
+            dss_chart.append({
+                "session":  i + 1,
+                "date":     date_str,
+                "time":     time_str,
+                "dss":      dss,
+                "tier":     tier,
+                "avg_bvi":  round(ab, 3) if ab is not None else None,
+            })
+        bvi_chart.append({
+            "session":      i + 1,
+            "date":         date_str,
+            "avg_bvi":      round(ab, 3) if ab is not None else None,
+            "peak_bvi":     round(pb, 3) if pb is not None else None,
+            "erratic_count":ec,
+        })
+        sessions_table.append({
+            "id":        str(s["_id"]),
+            "session":   i + 1,
+            "date":      date_str,
+            "time":      time_str,
+            "frames":    tf,
+            "avg_bvi":   round(ab, 3) if ab is not None else None,
+            "peak_bvi":  round(pb, 3) if pb is not None else None,
+            "erratic":   ec,
+            "dominant":  dom,
+            "dss":       dss,
+            "tier":      tier,
+        })
+
+    # Emotion totals from latest session frames
+    for f in latest_frames:
+        em = f.get("emotion")
+        if em:
+            emotion_counts[em.lower()] += 1
+        if f.get("objects_detected"):
+            total_distraction_frames += 1
+
+    # Overview averages
+    avg_dss_all  = round(sum(all_dss) / len(all_dss), 1)  if all_dss  else None
+    best_dss_all = max(all_dss)  if all_dss  else None
+    worst_dss_all= min(all_dss)  if all_dss  else None
+    avg_bvi_all  = round(sum(all_avg_bvi) / len(all_avg_bvi), 3) if all_avg_bvi else None
+    peak_bvi_all = round(max(all_peak_bvi), 3) if all_peak_bvi else None
+    total_erratic= sum(all_erratic)
+    dominant_overall = Counter(all_dominants).most_common(1)[0][0] if all_dominants else "—"
+
+    # Distraction rate over latest session
+    distraction_rate = 0
+    if latest_frames:
+        distraction_rate = round((total_distraction_frames / len(latest_frames)) * 100, 1)
+
+    # Tier for avg DSS
+    overall_tier = "—"
+    if avg_dss_all is not None:
+        if avg_dss_all >= 90:   overall_tier = "Elite"
+        elif avg_dss_all >= 75: overall_tier = "Safe"
+        elif avg_dss_all >= 60: overall_tier = "Needs Attention"
+        elif avg_dss_all >= 40: overall_tier = "At Risk"
+        else:                   overall_tier = "High Risk"
+
+    # Trend: last-3 vs prior-3
+    trend = "stable"
+    if len(all_dss) >= 6:
+        r = sum(all_dss[-3:]) / 3
+        o = sum(all_dss[-6:-3]) / 3
+        trend = "improving" if r > o + 3 else ("declining" if r < o - 3 else "stable")
+    elif len(all_dss) >= 2:
+        trend = "improving" if all_dss[-1] > all_dss[0] else ("declining" if all_dss[-1] < all_dss[0] else "stable")
+
+    return jsonify({
+        "total_sessions":   total_sessions,
+        "total_frames":     total_frames,
+        "overview": {
+            "avg_dss":          avg_dss_all,
+            "best_dss":         best_dss_all,
+            "worst_dss":        worst_dss_all,
+            "overall_tier":     overall_tier,
+            "overall_tier_color": TIER_COLOR.get(overall_tier, "#64748b"),
+            "trend":            trend,
+            "avg_bvi":          avg_bvi_all,
+            "peak_bvi":         peak_bvi_all,
+            "total_erratic":    total_erratic,
+            "distraction_rate": distraction_rate,
+            "dominant_emotion": dominant_overall,
+        },
+        "dss_chart":    dss_chart,
+        "bvi_chart":    bvi_chart,
+        "emotion_totals": dict(emotion_counts),
+        "tier_dist":    tier_dist,
+        "sessions_table": list(reversed(sessions_table)),  # newest first
+        "bvi_history":  _bvi_history(days=30, seed=sum(ord(c) for c in uid)),
+    }), 200

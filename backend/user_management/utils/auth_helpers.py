@@ -21,6 +21,11 @@ def generate_token(user_id: str, role: str) -> str:
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Let CORS preflight through without auth check
+        if request.method == "OPTIONS":
+            from flask import current_app
+            return current_app.make_default_options_response()
+
         from ..database import get_db
         from ..models.user import User
 

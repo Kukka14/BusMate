@@ -375,6 +375,118 @@
 .dp-chart-side-title { font-size: 0.72rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.25rem; }
 .dp-gauge-wrap { display: flex; justify-content: center; }
 
+/* ── DSS Rank Card ───────────────────────────────────────────────────────── */
+.dp-dss-card { margin-bottom: 0; }
+
+.dp-dss-head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1rem;
+}
+.dp-dss-badge {
+  font-size: 0.74rem; font-weight: 700; letter-spacing: 0.03em;
+  padding: 0.28rem 0.85rem; border-radius: 99px;
+}
+.dp-dss-empty {
+  font-size: 0.8rem; color: #475569; text-align: center;
+  padding: 1.5rem 0;
+}
+.dp-dss-body { display: flex; flex-direction: column; gap: 1.1rem; }
+
+/* Top row: big score + stats strip */
+.dp-dss-top-row {
+  display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;
+}
+.dp-dss-score-block {
+  display: flex; align-items: baseline; gap: 0.35rem; flex-shrink: 0;
+}
+.dp-dss-score       { font-size: 3rem; font-weight: 800; line-height: 1; }
+.dp-dss-score-sub   { font-size: 1.1rem; font-weight: 600; color: #64748b; }
+.dp-dss-score-label { font-size: 0.72rem; color: #475569; margin-left: 0.4rem; text-transform: uppercase; letter-spacing: 0.05em; align-self: center; }
+/* legacy alias */
+.dp-dss-score-wrap  { display: flex; align-items: baseline; gap: 0.35rem; }
+
+/* Stats strip */
+.dp-dss-stats-strip {
+  display: flex; align-items: center; gap: 0.1rem; flex: 1; flex-wrap: wrap;
+}
+.dp-dss-stat { display: flex; flex-direction: column; align-items: center; padding: 0 1rem; }
+.dp-dss-stat-val { font-size: 1.15rem; font-weight: 700; color: #e2e8f0; white-space: nowrap; }
+.dp-dss-stat-lbl { font-size: 0.65rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.dp-dss-stat-div { width: 1px; height: 32px; background: #1e293b; flex-shrink: 0; }
+
+/* Tier bar */
+.dp-dss-tiers {
+  display: flex; height: 10px; border-radius: 99px; overflow: hidden; gap: 2px;
+}
+.dp-dss-tier-seg { border-radius: 2px; transition: opacity 0.2s; }
+.dp-dss-tier-seg.active { filter: brightness(1.25); }
+
+.dp-dss-tier-labels {
+  display: flex; justify-content: space-between;
+  margin-top: 0.3rem;
+}
+.dp-dss-tlabel {
+  font-size: 0.64rem; color: #334155;
+  transition: color 0.2s;
+}
+.dp-dss-tlabel.active { color: #e2e8f0; font-weight: 600; }
+
+/* Chart */
+.dp-dss-chart-wrap { background: #080e1a; border-radius: 10px; padding: 0.75rem 0.5rem 0.25rem; border: 1px solid #1e293b; }
+.dp-dss-chart-header { margin-bottom: 0.35rem; }
+.dp-dss-trend-title { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; padding-left: 0.5rem; }
+
+/* Table toggle button */
+.dp-dss-table-toggle {
+  font-size: 0.72rem; color: #64748b; background: none; border: none; cursor: pointer;
+  padding: 0.25rem 0; letter-spacing: 0.03em;
+  transition: color 0.15s; align-self: flex-start;
+}
+.dp-dss-table-toggle:hover { color: #94a3b8; }
+
+/* Session details table */
+.dp-dss-table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e293b; }
+.dp-dss-table {
+  width: 100%; border-collapse: collapse; font-size: 0.76rem;
+}
+.dp-dss-table th {
+  background: #0f172a; color: #475569; font-weight: 600; letter-spacing: 0.04em;
+  padding: 0.55rem 0.75rem; text-align: left; border-bottom: 1px solid #1e293b;
+  white-space: nowrap;
+}
+.dp-dss-table td {
+  padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b0a;
+  color: #94a3b8; vertical-align: middle;
+}
+.dp-dss-table tr:last-child td { border-bottom: none; }
+.dp-dss-table tr:hover td { background: #ffffff04; }
+.dp-dss-td-num { color: #475569; font-size: 0.7rem; }
+.dp-dss-td-time { color: #475569; font-size: 0.68rem; }
+.dp-dss-td-dss { font-size: 0.9rem; font-weight: 700; }
+.dp-dss-td-tier {
+  font-size: 0.65rem; font-weight: 700; padding: 0.15rem 0.5rem;
+  border-radius: 99px; white-space: nowrap; letter-spacing: 0.03em;
+}
+
+/* Session trend (legacy — keep for compatibility) */
+.dp-dss-trend { display: flex; flex-direction: column; gap: 0.5rem; }
+.dp-dss-bars {
+  display: flex; align-items: flex-end; gap: 6px;
+  height: 72px;
+}
+.dp-dss-bar-wrap {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-end; gap: 3px;
+  height: 100%;
+}
+.dp-dss-bar {
+  width: 100%; border-radius: 4px 4px 0 0;
+  min-height: 3px;
+  transition: height 0.4s ease;
+}
+.dp-dss-bar-val { font-size: 0.62rem; color: #475569; }
+
+
 /* Metric bars */
 .dp-metrics { display: flex; flex-direction: column; gap: 0.55rem; }
 .dp-metric-row  { display: flex; align-items: center; gap: 0.4rem; }

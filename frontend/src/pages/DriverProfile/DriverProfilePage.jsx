@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, AreaChart, Area,
   Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ReferenceLine, Brush,
+  ReferenceLine, Brush, LineChart,
 } from "recharts";
 import "./DriverProfile.css";
 
@@ -287,13 +287,221 @@ function ProfileBVICard({ initialHistory, currentBVI }) {
   );
 }
 
+// ── DSS Rank Card ─────────────────────────────────────────────────────────────
+const TIER_META = [
+  { label: "High Risk",      min: 0,  max: 40,  color: "#ef4444" },
+  { label: "At Risk",        min: 40, max: 60,  color: "#f97316" },
+  { label: "Needs Attention",min: 60, max: 75,  color: "#f59e0b" },
+  { label: "Safe",           min: 75, max: 90,  color: "#38bdf8" },
+  { label: "Elite",          min: 90, max: 100, color: "#22c55e" },
+];
+const DSS_TIER_COLOR = { Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" };
+
+function DSSTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  const tc = DSS_TIER_COLOR[d?.tier] || "#64748b";
+  return (
+    <div className="dp-chart-tooltip">
+      <p className="dp-chart-tooltip-title" style={{ marginBottom: "0.25rem" }}>
+        Session {label} · {d?.date || ""}
+      </p>
+      <p style={{ color: tc, margin: "2px 0", fontSize: "0.72rem" }}>
+        DSS: <strong>{d?.dss}</strong> — <span>{d?.tier}</span>
+      </p>
+      {d?.avg_bvi != null && (
+        <p style={{ color: "#38bdf8", margin: "2px 0", fontSize: "0.72rem" }}>
+          Avg BVI: <strong>{d.avg_bvi}</strong>
+        </p>
+      )}
+      {d?.dominant && (
+        <p style={{ color: "#94a3b8", margin: "2px 0", fontSize: "0.72rem" }}>
+          Dominant: <strong>{d.dominant}</strong>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DSSRankCard({ rank }) {
+  const [showTable, setShowTable] = useState(false);
+
+  const trendIcon  = rank.trend === "improving" ? "↑" : rank.trend === "declining" ? "↓" : "→";
+  const trendColor = rank.trend === "improving" ? "#22c55e" : rank.trend === "declining" ? "#ef4444" : "#64748b";
+
+  // Build chart data — numbered 1..N (oldest first, already sorted in API)
+  const chartData = (rank.session_scores || []).map((s, i) => ({
+    ...s,
+    session: i + 1,
+  }));
+
+  // Custom dot: color by tier
+  const DssDot = (props) => {
+    const { cx, cy, payload } = props;
+    const c = DSS_TIER_COLOR[payload?.tier] || "#64748b";
+    return <circle cx={cx} cy={cy} r={4} fill={c} stroke="#0f172a" strokeWidth={1.5} />;
+  };
+
+  return (
+    <div className="dp-card dp-dss-card">
+      {/* Header */}
+      <div className="dp-dss-head">
+        <div>
+          <span className="dp-card-title">Driver Safety Score &amp; Ranking</span>
+          <span className="dp-card-hint">&nbsp;— last {rank.sessions_analysed || 0} monitored sessions</span>
+        </div>
+        {rank.tier && (
+          <span className="dp-dss-badge" style={{ background: (rank.tier_color || "#64748b") + "22", color: rank.tier_color || "#64748b", border: `1px solid ${rank.tier_color || "#64748b"}55` }}>
+            {rank.tier}
+          </span>
+        )}
+      </div>
+
+      {rank.sessions_analysed === 0 ? (
+        <p className="dp-dss-empty">No monitored sessions yet — start a Live Cam session to build your safety score.</p>
+      ) : (
+        <div className="dp-dss-body">
+
+          {/* Top row: big score + stats strip */}
+          <div className="dp-dss-top-row">
+            {/* Big avg score */}
+            <div className="dp-dss-score-block">
+              <span className="dp-dss-score" style={{ color: rank.tier_color || "#64748b" }}>{rank.avg_dss ?? "—"}</span>
+              <span className="dp-dss-score-sub">/ 100</span>
+              <span className="dp-dss-score-label">Avg DSS</span>
+            </div>
+            {/* Stats strip */}
+            <div className="dp-dss-stats-strip">
+              <div className="dp-dss-stat">
+                <span className="dp-dss-stat-val">{rank.sessions_analysed}</span>
+                <span className="dp-dss-stat-lbl">Sessions</span>
+              </div>
+              <div className="dp-dss-stat-div" />
+              <div className="dp-dss-stat">
+                <span className="dp-dss-stat-val" style={{ color: "#22c55e" }}>{rank.best_dss ?? "—"}</span>
+                <span className="dp-dss-stat-lbl">Best</span>
+              </div>
+              <div className="dp-dss-stat-div" />
+              <div className="dp-dss-stat">
+                <span className="dp-dss-stat-val" style={{ color: "#ef4444" }}>{rank.worst_dss ?? "—"}</span>
+                <span className="dp-dss-stat-lbl">Worst</span>
+              </div>
+              <div className="dp-dss-stat-div" />
+              <div className="dp-dss-stat">
+                <span className="dp-dss-stat-val" style={{ color: trendColor }}>{trendIcon} {rank.trend}</span>
+                <span className="dp-dss-stat-lbl">Trend</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tier bar */}
+          <div className="dp-dss-tiers">
+            {TIER_META.map(t => (
+              <div key={t.label}
+                className={`dp-dss-tier-seg ${rank.tier === t.label ? "active" : ""}`}
+                style={{ flex: t.max - t.min, background: rank.tier === t.label ? t.color : t.color + "33" }}
+                title={`${t.label}: ${t.min}–${t.max}`}
+              />
+            ))}
+          </div>
+          <div className="dp-dss-tier-labels">
+            {TIER_META.map(t => (
+              <span key={t.label} className={rank.tier === t.label ? "dp-dss-tlabel active" : "dp-dss-tlabel"}>{t.label}</span>
+            ))}
+          </div>
+
+          {/* DSS Trend Chart */}
+          {chartData.length > 0 && (
+            <div className="dp-dss-chart-wrap">
+              <div className="dp-dss-chart-header">
+                <span className="dp-dss-trend-title">DSS Per Session — Performance Trend</span>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={chartData} margin={{ top: 8, right: 16, left: -16, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="dssGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor={rank.tier_color || "#38bdf8"} stopOpacity={0.25} />
+                      <stop offset="100%" stopColor={rank.tier_color || "#38bdf8"} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="session" tick={{ fill: "#475569", fontSize: 10 }} axisLine={false} tickLine={false}
+                    label={{ value: "Session #", position: "insideBottom", offset: -2, fill: "#334155", fontSize: 9 }} />
+                  <YAxis domain={[0, 100]} tick={{ fill: "#475569", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<DSSTooltip />} />
+                  {/* Reference lines for tier thresholds */}
+                  {[{ y: 40, c: "#ef4444", l: "At Risk" }, { y: 60, c: "#f59e0b", l: "Needs" }, { y: 75, c: "#38bdf8", l: "Safe" }, { y: 90, c: "#22c55e", l: "Elite" }].map(r => (
+                    <ReferenceLine key={r.y} y={r.y} stroke={r.c} strokeDasharray="3 3" strokeOpacity={0.4}
+                      label={{ value: r.l, position: "insideTopRight", fill: r.c, fontSize: 8 }} />
+                  ))}
+                  {/* Avg reference line */}
+                  {rank.avg_dss && (
+                    <ReferenceLine y={rank.avg_dss} stroke={rank.tier_color || "#64748b"} strokeDasharray="6 3" strokeOpacity={0.7}
+                      label={{ value: `Avg ${rank.avg_dss}`, position: "insideTopLeft", fill: rank.tier_color || "#64748b", fontSize: 9 }} />
+                  )}
+                  <Line type="monotone" dataKey="dss" stroke={rank.tier_color || "#38bdf8"} strokeWidth={2.5}
+                    dot={<DssDot />} activeDot={{ r: 6 }} name="DSS" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Session table toggle */}
+          {chartData.length > 0 && (
+            <>
+              <button className="dp-dss-table-toggle" onClick={() => setShowTable(v => !v)}>
+                {showTable ? "▲ Hide session details" : "▼ Show all session details"}
+              </button>
+              {showTable && (
+                <div className="dp-dss-table-wrap">
+                  <table className="dp-dss-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>DSS</th>
+                        <th>Tier</th>
+                        <th>Avg BVI</th>
+                        <th>Dominant</th>
+                        <th>Erratic</th>
+                        <th>Frames</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...chartData].reverse().map((s, i) => {
+                        const tc = DSS_TIER_COLOR[s.tier] || "#64748b";
+                        return (
+                          <tr key={s.id || i}>
+                            <td className="dp-dss-td-num">{chartData.length - i}</td>
+                            <td>{s.date}{s.time ? <span className="dp-dss-td-time">&nbsp;{s.time}</span> : null}</td>
+                            <td><span className="dp-dss-td-dss" style={{ color: tc }}>{s.dss}</span></td>
+                            <td><span className="dp-dss-td-tier" style={{ background: tc + "22", color: tc, border: `1px solid ${tc}44` }}>{s.tier}</span></td>
+                            <td>{s.avg_bvi ?? "—"}</td>
+                            <td>{s.dominant ? s.dominant.charAt(0).toUpperCase() + s.dominant.slice(1) : "—"}</td>
+                            <td style={{ color: s.erratic > 0 ? "#ef4444" : "#22c55e" }}>{s.erratic ?? 0}</td>
+                            <td>{s.frames ?? "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sidebar (shared with DriverDashboard) ─────────────────────────────────────
 function Sidebar({ onLogout }) {
   const navigate = useNavigate();
   const navItems = [
     { key: "home",    label: "Home",     Icon: IcoHome,    path: "/driver/dashboard" },
     { key: "monitor", label: "Monitor",  Icon: IcoMonitor, path: "/driver/monitor"  },
-    { key: "stats",   label: "Stats",    Icon: IcoStats,   path: null               },
+    { key: "stats",   label: "Stats",    Icon: IcoStats,   path: "/driver/stats"     },
     { key: "profile", label: "Profile",  Icon: IcoUser,    path: "/driver/profile"  },
   ];
   return (
@@ -363,17 +571,28 @@ export default function DriverProfilePage() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
+  const [rank,    setRank]    = useState(null);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) { navigate("/login"); return; }
-    fetch(`${API}/api/driver/profile`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(d => { if (d.error) setError(d.error); else setProfile(d); })
-      .catch(() => setError("Failed to load profile."))
+
+    Promise.allSettled([
+      fetch(`${API}/api/driver/profile`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`${API}/api/driver/rank`,    { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+    ])
+      .then(([profileResult, rankResult]) => {
+        if (profileResult.status === "fulfilled") {
+          if (profileResult.value.error) setError(profileResult.value.error);
+          else setProfile(profileResult.value);
+        } else {
+          setError("Failed to load profile.");
+        }
+        if (rankResult.status === "fulfilled" && !rankResult.value?.error) {
+          setRank(rankResult.value);
+        }
+      })
       .finally(() => setLoading(false));
   }, [navigate]);
 
@@ -465,6 +684,11 @@ export default function DriverProfilePage() {
               </div>
             ))}
           </div>
+
+          {/* ── DSS Rank Card ────────────────────────────────────────── */}
+          {rank && (
+            <DSSRankCard rank={rank} />
+          )}
 
           {/* ── BVI Analytics Card (full-width, matches dashboard) ──────── */}
           <ProfileBVICard initialHistory={bvi.history || []} currentBVI={bvi}/>
