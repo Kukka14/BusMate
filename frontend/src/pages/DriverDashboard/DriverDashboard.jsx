@@ -306,7 +306,7 @@ function Sidebar({ active, onNav, onLogout, safetyTip }) {
   const navItems = [
     { key: "home",     label: "Home",    Icon: IcoHome,  path: null              },
     { key: "monitor",  label: "Monitor", Icon: IcoMonitorIcon, path: "/driver/monitor" },
-    { key: "schedule", label: "Schedule",Icon: IcoSched, path: null              },
+    { key: "schedule", label: "Schedule",Icon: IcoSched, path: "/driver/schedule" },
     { key: "stats",    label: "Stats",   Icon: IcoStats, path: "/driver/stats"   },
     { key: "profile",  label: "Profile", Icon: IcoUser,  path: "/driver/profile" },
   ];

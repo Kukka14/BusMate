@@ -351,6 +351,59 @@ def stop_shift(current_user):
                     "end_time": datetime.utcnow().isoformat()}), 200
 
 
+# ── Schedule endpoints ────────────────────────────────────────────────────────
+
+def _generate_schedules(user_id):
+    """Generate deterministic demo schedules for a driver."""
+    from datetime import timezone
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    routes = [
+        {"start_town": "Colombo",    "end_town": "Kandy",        "bus": "BUS-204", "route_name": "101 Express"},
+        {"start_town": "Galle",      "end_town": "Matara",       "bus": "BUS-117", "route_name": "202 Southern"},
+        {"start_town": "Kurunegala", "end_town": "Anuradhapura", "bus": "BUS-088", "route_name": "303 North Central"},
+        {"start_town": "Negombo",    "end_town": "Colombo",      "bus": "BUS-155", "route_name": "404 Coastal"},
+        {"start_town": "Kandy",      "end_town": "Nuwara Eliya", "bus": "BUS-301", "route_name": "505 Hill Country"},
+        {"start_town": "Colombo",    "end_town": "Galle",        "bus": "BUS-204", "route_name": "606 Southern Exp"},
+    ]
+
+    # Fixed layout: 3 past (completed) + today + 4 upcoming
+    layout = [
+        (-3, "Completed", "06:00 – 14:00"),
+        (-2, "Completed", "10:00 – 18:00"),
+        (-1, "Completed", "14:00 – 22:00"),
+        ( 0, "Today",     "06:00 – 14:00"),
+        ( 1, "Upcoming",  "10:00 – 18:00"),
+        ( 2, "Upcoming",  "06:00 – 14:00"),
+        ( 3, "Upcoming",  "14:00 – 22:00"),
+        ( 4, "Upcoming",  "06:00 – 14:00"),
+    ]
+
+    schedules = []
+    for idx, (offset, status, shift_time) in enumerate(layout):
+        day = today + timedelta(days=offset)
+        r = routes[idx % len(routes)]
+        schedules.append({
+            "id": f"SCH-{abs(hash(str(user_id) + str(offset))) % 99999:05d}",
+            "date": day.strftime("%a, %b %d"),
+            "date_iso": day.isoformat(),
+            "shift_time": shift_time,
+            "start_town": r["start_town"],
+            "end_town": r["end_town"],
+            "bus": r["bus"],
+            "route_name": r["route_name"],
+            "status": status,
+        })
+    return schedules
+
+
+@driver_bp.get("/schedules")
+@token_required
+def get_schedules(current_user):
+    schedules = _generate_schedules(str(current_user.id))
+    return jsonify({"schedules": schedules}), 200
+
+
 # ── Driving Session endpoints ─────────────────────────────────────────────────
 
 @driver_bp.post("/session/start")

@@ -12,7 +12,7 @@ const IcoLogout  = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="n
 const NAV_ITEMS = [
   { key: "home",     label: "Home",     Icon: IcoHome,    path: "/driver/dashboard" },
   { key: "monitor",  label: "Monitor",  Icon: IcoMonitor, path: "/driver/monitor"   },
-  { key: "schedule", label: "Schedule", Icon: IcoSched,   path: null                },
+  { key: "schedule", label: "Schedule", Icon: IcoSched,   path: "/driver/schedule"  },
   { key: "stats",    label: "Stats",    Icon: IcoStats,   path: "/driver/stats"     },
   { key: "profile",  label: "Profile",  Icon: IcoUser,    path: "/driver/profile"   },
 ];
@@ -29,6 +29,8 @@ export default function Sidebar({ activeKey }) {
     if (p.startsWith("/driver/drowsiness"))   return "monitor";
     if (p.startsWith("/road-sign"))           return "monitor";
     if (p.startsWith("/road-scene"))          return "monitor";
+    if (p.startsWith("/driver/schedule"))     return "schedule";
+    if (p.startsWith("/driver/active-shift")) return "schedule";
     if (p.startsWith("/driver/stats"))        return "stats";
     if (p.startsWith("/driver/profile"))      return "profile";
     return "";
