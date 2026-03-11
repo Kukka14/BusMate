@@ -432,6 +432,15 @@
 .rsl-metric-lbl { color: #64748b; }
 .rsl-metric-val { font-weight: 600; }
 
+/* ── Live instruction panel wrapper ── */
+.rsl-live-instruction {
+  width: 100%;
+  margin-top: 0.85rem;
+}
+.rsl-live-instruction .rsi-panel {
+  max-width: 100%;
+}
+
 /* ── No-data state ── */
 .rsl-no-data {
   text-align: center;

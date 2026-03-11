@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import "./Road_sign_LivePage.css";
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
@@ -417,6 +418,11 @@ export default function Road_sign_LivePage() {
                           </span>
                         </div>
                       ))}
+                    </div>
+
+                    {/* Driver instruction panel */}
+                    <div className="rsl-live-instruction">
+                      <RoadSignInstructionPanel className={info.class_name} compact />
                     </div>
                   </div>
                 ) : (
