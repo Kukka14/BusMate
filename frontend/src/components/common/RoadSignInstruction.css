@@ -1,0 +1,151 @@
+/* ── Road Sign Instruction Panel ─────────────────────────────────────────── */
+
+.rsi-panel {
+  width: 100%;
+  max-width: 900px;
+  border: 1.5px solid;
+  border-radius: 0.9rem;
+  padding: 1.25rem 1.5rem 1.35rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);
+  animation: rsi-fadein 0.35s ease;
+}
+
+@keyframes rsi-fadein {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* ── Header row ─────────────────────────────────────────────────────────── */
+.rsi-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.rsi-alert-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.rsi-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+  flex: 1;
+  letter-spacing: 0.02em;
+}
+
+.rsi-priority-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  padding: 0.22rem 0.7rem;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ── Sign name row ──────────────────────────────────────────────────────── */
+.rsi-sign-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.rsi-sign-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.rsi-sign-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.rsi-sign-name {
+  font-size: 1.15rem;
+  font-weight: 800;
+  text-transform: capitalize;
+  letter-spacing: 0.01em;
+}
+
+/* ── Divider ────────────────────────────────────────────────────────────── */
+.rsi-divider {
+  height: 1px;
+  opacity: 0.3;
+  border-radius: 1px;
+  margin-bottom: 0.85rem;
+}
+
+/* ── Instructions list ──────────────────────────────────────────────────── */
+.rsi-instructions-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.55rem;
+}
+
+.rsi-instructions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rsi-instruction-item {
+  font-size: 0.93rem;
+  font-weight: 500;
+  color: var(--color-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  line-height: 1.5;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.45rem;
+  background: rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+
+.rsi-instruction-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+/* ── Compact variant (used inside video frame cards) ────────────────────── */
+.rsi-compact {
+  max-width: 100%;
+  padding: 0.9rem 1.1rem 1rem;
+  margin-bottom: 0;
+  border-radius: 0.65rem;
+}
+
+.rsi-compact .rsi-title {
+  font-size: 0.85rem;
+}
+
+.rsi-compact .rsi-sign-icon {
+  font-size: 1.5rem;
+}
+
+.rsi-compact .rsi-sign-name {
+  font-size: 0.95rem;
+}
+
+.rsi-compact .rsi-instruction-item {
+  font-size: 0.83rem;
+  padding: 0.28rem 0.5rem;
+}

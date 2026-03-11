@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar";
+import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import "./Road_sign_VideoResultsPage.css";
 
 // ── Beep helper (no speech) ───────────────────────────────────────────────────
@@ -218,6 +219,11 @@ export default function Road_sign_VideoResultsPage() {
                   />
                 </div>
               ))}
+            </div>
+
+            {/* Driver instruction panel */}
+            <div className="rvr-frame-instruction">
+              <RoadSignInstructionPanel className={r.class_name} compact />
             </div>
           </div>
         ))}
