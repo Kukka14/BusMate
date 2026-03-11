@@ -1,5 +1,2 @@
 .venv/
 
-# Large files exceeding GitHub's size limit
-backend/RSA&HA/RSA/model.safetensors
-backend/RSA&HA/HA/sri_lanka_srtm.tif
