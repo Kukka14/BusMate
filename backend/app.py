@@ -1,3 +1,6 @@
+import threading as _threading_module
+_RealThread = _threading_module.Thread  # save before eventlet patches it
+
 import eventlet
 eventlet.monkey_patch()
 import os
@@ -536,18 +539,22 @@ def _rs_start_camera() -> bool:
     with _rs_cam_lock:
         _rs_cap = cap
     _rs_cam_running = True
-    threading.Thread(target=_rs_cam_worker, daemon=True).start()
+    _RealThread(target=_rs_cam_worker, daemon=True).start()
     return True
 
 
 def _rs_stop_camera():
-    global _rs_cap, _rs_cam_running
+    global _rs_cap, _rs_cam_running, _rs_latest_ann, _rs_latest_raw, _rs_latest_info
     _rs_cam_running = False
     time.sleep(0.15)
     with _rs_cam_lock:
         if _rs_cap:
             _rs_cap.release()
             _rs_cap = None
+    # Clear stale frame data so the next session doesn't serve old frames
+    _rs_latest_ann  = None
+    _rs_latest_raw  = None
+    _rs_latest_info = {}
 
 
 def _rs_gen_mjpeg():
@@ -625,7 +632,11 @@ def rs_video_feed():
         return jsonify({"error": "Road-sign models not loaded"}), 503
     if not _rs_start_camera():
         return "Cannot open camera", 500
-    return Response(_rs_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp = Response(_rs_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"]     = "no-cache, no-store, must-revalidate"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 
 @app.route("/get_detection_info")
