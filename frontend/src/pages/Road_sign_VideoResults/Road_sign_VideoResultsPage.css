@@ -407,3 +407,9 @@
   color: var(--color-text-muted);
 }
 .rs-empty p { font-size: 1rem; }
+
+/* ── Per-frame instruction panel wrapper ──────────────────────────────────── */
+.rvr-frame-instruction {
+  padding: 1rem 1.1rem 0.25rem;
+  border-top: 1px solid var(--color-border);
+}

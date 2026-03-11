@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar";
+import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import "./Road_sign_ResultsPage.css";
 
 const sourceLabel = (type) =>
@@ -107,6 +108,9 @@ export default function Road_sign_ResultsPage() {
           </div>
         </div>
       </div>
+
+      {/* Instruction panel */}
+      <RoadSignInstructionPanel className={class_name} />
 
       {/* Three image panels */}
       <div className="rs-images-grid">

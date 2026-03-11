@@ -1,12 +1,26 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { io } from "socket.io-client";
+import useLocalStorage from "../../hooks/useLocalStorage";
 import "./DrivingMonitor.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "";
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-const CHEATING_LABELS = new Set(["phone", "hand raise", "extra person", "cell phone", "laptop"]);
+const CHEATING_LABELS = new Set(["cell phone", "laptop", "phone", "hand raise", "extra person"]);
+
+const getEmotionColor = (emotion) => {
+  switch (emotion?.toLowerCase()) {
+    case "happy":    return "text-green-400 border-green-400/30 bg-green-400/10";
+    case "sad":      return "text-blue-400 border-blue-400/30 bg-blue-400/10";
+    case "angry":    return "text-red-400 border-red-400/30 bg-red-400/10";
+    case "fearful":  return "text-purple-400 border-purple-400/30 bg-purple-400/10";
+    case "surprised":return "text-yellow-400 border-yellow-400/30 bg-yellow-400/10";
+    case "disgust":
+    case "disgusted":return "text-orange-400 border-orange-400/30 bg-orange-400/10";
+    default:         return "text-gray-300 border-gray-400/30 bg-gray-400/10";
+  }
+};
 
 const EMOTION_COLOR = {
   happy:    "#22c55e",
@@ -29,8 +43,10 @@ function bviColor(s) {
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const IcoHome    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
 const IcoMonitor = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>;
-const IcoSched   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
-const IcoStats   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
+const IcoSched    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
+const IcoStats    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
+const IcoDrowsy   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="12" rx="10" ry="6"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>;
+const IcoEmotion  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>;
 const IcoUser    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
 const IcoLogout  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
 const IcoCam     = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>;
@@ -38,19 +54,26 @@ const IcoStop    = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="c
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 const IcoRoadSign = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l18 18M10.5 10.677a2 2 0 002.828 2.828"/><path d="M13.161 6.843A2 2 0 0015 9a2 2 0 00.8-.167m1.99 1.99C18.954 12.099 20 13.927 20 16a8 8 0 01-8 8 8 8 0 01-8-8c0-4.42 3.579-8 8-8 .786 0 1.547.113 2.268.322"/><path d="M12 4V2"/></svg>;
 const IcoScene    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 20h20"/><path d="M4 20L9 9l4 6 3-3 4 8"/><circle cx="17" cy="6" r="2"/></svg>;
-const IcoEye      = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({ onLogout }) {
   const navigate = useNavigate();
-  const [openKey, setOpenKey] = useState(null);
+  const [openKey, setOpenKey] = useState("emotion"); // auto-expand emotion section
 
   const items = [
-    
-    { key: "dashboard", label: "Dashboard",      Icon: IcoHome,    path: "/driver/dashboard" },
-    { key: "drowsiness", label: "Drowsiness Monitor", Icon: IcoEye, path: "/driver/drowsiness" },
-    { key: "monitor",   label: "Emotion Shift Profile Analysis",               Icon: IcoMonitor,  path: "/driver/monitor" },
-    
+    { key: "dashboard",  label: "Dashboard",            Icon: IcoHome,    path: "/driver/dashboard" },
+    { key: "monitor",    label: "Monitor",               Icon: IcoMonitor, path: "/driver/monitor"   },
+    { key: "drowsiness", label: "Drowsiness Detection",  Icon: IcoDrowsy,  path: null, disabled: true },
+    {
+      key: "emotion",
+      label: "Emotion Shift Analysis",
+      Icon: IcoEmotion,
+      path: null,
+      sub: [
+        { key: "em-live",  label: "📷  Live Cam",       path: "/driver/monitor/emotion?tab=live"  },
+        { key: "em-video", label: "🎥  Video Analysis", path: "/driver/monitor/emotion?tab=video" },
+      ],
+    },
     {
       key: "roadsign",
       label: "Road Sign Detection",
@@ -68,20 +91,12 @@ function Sidebar({ onLogout }) {
       Icon: IcoScene,
       path: null,
       sub: [
-        { key: "rsa-image",  label: "🖼  Image",   path: "/road-scene?mode=image" },
-        { key: "rsa-video",  label: "🎥  Video",   path: "/road-scene?mode=video" },
-        { key: "rsa-hazard", label: "🗺  Hazard",  path: "/road-scene/hazard"    },
+        { key: "rsa-image",  label: "🖼  Image",  path: "/road-scene?mode=image" },
+        { key: "rsa-video",  label: "🎥  Video",  path: "/road-scene?mode=video" },
+        { key: "rsa-hazard", label: "🗺  Hazard", path: "/road-scene/hazard"     },
       ],
     },
-    { key: "profile",   label: "Profile",                         Icon: IcoUser,     path: "/driver/profile",   sub: null },
-
-
-    // { key: "dashboard", label: "Dashboard",      Icon: IcoHome,    path: "/driver/dashboard" },
-    // { key: "section1",  label: "section 1",      Icon: IcoSched,   path: null                },
-    // { key: "monitor",   label: "Emotion Shift Profile Analysis",Icon: IcoMonitor, path: "/driver/monitor"   },
-    // { key: "section3",  label: "section 3",      Icon: IcoStats,   path: null                },
-    // { key: "section4",  label: "section 4",      Icon: IcoStats,   path: null                },
-    // { key: "profile",   label: "Profile",        Icon: IcoUser,    path: "/driver/profile"   },
+    { key: "profile", label: "Profile", Icon: IcoUser, path: "/driver/profile" },
   ];
 
   return (
@@ -95,18 +110,21 @@ function Sidebar({ onLogout }) {
         <span>DriveGuard</span>
       </div>
       <nav className="dm-nav">
-        {items.map(({ key, label, Icon, path, sub }) => (
+        {items.map(({ key, label, Icon, path, sub, disabled }) => (
           <div key={key}>
             <button
-              className={`dm-nav-btn ${key === "monitor" ? "active" : ""}`}
+              className={`dm-nav-btn ${key === "emotion" ? "active" : ""} ${disabled ? "dm-nav-disabled" : ""}`}
+              disabled={disabled}
               onClick={() => {
+                if (disabled) return;
                 if (sub) setOpenKey(k => k === key ? null : key);
                 else if (path) navigate(path);
               }}
             >
               <Icon />
               <span>{label}</span>
-              {sub && <span className="dm-nav-arrow">{openKey === key ? "▾" : "▸"}</span>}
+              {disabled && <span className="dm-nav-cs-badge">Soon</span>}
+              {sub && !disabled && <span className="dm-nav-arrow">{openKey === key ? "▾" : "▸"}</span>}
             </button>
             {sub && openKey === key && (
               <div className="dm-nav-sub">
@@ -203,8 +221,11 @@ export default function DrivingMonitorPage() {
   const token    = localStorage.getItem("token");
   const driverId = user.id || user._id || "driver";
 
-  // tab state
-  const [activeTab, setActiveTab] = useState("live"); // "live" | "video"
+  // tab state — honour ?tab= query param from MonitorHub
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get("tab") === "video" ? "video" : "live"
+  ); // "live" | "video"
 
   // video analysis state
   const [videoFile,    setVideoFile]    = useState(null);
@@ -226,6 +247,8 @@ export default function DrivingMonitorPage() {
   const [sessionBusy,    setSessionBusy]    = useState(false);
   const [sessionSummary, setSessionSummary] = useState(null);
   const [elapsed,        setElapsed]        = useState("00:00");
+  const storageKey = `dm_past_sessions_${driverId}`;
+  const [pastSummaries, setPastSummaries]   = useLocalStorage(storageKey, []);
 
   // auth guard
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
@@ -264,13 +287,13 @@ export default function DrivingMonitorPage() {
 
   // ── Socket.IO — connect once on mount ───────────────────────────────────
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ["polling"] });
+    const socket = io(SOCKET_URL, { transports: ["polling", "websocket"] });
     socketRef.current = socket;
     socket.on("connect",    () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
     socket.on("prediction", (payload) => {
-      if (!payload?.ok) return;
+      if (payload?.ok === false) return;
       setResult(payload);
       // persist frame to MongoDB
       if (sessionIdRef.current && token) {
@@ -405,7 +428,11 @@ export default function DrivingMonitorPage() {
           body: JSON.stringify({ session_id: sessionId }),
         });
         const d = await r.json();
-        if (r.ok) setSessionSummary(d.summary);
+        if (r.ok && d.summary) {
+          const entry = { ...d.summary, _saved_at: new Date().toISOString() };
+          setSessionSummary(d.summary);
+          setPastSummaries((prev) => [entry, ...prev].slice(0, 5));
+        }
       }
     } catch (e) { console.error(e); }
     finally {
@@ -440,6 +467,25 @@ export default function DrivingMonitorPage() {
       : objDets.map((d) => d?.label).filter(Boolean),
     [result, objDets]);
   const cheating = Boolean(result?.objects?.cheating);
+
+  // live DSS — recomputes each frame from current BVI + distraction state
+  const liveDSS = useMemo(() => {
+    if (bviScore == null) return null;
+    let ePts;
+    if (bviScore < 0.40) ePts = 50;
+    else if (bviScore < 0.55) ePts = 28;
+    else ePts = Math.max(0, Math.round(15 * (1.0 - bviScore) / 0.45));
+    const dPts = cheating ? 35 : 50;
+    const dss = ePts + dPts;
+    let tier;
+    if (dss >= 90) tier = "Elite";
+    else if (dss >= 75) tier = "Safe";
+    else if (dss >= 60) tier = "Needs Attention";
+    else if (dss >= 40) tier = "At Risk";
+    else tier = "High Risk";
+    const tierColor = { Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[tier];
+    return { dss, tier, tierColor, ePts, dPts };
+  }, [bviScore, cheating]);
 
   // ── Video upload analysis ─────────────────────────────────────────────────
   async function uploadVideo() {
@@ -732,6 +778,14 @@ export default function DrivingMonitorPage() {
                   ["Peak BVI",         sessionSummary.peak_bvi?.toFixed(3) ?? "—",    "#ef4444"],
                   ["Dominant Emotion", sessionSummary.dominant_emotion || "—",        EMOTION_COLOR[sessionSummary.dominant_emotion] || "#f1f5f9"],
                   ["Erratic Frames",   sessionSummary.erratic_count ?? 0,             (sessionSummary.erratic_count ?? 0) > 0 ? "#ef4444" : "#22c55e"],
+                  ["DSS Score",        sessionSummary.dss_score != null ? `${sessionSummary.dss_score} / 100` : "—",
+                    sessionSummary.dss_score != null
+                      ? ({ Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[sessionSummary.dss_tier] || "#64748b")
+                      : null],
+                  ["Tier",             sessionSummary.dss_tier || "—",
+                    sessionSummary.dss_tier
+                      ? ({ Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[sessionSummary.dss_tier] || "#64748b")
+                      : null],
                 ].map(([lbl, val, clr]) => (
                   <div key={lbl} className="dm-sum-stat">
                     <span className="dm-sum-val" style={clr ? { color: clr } : {}}>{val}</span>
@@ -742,6 +796,128 @@ export default function DrivingMonitorPage() {
               <p className="dm-summary-note">
                 Session saved to your driver profile. View historical BVI trends on Dashboard → Analytics.
               </p>
+            </div>
+          )}
+
+          {/* Live DSS card — shown while a session is active and BVI is available */}
+          {liveDSS && sessionId && (
+            <div className="dm-card dm-dss-live-card">
+              <div className="dm-card-head">
+                <div>
+                  <span className="dm-card-title">Driver Safety Score</span>
+                  <span className="dm-card-hint">Live estimate · updates every frame</span>
+                </div>
+                <span className="dm-dss-live-badge" style={{ background: liveDSS.tierColor + "22", color: liveDSS.tierColor, border: `1px solid ${liveDSS.tierColor}55` }}>
+                  {liveDSS.tier}
+                </span>
+              </div>
+
+              <div className="dm-dss-live-body">
+                {/* Big score */}
+                <div className="dm-dss-live-score-wrap">
+                  <span className="dm-dss-live-score" style={{ color: liveDSS.tierColor }}>{liveDSS.dss}</span>
+                  <span className="dm-dss-live-sub">/ 100</span>
+                </div>
+
+                {/* Breakdown */}
+                <div className="dm-dss-live-breakdown">
+                  <div className="dm-dss-live-row">
+                    <span className="dm-dss-live-lbl">Emotional (BVI)</span>
+                    <div className="dm-dss-live-track">
+                      <div className="dm-dss-live-fill" style={{ width: `${liveDSS.ePts * 2}%`, background: bviColor(bviScore) }} />
+                    </div>
+                    <span className="dm-dss-live-val">{liveDSS.ePts} / 50</span>
+                  </div>
+                  <div className="dm-dss-live-row">
+                    <span className="dm-dss-live-lbl">Distraction (YOLO)</span>
+                    <div className="dm-dss-live-track">
+                      <div className="dm-dss-live-fill" style={{ width: `${liveDSS.dPts * 2}%`, background: cheating ? "#ef4444" : "#22c55e" }} />
+                    </div>
+                    <span className="dm-dss-live-val">{liveDSS.dPts} / 50</span>
+                  </div>
+                </div>
+
+                {/* Tier bar */}
+                <div className="dm-dss-live-tiers">
+                  {[
+                    { label: "High Risk",      min: 0,  max: 40,  color: "#ef4444" },
+                    { label: "At Risk",         min: 40, max: 60,  color: "#f97316" },
+                    { label: "Needs Attention", min: 60, max: 75,  color: "#f59e0b" },
+                    { label: "Safe",            min: 75, max: 90,  color: "#38bdf8" },
+                    { label: "Elite",           min: 90, max: 100, color: "#22c55e" },
+                  ].map(t => (
+                    <div key={t.label}
+                      className="dm-dss-live-seg"
+                      style={{ flex: t.max - t.min, background: liveDSS.tier === t.label ? t.color : t.color + "33" }}
+                      title={`${t.label}: ${t.min}–${t.max}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Past session summaries */}
+          {pastSummaries.length > 0 && (
+            <div className="dm-card dm-past-sessions-card">
+              <div className="dm-card-head">
+                <div>
+                  <span className="dm-card-title">Recent Session History</span>
+                  <span className="dm-card-hint">Last {pastSummaries.length} completed session{pastSummaries.length > 1 ? "s" : ""}</span>
+                </div>
+                <button
+                  className="dm-past-clear-btn"
+                  onClick={() => setPastSummaries([])}
+                  title="Clear session history"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="dm-past-list">
+                {pastSummaries.map((s, i) => {
+                  const tc = { Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[s.dss_tier] || "#64748b";
+                  const savedDate = s._saved_at ? new Date(s._saved_at) : null;
+                  return (
+                    <div key={i} className="dm-past-row">
+                      <div className="dm-past-row-left">
+                        <span className="dm-past-idx">#{pastSummaries.length - i}</span>
+                        <div className="dm-past-meta">
+                          {savedDate && (
+                            <span className="dm-past-date">
+                              {savedDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                              &nbsp;·&nbsp;
+                              {savedDate.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          )}
+                          <span className="dm-past-emotion">
+                            {s.dominant_emotion ? s.dominant_emotion.charAt(0).toUpperCase() + s.dominant_emotion.slice(1) : "—"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="dm-past-stats">
+                        <div className="dm-past-stat">
+                          <span className="dm-past-stat-val" style={{ color: bviColor(s.avg_bvi) }}>{s.avg_bvi?.toFixed(3) ?? "—"}</span>
+                          <span className="dm-past-stat-lbl">Avg BVI</span>
+                        </div>
+                        <div className="dm-past-stat">
+                          <span className="dm-past-stat-val">{s.total_frames ?? "—"}</span>
+                          <span className="dm-past-stat-lbl">Frames</span>
+                        </div>
+                        <div className="dm-past-stat">
+                          <span className="dm-past-stat-val" style={{ color: "#ef4444" }}>{s.erratic_count ?? 0}</span>
+                          <span className="dm-past-stat-lbl">Erratic</span>
+                        </div>
+                      </div>
+                      {s.dss_score != null && (
+                        <div className="dm-past-dss" style={{ borderColor: tc + "55" }}>
+                          <span className="dm-past-dss-score" style={{ color: tc }}>{s.dss_score}</span>
+                          <span className="dm-past-dss-label">{s.dss_tier}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import "./Road_sign_LivePage.css";
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
@@ -157,6 +158,9 @@ export default function Road_sign_LivePage() {
   const [log,          setLog]          = useState([]);     // detection history
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [streamError,  setStreamError]  = useState(false);
+  // Unique URL per mount forces the browser to make a fresh HTTP request
+  // instead of reusing the cached last-frame from a previous MJPEG session.
+  const [streamSrc] = useState(() => `/road-sign/video_feed?t=${Date.now()}`);
 
   // Refs to avoid stale closures inside the polling interval
   const audioEnabledRef = useRef(true);
@@ -317,7 +321,7 @@ export default function Road_sign_LivePage() {
               {/* MJPEG stream — bounding boxes rendered by the Flask server */}
               <div className="rsl-stream-wrap">
                 <img
-                  src="/road-sign/video_feed"
+                  src={streamSrc}
                   alt="Live road sign detection"
                   className="rsl-stream"
                   onError={() => setStreamError(true)}
@@ -417,6 +421,11 @@ export default function Road_sign_LivePage() {
                           </span>
                         </div>
                       ))}
+                    </div>
+
+                    {/* Driver instruction panel */}
+                    <div className="rsl-live-instruction">
+                      <RoadSignInstructionPanel className={info.class_name} compact />
                     </div>
                   </div>
                 ) : (

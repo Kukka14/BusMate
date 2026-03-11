@@ -9,6 +9,7 @@ import { NotFoundPage } from "../pages/NotFound";
 import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
 import DriverDashboard from "../pages/DriverDashboard/DriverDashboard";
 import { DrivingMonitorPage } from "../pages/DrivingMonitor";
+import MonitorHubPage from "../pages/MonitorHub/MonitorHubPage";
 import DriverProfilePage from "../pages/DriverProfile/DriverProfilePage";
 import { Road_sign_UploadPage } from "../pages/Road_sign_Upload";
 import { Road_sign_LivePage } from "../pages/Road_sign_Live";
@@ -18,7 +19,7 @@ import { RoadSceneUploadPage } from "../pages/Road_scene_Upload";
 import { RoadSceneResultsPage } from "../pages/Road_scene_Results";
 import { RoadSceneVideoResultsPage } from "../pages/Road_scene_VideoResults";
 import HazardAnalyserPage from "../pages/HazardAnalyser";
-import { DrowsinessMonitorPage } from "../pages/DrowsinessMonitor";
+import DriverStatsPage from "../pages/DriverStats/DriverStatsPage";
 
 export const router = createBrowserRouter([
   // Standalone full-page routes (own layout)
@@ -26,10 +27,11 @@ export const router = createBrowserRouter([
   { path: "/login",             element: <LoginPage />          },
   { path: "/signup",            element: <SignUpPage />         },
   { path: "/admin/dashboard",   element: <AdminDashboard />     },
-  { path: "/driver/dashboard",  element: <DriverDashboard />    },
-  { path: "/driver/monitor",    element: <DrivingMonitorPage /> },
+  { path: "/driver/dashboard",        element: <DriverDashboard />    },
+  { path: "/driver/monitor",           element: <MonitorHubPage />     },
+  { path: "/driver/monitor/emotion",   element: <DrivingMonitorPage /> },
   { path: "/driver/profile",    element: <DriverProfilePage />  },
-  { path: "/driver/drowsiness", element: <DrowsinessMonitorPage /> },
+  { path: "/driver/stats",      element: <DriverStatsPage />    },
 
   // Road Sign Detection pages
   { path: "/road-sign",                element: <Road_sign_UploadPage />       },

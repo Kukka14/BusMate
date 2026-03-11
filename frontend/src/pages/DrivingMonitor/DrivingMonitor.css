@@ -348,6 +348,71 @@
 
 /* ── Session summary card ─────────────────────────────────── */
 .dm-summary-card { margin-top: 0.25rem; }
+
+/* ── Live DSS Card ───────────────────────────────────────────────────────── */
+.dm-dss-live-card { margin-top: 0.75rem; }
+
+.dm-dss-live-badge {
+  font-size: 0.74rem; font-weight: 700; letter-spacing: 0.03em;
+  padding: 0.28rem 0.85rem; border-radius: 99px;
+}
+.dm-dss-live-body { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.dm-dss-live-score-wrap { display: flex; align-items: baseline; gap: 0.3rem; }
+.dm-dss-live-score { font-size: 2.8rem; font-weight: 800; line-height: 1; }
+.dm-dss-live-sub   { font-size: 1rem; font-weight: 600; color: #64748b; }
+
+.dm-dss-live-breakdown { display: flex; flex-direction: column; gap: 0.55rem; }
+.dm-dss-live-row  { display: flex; align-items: center; gap: 0.65rem; }
+.dm-dss-live-lbl  { font-size: 0.74rem; color: #94a3b8; min-width: 140px; }
+.dm-dss-live-track {
+  flex: 1; height: 7px; background: #1e293b; border-radius: 99px; overflow: hidden;
+}
+.dm-dss-live-fill  { height: 100%; border-radius: 99px; transition: width 0.4s ease, background 0.3s; }
+.dm-dss-live-val   { font-size: 0.73rem; font-weight: 600; color: #e2e8f0; min-width: 42px; text-align: right; }
+
+.dm-dss-live-tiers {
+  display: flex; height: 8px; border-radius: 99px; overflow: hidden; gap: 2px;
+}
+.dm-dss-live-seg { border-radius: 2px; transition: background 0.3s; }
+
+/* ── Past Session History ─────────────────────────────────────────────── */
+.dm-past-sessions-card { margin-top: 1rem; }
+.dm-past-clear-btn {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+  padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid #334155;
+  background: transparent; color: #94a3b8; cursor: pointer; transition: all 0.15s;
+}
+.dm-past-clear-btn:hover { background: #ef444422; color: #ef4444; border-color: #ef444455; }
+.dm-past-list { display: flex; flex-direction: column; gap: 0; }
+.dm-past-row {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.75rem 1rem; border-bottom: 1px solid #1e293b22;
+  transition: background 0.15s;
+}
+.dm-past-row:last-child { border-bottom: none; }
+.dm-past-row:hover { background: #ffffff05; }
+.dm-past-row-left { display: flex; align-items: center; gap: 0.65rem; flex: 1; min-width: 0; }
+.dm-past-idx {
+  font-size: 0.72rem; font-weight: 700; color: #475569;
+  background: #1e293b; border-radius: 4px; padding: 0.15rem 0.4rem;
+  flex-shrink: 0;
+}
+.dm-past-meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.dm-past-date { font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+.dm-past-emotion { font-size: 0.8rem; font-weight: 600; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dm-past-stats { display: flex; gap: 1.25rem; flex-shrink: 0; }
+.dm-past-stat { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+.dm-past-stat-val { font-size: 0.85rem; font-weight: 700; color: #e2e8f0; }
+.dm-past-stat-lbl { font-size: 0.65rem; color: #64748b; letter-spacing: 0.04em; }
+.dm-past-dss {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+  flex-shrink: 0; border: 1px solid; border-radius: 8px;
+  padding: 0.35rem 0.75rem; min-width: 64px;
+}
+.dm-past-dss-score { font-size: 1.1rem; font-weight: 800; line-height: 1; }
+.dm-past-dss-label { font-size: 0.6rem; font-weight: 600; color: #94a3b8; letter-spacing: 0.04em; text-align: center; }
+
 .dm-summary-grid {
   display: flex; flex-wrap: wrap; gap: 0;
   background: #111827; border: 1px solid #1e293b;
@@ -590,8 +655,10 @@
 }
 .dm-vframe-img {
   width: 100%;
-  height: 180px;
-  object-fit: cover;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #000;
   display: block;
   border-bottom: 1px solid #1e293b;
 }

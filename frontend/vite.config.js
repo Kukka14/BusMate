@@ -8,7 +8,19 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": "http://localhost:5000",
-      "/road-sign": {
+      // MJPEG stream — needs buffering disabled so frames flow through immediately
+      "/road-sign/video_feed": {
+        target: "http://localhost:5000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/road-sign/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            proxyRes.headers["x-accel-buffering"] = "no";
+          });
+        },
+      },
+      // All other road-sign backend calls (exclude React page routes)
+      "^/road-sign/(?!(live|results|video-results)(/|$))": {
         target: "http://localhost:5000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/road-sign/, ""),

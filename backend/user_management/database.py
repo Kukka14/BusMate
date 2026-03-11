@@ -21,6 +21,7 @@ def get_db():
 def _ensure_indexes(db):
     db.users.create_index([("email", ASCENDING)], unique=True)
     db.users.create_index([("username", ASCENDING)], unique=True)
+    db.driving_sessions.create_index([("driver_id", ASCENDING), ("started_at", ASCENDING)])
 
 
 def ping():
