@@ -1,0 +1,535 @@
+/* ============================================================
+   DrowsinessMonitor.css  –  dark theme, matches DrivingMonitor
+   ============================================================ */
+
+/* ── Root layout ─────────────────────────────────────────── */
+.dw-root {
+  display: flex;
+  min-height: 100vh;
+  background: #0d1117;
+  color: #e2e8f0;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.dw-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #111827;
+  border-right: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 0.75rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.dw-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.5rem 1.25rem;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 1rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+}
+.dw-logo-icon {
+  width: 28px; height: 28px;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  border-radius: 0.4rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.dw-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.dw-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border: none;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  width: 100%;
+}
+.dw-nav-btn:hover  { background: rgba(255,255,255,0.05); color: #94a3b8; }
+.dw-nav-btn.active {
+  background: rgba(239,68,68,0.1);
+  color: #f87171;
+  font-weight: 600;
+}
+.dw-nav-arrow { margin-left: auto; font-size: 0.65rem; }
+.dw-nav-sub   { display: flex; flex-direction: column; gap: 1px; padding-left: 1.5rem; margin-top: 2px; }
+.dw-nav-sub-btn {
+  display: flex; align-items: center;
+  padding: 0.4rem 0.6rem;
+  border: none; border-radius: 0.35rem;
+  background: transparent; color: #475569;
+  font-size: 0.75rem; font-family: inherit; cursor: pointer;
+  transition: all 0.15s; text-align: left; width: 100%;
+}
+.dw-nav-sub-btn:hover { background: rgba(255,255,255,0.04); color: #64748b; }
+.dw-sidebar-foot { margin-top: auto; padding-top: 0.75rem; }
+.dw-tip-box {
+  background: rgba(239,68,68,0.05);
+  border: 1px solid rgba(239,68,68,0.12);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.dw-tip-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; color: #f87171; display: block; margin-bottom: 0.3rem; }
+.dw-tip-text  { font-size: 0.72rem; color: #64748b; margin: 0; line-height: 1.5; }
+.dw-signout {
+  display: flex; align-items: center; gap: 0.4rem;
+  width: 100%; padding: 0.55rem 0.75rem;
+  border: none; border-radius: 0.4rem;
+  background: transparent; color: #64748b;
+  font-size: 0.8rem; font-family: inherit; cursor: pointer;
+  transition: all 0.15s;
+}
+.dw-signout:hover { background: rgba(239,68,68,0.08); color: #f87171; }
+
+/* ── Main content ─────────────────────────────────────────── */
+.dw-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dw-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+}
+
+/* ── Topbar ───────────────────────────────────────────────── */
+.dw-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.5rem;
+  background: #111827;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.dw-topbar-title { font-size: 0.9rem; font-weight: 700; color: #f1f5f9; }
+.dw-topbar-right { display: flex; align-items: center; gap: 0.75rem; }
+.dw-driver-info  { display: flex; flex-direction: column; align-items: flex-end; }
+.dw-driver-name  { font-size: 0.8rem; font-weight: 600; color: #f1f5f9; }
+.dw-driver-id    { font-size: 0.68rem; color: #475569; }
+.dw-status-pill {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.25rem 0.75rem; border-radius: 999px;
+  background: rgba(100,116,139,0.1); border: 1px solid rgba(100,116,139,0.2);
+  font-size: 0.68rem; font-weight: 700; color: #64748b;
+  letter-spacing: 0.05em;
+}
+.dw-status-pill.active {
+  background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); color: #4ade80;
+}
+.dw-status-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+}
+.dw-status-pill.active .dw-status-dot { animation: dwpulse 1.5s ease-in-out infinite; }
+.dw-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, #f87171, #fb923c);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.78rem; font-weight: 700; color: white;
+}
+
+/* ── Tab switcher ─────────────────────────────────────────── */
+.dw-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+.dw-tab-btn {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid #1e293b; border-radius: 0.45rem;
+  background: transparent; color: #475569;
+  font-size: 0.78rem; font-family: inherit; cursor: pointer;
+  transition: all 0.15s;
+}
+.dw-tab-btn:hover { color: #64748b; border-color: #334155; }
+.dw-tab-btn.active {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.3);
+  color: #f87171;
+  font-weight: 600;
+}
+
+/* ── Session banner ───────────────────────────────────────── */
+.dw-session-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 0.65rem;
+}
+.dw-session-banner.active {
+  border-color: rgba(239,68,68,0.3);
+  background: rgba(239,68,68,0.04);
+}
+.dw-session-left    { flex: 1; min-width: 0; }
+.dw-session-title   { font-size: 0.85rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.25rem; }
+.dw-session-meta    { font-size: 0.72rem; color: #64748b; display: flex; gap: 1rem; flex-wrap: wrap; }
+.dw-session-id      { font-family: monospace; color: #475569; }
+.dw-session-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; flex-shrink: 0; }
+.dw-fps-label {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.7rem; color: #64748b; font-family: inherit;
+}
+.dw-fps-input {
+  width: 52px; padding: 0.2rem 0.4rem;
+  background: #111827; border: 1px solid #1e293b; border-radius: 0.3rem;
+  color: #94a3b8; font-family: inherit; font-size: 0.72rem; text-align: center;
+}
+.dw-fps-input:focus { outline: 1px solid #f87171; }
+
+/* ── Session button ───────────────────────────────────────── */
+.dw-session-btn {
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.6rem 1.25rem; border-radius: 0.5rem;
+  border: none; font-family: inherit; font-size: 0.8rem; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.dw-session-btn.start {
+  background: linear-gradient(135deg, #f87171, #fb923c);
+  color: white;
+}
+.dw-session-btn.start:hover { opacity: 0.88; }
+.dw-session-btn.stop {
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.3);
+  color: #f87171;
+}
+.dw-session-btn.stop:hover { background: rgba(239,68,68,0.2); }
+.dw-session-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Alert banner ─────────────────────────────────────────── */
+.dw-alert-banner {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.9rem 1.1rem; border-radius: 0.5rem;
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.4);
+  color: #f87171; font-size: 0.82rem; font-weight: 600;
+  animation: dwshake 0.35s ease;
+}
+@keyframes dwshake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-5px); }
+  75%       { transform: translateX(5px); }
+}
+
+/* ── Main 2-col grid ──────────────────────────────────────── */
+.dw-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 1rem;
+  align-items: start;
+}
+
+/* ── Generic card ─────────────────────────────────────────── */
+.dw-card {
+  background: #1a1f2e;
+  border: 1px solid #1e293b;
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.dw-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+}
+.dw-card-title { font-size: 0.8rem; font-weight: 600; color: #94a3b8; }
+.dw-card-hint  { display: block; font-size: 0.65rem; color: #334155; margin-top: 0.15rem; }
+.dw-card-badge {
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  font-size: 0.65rem; font-weight: 700;
+}
+.dw-card-badge.green { background: rgba(34,197,94,0.12); color: #4ade80;  border: 1px solid rgba(34,197,94,0.2);  }
+.dw-card-badge.red   { background: rgba(239,68,68,0.12); color: #f87171;  border: 1px solid rgba(239,68,68,0.2);  }
+
+/* ── Camera ───────────────────────────────────────────────── */
+.dw-cam-card { min-height: 0; }
+.dw-cam-wrap {
+  position: relative;
+  width: 100%; aspect-ratio: 4/3;
+  background: #0d1117;
+  border-radius: 0.5rem;
+  border: 1px solid #1e293b;
+  overflow: hidden;
+}
+.dw-cam-video   { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dw-cam-overlay {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  /* no CSS mirror — drawFaceBox already mirrors x in JS to match the video */
+}
+.dw-cam-placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0.5rem; color: #334155; font-size: 0.8rem;
+}
+.dw-cam-placeholder svg { opacity: 0.4; width: 32px; height: 32px; }
+.dw-cam-error { font-size: 0.75rem; color: #f87171; padding: 0.5rem 0.75rem; background: rgba(239,68,68,0.08); border-radius: 0.35rem; }
+.dw-cam-no-face {
+  position: absolute; bottom: 0.6rem; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.65); color: #64748b;
+  padding: 0.25rem 0.75rem; border-radius: 999px;
+  font-size: 0.68rem; font-weight: 600;
+}
+
+/* Big verdict badge overlaid on the camera feed */
+.dw-cam-verdict {
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  padding: 0.35rem 1rem; border-radius: 999px;
+  font-size: 0.82rem; font-weight: 800; letter-spacing: 0.06em;
+  backdrop-filter: blur(6px);
+  border: 1.5px solid;
+}
+.dw-cam-verdict.alert  { background: rgba(34,197,94,0.2);  color: #4ade80; border-color: rgba(34,197,94,0.5);  }
+.dw-cam-verdict.drowsy { background: rgba(239,68,68,0.25); color: #f87171; border-color: rgba(239,68,68,0.5); animation: dwpulse 1s ease-in-out infinite; }
+
+/* Verdict pill (header badge) */
+.dw-verdict-pill {
+  padding: 0.15rem 0.6rem; border-radius: 999px;
+  border: 1px solid; font-size: 0.65rem; font-weight: 700;
+  letter-spacing: 0.04em; background: transparent;
+}
+/* Verdict badge (card header) */
+.dw-verdict-badge {
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  font-size: 0.65rem; font-weight: 700;
+}
+.dw-verdict-badge.alert  { background: rgba(34,197,94,0.1);  color: #4ade80; border: 1px solid rgba(34,197,94,0.2);  }
+.dw-verdict-badge.drowsy { background: rgba(239,68,68,0.1);  color: #f87171; border: 1px solid rgba(239,68,68,0.2);  }
+
+/* Live badge */
+.dw-live-badge {
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3);
+  color: #f87171; font-size: 0.65rem; font-weight: 700;
+}
+.dw-live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #f87171;
+  animation: dwpulse 1.2s ease-in-out infinite;
+}
+.dw-cam-footer {
+  display: flex; justify-content: space-between;
+  font-size: 0.65rem; color: #334155;
+}
+
+/* ── Analysis column ──────────────────────────────────────── */
+.dw-analysis-col { display: flex; flex-direction: column; gap: 0.75rem; }
+
+/* ── Confidence body ──────────────────────────────────────── */
+.dw-conf-body    { display: flex; align-items: center; gap: 1rem; }
+.dw-conf-right   { flex: 1; display: flex; flex-direction: column; gap: 0.25rem; }
+.dw-conf-pct     { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+.dw-conf-sublabel{ font-size: 0.68rem; color: #475569; }
+.dw-conf-divider { height: 1px; background: #1e293b; margin: 0.35rem 0; }
+
+/* ── Alert streak bar ─────────────────────────────────────── */
+.dw-streak-wrap  { display: flex; align-items: center; gap: 0.5rem; }
+.dw-streak-track { display: flex; gap: 3px; flex: 1; }
+.dw-streak-seg   {
+  flex: 1; height: 8px; border-radius: 2px;
+  transition: background 0.2s;
+}
+.dw-streak-label { font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+.dw-streak-note  { font-size: 0.65rem; color: #334155; margin: 0; }
+
+/* ── Model prediction bars ────────────────────────────────── */
+.dw-models { display: flex; flex-direction: column; gap: 0.65rem; }
+.dw-model-row { display: flex; flex-direction: column; gap: 0.3rem; }
+.dw-model-head { display: flex; align-items: center; gap: 0.4rem; }
+.dw-model-name   { font-size: 0.72rem; color: #94a3b8; font-weight: 600; flex: 1; }
+.dw-model-weight { font-size: 0.62rem; color: #475569; font-family: monospace; }
+.dw-model-warmup {
+  font-size: 0.58rem; padding: 0.1rem 0.4rem; border-radius: 999px;
+  background: rgba(245,158,11,0.12); color: #fbbf24;
+  border: 1px solid rgba(245,158,11,0.2); font-weight: 700;
+}
+.dw-model-track {
+  height: 6px; background: #1e293b; border-radius: 999px; overflow: hidden;
+}
+.dw-model-fill {
+  height: 100%; border-radius: 999px; transition: width 0.35s ease;
+}
+.dw-model-pct { font-size: 0.68rem; font-weight: 700; text-align: right; }
+
+/* ── Facial feature chips ─────────────────────────────────── */
+.dw-feats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.dw-feat-chip {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.dw-feat-chip.warn {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.05);
+}
+.dw-feat-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: #475569; }
+.dw-feat-val   { font-size: 0.9rem; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+.dw-feat-chip.warn .dw-feat-val { color: #f87171; }
+.dw-feat-legend {
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  font-size: 0.63rem; color: #334155;
+}
+
+/* ── Alert log ────────────────────────────────────────────── */
+.dw-alert-log-card {}
+.dw-alert-log { display: flex; flex-direction: column; gap: 0.3rem; max-height: 200px; overflow-y: auto; }
+.dw-alert-log-row {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.15);
+  border-radius: 0.4rem;
+  font-size: 0.72rem;
+}
+.dw-al-time { color: #475569; white-space: nowrap; }
+.dw-al-conf { font-weight: 700; }
+.dw-al-ear  { color: #64748b; font-family: monospace; margin-left: auto; }
+
+/* ── Session summary ──────────────────────────────────────── */
+.dw-summary-grid {
+  display: flex; flex-wrap: wrap; gap: 0;
+  background: #111827; border: 1px solid #1e293b;
+  border-radius: 0.6rem; overflow: hidden;
+}
+.dw-sum-stat {
+  flex: 1; min-width: 100px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0.85rem 0.5rem; gap: 0.2rem;
+  border-right: 1px solid #1e293b;
+}
+.dw-sum-stat:last-child { border-right: none; }
+.dw-sum-val { font-size: 1.1rem; font-weight: 700; color: #f1f5f9; }
+.dw-sum-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; }
+
+/* ── No data placeholder ──────────────────────────────────── */
+.dw-no-data { font-size: 0.72rem; color: #334155; margin: 0; }
+
+/* ── Spinner ──────────────────────────────────────────────── */
+.dw-spinner-sm {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: dwspin 0.6s linear infinite;
+  display: inline-block;
+}
+
+/* ── Video tab ────────────────────────────────────────────── */
+.dw-video-tab { display: flex; flex-direction: column; gap: 1rem; }
+.dw-video-upload-card {}
+.dw-upload-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.dw-file-label {
+  flex: 1; min-width: 200px;
+  display: flex; align-items: center;
+  padding: 0.5rem 0.85rem;
+  background: #111827; border: 1px solid #1e293b;
+  border-radius: 0.45rem; cursor: pointer;
+  transition: border-color 0.15s;
+}
+.dw-file-label:hover { border-color: #334155; }
+.dw-file-label input { display: none; }
+.dw-file-text { font-size: 0.75rem; color: #64748b; }
+.dw-upload-hint  { font-size: 0.72rem; color: #64748b; margin: 0; }
+.dw-upload-error { font-size: 0.75rem; color: #f87171; margin: 0; }
+
+/* Video summary stat cards */
+.dw-video-summary {
+  display: flex; flex-wrap: wrap; gap: 0;
+  background: #1a1f2e; border: 1px solid #1e293b;
+  border-radius: 0.75rem; overflow: hidden;
+}
+.dw-vs-card {
+  flex: 1; min-width: 100px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0.9rem 0.5rem; gap: 0.2rem;
+  border-right: 1px solid #1e293b;
+}
+.dw-vs-card:last-child { border-right: none; }
+.dw-vs-val { font-size: 1.15rem; font-weight: 700; color: #f1f5f9; }
+.dw-vs-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; }
+
+/* Timeline */
+.dw-timeline-card {}
+.dw-timeline-legend {
+  display: flex; align-items: center; gap: 0.75rem;
+  font-size: 0.68rem; color: #64748b;
+}
+.dw-tl-dot {
+  display: inline-block;
+  width: 10px; height: 10px; border-radius: 2px; margin-right: 3px;
+}
+.dw-tl-dot.warmup    { background: #475569; }
+.dw-tl-dot.alert-seg { background: #22c55e; }
+.dw-tl-dot.drowsy-seg{ background: #ef4444; }
+.dw-timeline {
+  display: flex;
+  height: 28px;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  gap: 1px;
+  background: #0d1117;
+}
+.dw-tl-seg { min-width: 2px; transition: flex 0.2s; }
+.dw-tl-seg.warmup  { background: #334155; }
+.dw-tl-seg.alert   { background: #22c55e; }
+.dw-tl-seg.drowsy  { background: #ef4444; }
+.dw-vid-alerts { display: flex; flex-direction: column; gap: 0.3rem; }
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes dwpulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+@keyframes dwspin  { to { transform: rotate(360deg); } }
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .dw-grid { grid-template-columns: 1fr; }
+  .dw-analysis-col {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .dw-sidebar { display: none; }
+  .dw-content { padding: 1rem; }
+  .dw-video-summary { flex-direction: column; }
+  .dw-vs-card { border-right: none; border-bottom: 1px solid #1e293b; }
+}

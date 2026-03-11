@@ -18,6 +18,7 @@ import { RoadSceneUploadPage } from "../pages/Road_scene_Upload";
 import { RoadSceneResultsPage } from "../pages/Road_scene_Results";
 import { RoadSceneVideoResultsPage } from "../pages/Road_scene_VideoResults";
 import HazardAnalyserPage from "../pages/HazardAnalyser";
+import { DrowsinessMonitorPage } from "../pages/DrowsinessMonitor";
 
 export const router = createBrowserRouter([
   // Standalone full-page routes (own layout)
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
   { path: "/driver/dashboard",  element: <DriverDashboard />    },
   { path: "/driver/monitor",    element: <DrivingMonitorPage /> },
   { path: "/driver/profile",    element: <DriverProfilePage />  },
+  { path: "/driver/drowsiness", element: <DrowsinessMonitorPage /> },
 
   // Road Sign Detection pages
   { path: "/road-sign",                element: <Road_sign_UploadPage />       },

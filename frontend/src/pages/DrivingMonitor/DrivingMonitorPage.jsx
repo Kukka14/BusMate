@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 import "./DrivingMonitor.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
-const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "";
 
 const CHEATING_LABELS = new Set(["phone", "hand raise", "extra person", "cell phone", "laptop"]);
 
@@ -38,6 +38,7 @@ const IcoStop    = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="c
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 const IcoRoadSign = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l18 18M10.5 10.677a2 2 0 002.828 2.828"/><path d="M13.161 6.843A2 2 0 0015 9a2 2 0 00.8-.167m1.99 1.99C18.954 12.099 20 13.927 20 16a8 8 0 01-8 8 8 8 0 01-8-8c0-4.42 3.579-8 8-8 .786 0 1.547.113 2.268.322"/><path d="M12 4V2"/></svg>;
 const IcoScene    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 20h20"/><path d="M4 20L9 9l4 6 3-3 4 8"/><circle cx="17" cy="6" r="2"/></svg>;
+const IcoEye      = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({ onLogout }) {
@@ -47,7 +48,7 @@ function Sidebar({ onLogout }) {
   const items = [
     
     { key: "dashboard", label: "Dashboard",      Icon: IcoHome,    path: "/driver/dashboard" },
-    { key: "section1",  label: "section 1",      Icon: IcoSched,   path: null                },
+    { key: "drowsiness", label: "Drowsiness Monitor", Icon: IcoEye, path: "/driver/drowsiness" },
     { key: "monitor",   label: "Emotion Shift Profile Analysis",               Icon: IcoMonitor,  path: "/driver/monitor" },
     
     {
@@ -263,7 +264,7 @@ export default function DrivingMonitorPage() {
 
   // ── Socket.IO — connect once on mount ───────────────────────────────────
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ["polling", "websocket"] });
+    const socket = io(SOCKET_URL, { transports: ["polling"] });
     socketRef.current = socket;
     socket.on("connect",    () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));

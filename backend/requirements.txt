@@ -13,3 +13,7 @@ flask-cors
 torch
 transformers
 safetensors
+geopandas
+rasterio
+osmnx
+geopy

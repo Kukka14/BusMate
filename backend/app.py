@@ -24,15 +24,26 @@ load_dotenv()
 
 from user_management import register_user_management
 from user_management.config import Config
+from drowsiness_engine import DrowsinessEngine
 
 
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"])
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="threading",
+    max_http_buffer_size=10 * 1024 * 1024,   # 10 MB — handles large base64 frame payloads
+    allow_upgrades=False,                     # Prevents polling→WebSocket upgrade probe that
+                                              # causes "Too many packets in payload" in engineio 4.11+
+)
 
 # Register user management blueprints (MongoDB — no table creation needed)
 register_user_management(app)
+
+# Drowsiness detection engine (loaded once at startup)
+_dw_engine = DrowsinessEngine()
 
 
 # -----------------------------
@@ -1502,6 +1513,90 @@ def analyze_route():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# DROWSINESS DETECTION
+# Socket event : client emits  "drowsiness_frame"  {image, session_id, client_ts}
+#                server emits  "drowsiness_result" {ok, verdict, confidence, …}
+# REST endpoint: POST /analyze-drowsiness-video   (multipart: field "video")
+# =============================================================================
+
+# Per-driver sequence buffers for LSTM are managed inside _dw_engine automatically.
+
+
+@socketio.on("drowsiness_frame")
+def on_drowsiness_frame(data):
+    """Process one webcam frame for drowsiness detection."""
+    img_data   = data.get("image")
+    session_id = data.get("session_id") or data.get("driver_id") or "default"
+
+    img = decode_base64_image(img_data)
+    if img is None:
+        emit("drowsiness_result", {"ok": False, "error": "Invalid image data"})
+        return
+
+    if not _dw_engine.ready:
+        emit("drowsiness_result", {
+            "ok":      False,
+            "error":   "Drowsiness engine not loaded — check server logs.",
+        })
+        return
+
+    result = _dw_engine.process_frame(img, session_id=session_id)
+    emit("drowsiness_result", result)
+
+
+@app.route("/analyze-drowsiness-video", methods=["POST"])
+def analyze_drowsiness_video():
+    """Analyse an uploaded video file for drowsiness events.
+
+    Multipart form field: "video"
+    Query param (optional): sample_every (default 3)
+    Returns JSON with summary + per-frame timeline.
+    """
+    if not _dw_engine.ready:
+        return jsonify({
+            "error": (
+                "Drowsiness engine not loaded. "
+                "Ensure models are present in backend/Drownsiness/ "
+                "and mediapipe is installed."
+            )
+        }), 503
+
+    video_file = request.files.get("video")
+    if not video_file:
+        return jsonify({"error": "No video file provided (field name: 'video')"}), 400
+
+    # Determine extension for temp file
+    suffix = ".mp4"
+    if video_file.filename and "." in video_file.filename:
+        suffix = "." + video_file.filename.rsplit(".", 1)[-1].lower()
+
+    sample_every = max(1, int(request.args.get("sample_every", 3)))
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            video_file.save(tmp.name)
+            tmp_path = tmp.name
+
+        result = _dw_engine.process_video(tmp_path, sample_every=sample_every)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error", "Processing failed")}), 500
+
+        return jsonify(result)
+
+    except Exception as exc:
+        logger.exception("Drowsiness video analysis error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 # -----------------------------
