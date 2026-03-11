@@ -118,13 +118,11 @@ export default function SignUpPage() {
       <header className="sp-header">
         <div className="sp-brand" onClick={() => navigate("/")}>
           <div className="sp-brand-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
           </div>
-          <span>DriveGuard</span>
+          <span>BusMate</span>
         </div>
-        <a className="sp-header-link" href="#">Fleet Management Solutions</a>
+        <a className="sp-header-link" href="#">AI Driver Safety Platform</a>
       </header>
 
       {/* ── Card ── */}
@@ -132,7 +130,7 @@ export default function SignUpPage() {
         <div className="sp-card">
           <div className="sp-card-header">
             <h1>Create Account</h1>
-            <p>Register your fleet management account to get started with DriveGuard.</p>
+            <p>Join BusMate to access AI-powered driver safety monitoring.</p>
           </div>
 
           {error && <div className="sp-error" role="alert">{error}</div>}
@@ -303,7 +301,7 @@ export default function SignUpPage() {
           <a href="#">Terms of Service</a>
           <a href="#">Compliance</a>
         </div>
-        <span>© 2026 DriveGuard Intelligent Fleet Systems. All rights reserved.</span>
+        <span>&copy; {new Date().getFullYear()} BusMate. All rights reserved.</span>
       </footer>
     </div>
   );

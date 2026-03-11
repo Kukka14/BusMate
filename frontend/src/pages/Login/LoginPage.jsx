@@ -85,19 +85,19 @@ export default function LoginPage() {
       <header className="lp-header">
         <div className="lp-brand" onClick={() => navigate("/")}>
           <div className="lp-brand-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
           </div>
-          <span>DriveGuard</span>
+          <span>BusMate</span>
         </div>
-        <a className="lp-header-link" href="#">Fleet Management Solutions</a>
+        <a className="lp-header-link" href="#">AI Driver Safety Platform</a>
       </header>
 
       {/* ── Card ── */}
       <main className="lp-main">
         <div className="lp-card">
           <div className="lp-card-header">
-            <h1>Fleet Login</h1>
-            <p>Access your secure dashboard to manage your fleet operations.</p>
+            <h1>Welcome Back</h1>
+            <p>Sign in to access your BusMate driver safety dashboard.</p>
           </div>
 
           {/* ── Role selector ── */}
@@ -211,7 +211,7 @@ export default function LoginPage() {
 
           <p className="lp-support">
             Need assistance?{" "}
-            <a href="mailto:support@driveguard.ai">Contact IT Support</a>
+            <a href="mailto:support@busmate.ai">Contact Support</a>
           </p>
           <p className="lp-support" style={{ marginTop: "0.5rem" }}>
             Don&apos;t have an account?{" "}
@@ -232,7 +232,7 @@ export default function LoginPage() {
           <a href="#">Terms of Service</a>
           <a href="#">Compliance</a>
         </div>
-        <span>© 2026 DriveGuard Intelligent Fleet Systems. All rights reserved.</span>
+        <span>&copy; {new Date().getFullYear()} BusMate. All rights reserved.</span>
       </footer>
     </div>
   );

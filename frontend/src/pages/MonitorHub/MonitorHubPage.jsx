@@ -68,11 +68,9 @@ function Sidebar({ onLogout }) {
     <aside className="mh-sidebar">
       <div className="mh-logo">
         <div className="mh-logo-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="white">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
         </div>
-        <span>DriveGuard</span>
+        <span>BusMate</span>
       </div>
       <nav className="mh-nav">
         {items.map(({ key, label, Icon, path, sub, disabled }) => (
