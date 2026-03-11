@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import "./DrowsinessMonitor.css";
@@ -225,6 +225,7 @@ export default function DrowsinessMonitorPage() {
   const [sessionStart,   setSessionStart]   = useState(null);
   const [sessionFrames,  setSessionFrames]  = useState(0);
   const [sessionAlerts,  setSessionAlerts]  = useState(0);
+  const [drowsyFrames,   setDrowsyFrames]   = useState(0);   // frames where verdict === "Drowsy"
   const [sessionBusy,    setSessionBusy]    = useState(false);
   const [sessionSummary, setSessionSummary] = useState(null);
   const [elapsed,        setElapsed]        = useState("00:00");
@@ -278,7 +279,8 @@ export default function DrowsinessMonitorPage() {
       if (!payload?.ok) return;
       setResult(payload);
 
-      // fire alert log + session counter when streak threshold is crossed
+      // track per-frame verdict and alert streak
+      if (payload.verdict === "Drowsy") setDrowsyFrames(c => c + 1);
       if (payload.alert) {
         const ts = new Date().toLocaleTimeString();
         setAlertLog(prev => [
@@ -366,6 +368,7 @@ export default function DrowsinessMonitorPage() {
         setSessionStart(new Date());
         setSessionFrames(0);
         setSessionAlerts(0);
+        setDrowsyFrames(0);
       }
     } catch (e) { console.error(e); }
     finally { setSessionBusy(false); }
@@ -375,18 +378,43 @@ export default function DrowsinessMonitorPage() {
     setSessionBusy(true);
     try {
       if (sessionId) {
+        // Compute final DAS before clearing state
+        const dPct   = sessionFrames > 0 ? drowsyFrames / sessionFrames : 0;
+        const aPts   = dPct < 0.05 ? 50 : dPct < 0.15 ? 35 : dPct < 0.30 ? 20 : 0;
+        const sPts   = sessionAlerts === 0 ? 50 : sessionAlerts === 1 ? 35 : sessionAlerts <= 3 ? 20 : 0;
+        const dasVal = aPts + sPts;
+        const dasTier = dasVal >= 90 ? "Elite" : dasVal >= 75 ? "Safe" : dasVal >= 60 ? "Needs Attention" : dasVal >= 40 ? "At Risk" : "High Risk";
+        const durSec = sessionStart ? Math.round((Date.now() - sessionStart.getTime()) / 1000) : 0;
+
         const r = await fetch(`${API}/api/driver/session/stop`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId }),
+          body: JSON.stringify({
+            session_id:    sessionId,
+            dss_score:     dasVal,
+            dss_tier:      dasTier,
+            drowsy_frames: drowsyFrames,
+            drowsy_pct:    Math.round(dPct * 1000) / 10,
+            duration_sec:  durSec,
+            total_alerts:  sessionAlerts,
+          }),
         });
         const d = await r.json();
-        if (r.ok) setSessionSummary({ ...d.summary, total_alerts: sessionAlerts });
+        if (r.ok) setSessionSummary({
+          ...d.summary,
+          dss_score:     dasVal,
+          dss_tier:      dasTier,
+          drowsy_frames: drowsyFrames,
+          drowsy_pct:    Math.round(dPct * 1000) / 10,
+          total_frames:  sessionFrames,
+          total_alerts:  sessionAlerts,
+          duration_sec:  durSec,
+        });
       }
     } catch (e) { console.error(e); }
     finally {
       setSessionId(null); setSessionStart(null);
-      setSessionFrames(0); setResult(null);
+      setSessionFrames(0); setDrowsyFrames(0); setResult(null);
       setSessionBusy(false);
     }
   }
@@ -414,6 +442,10 @@ export default function DrowsinessMonitorPage() {
       if (!res.ok) { setVideoError("Server error — check backend logs."); return; }
       const data = await res.json();
       if (data.error) { setVideoError(data.error); return; }
+      if (data.timeline?.length) {
+        const sample = data.timeline[0];
+        console.log("[DW-video] first frame image field type:", typeof sample.image, "length:", sample.image?.length ?? 0);
+      }
       setVideoResult(data);
     } catch {
       setVideoError("Network error — is the server running?");
@@ -431,6 +463,20 @@ export default function DrowsinessMonitorPage() {
   const features   = result?.features  ?? {};
   const faceOk     = result?.face_detected;
   const vColor     = verdictColor(verdict);
+
+  // ── Live Driver Alertness Score (DAS) — updates every frame ───────────────
+  const liveDAS = useMemo(() => {
+    if (!sessionId || sessionFrames < 5) return null;
+    const dPct = sessionFrames > 0 ? drowsyFrames / sessionFrames : 0;
+    // Alertness pts (50 max) — penalise drowsy frame ratio
+    const alertPts   = dPct < 0.05 ? 50 : dPct < 0.15 ? 35 : dPct < 0.30 ? 20 : 0;
+    // Sustained-alert pts (50 max) — penalise confirmed alert events
+    const sustainPts = sessionAlerts === 0 ? 50 : sessionAlerts === 1 ? 35 : sessionAlerts <= 3 ? 20 : 0;
+    const das = alertPts + sustainPts;
+    const tier = das >= 90 ? "Elite" : das >= 75 ? "Safe" : das >= 60 ? "Needs Attention" : das >= 40 ? "At Risk" : "High Risk";
+    const tierColor = { Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[tier];
+    return { das, tier, tierColor, alertPts, sustainPts, dPct };
+  }, [sessionId, sessionFrames, drowsyFrames, sessionAlerts]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -687,6 +733,70 @@ export default function DrowsinessMonitorPage() {
                   </div>
                 </div>
 
+                {/* ── Live Driver Alertness Score ── */}
+                {liveDAS && (
+                  <div className="dw-card dw-das-live-card">
+                    <div className="dw-card-head">
+                      <div>
+                        <span className="dw-card-title">Driver Alertness Score</span>
+                        <span className="dw-card-hint">Updates every frame · Resets on new session</span>
+                      </div>
+                      <span className="dw-card-badge" style={{
+                        background: liveDAS.tierColor + "22",
+                        color: liveDAS.tierColor,
+                        border: `1px solid ${liveDAS.tierColor}44`,
+                      }}>{liveDAS.tier}</span>
+                    </div>
+
+                    {/* Big score */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: "0.4rem", margin: "0.6rem 0" }}>
+                      <span style={{ fontSize: "2.8rem", fontWeight: 800, lineHeight: 1, color: liveDAS.tierColor,
+                                     transition: "color 0.4s" }}>
+                        {liveDAS.das}
+                      </span>
+                      <span style={{ fontSize: "1.1rem", color: "#64748b", marginBottom: "6px" }}>/ 100</span>
+                    </div>
+
+                    {/* Score breakdown bars */}
+                    {[{label: "Alertness (drowsy rate)", pts: liveDAS.alertPts, max: 50,
+                        hint: `${Math.round(liveDAS.dPct * 100)}% drowsy frames`,
+                        color: liveDAS.alertPts >= 40 ? "#22c55e" : liveDAS.alertPts >= 20 ? "#f59e0b" : "#ef4444"},
+                      {label: "Sustained Alertness",   pts: liveDAS.sustainPts, max: 50,
+                        hint: `${sessionAlerts} alert event${sessionAlerts !== 1 ? "s" : ""}`,
+                        color: liveDAS.sustainPts >= 40 ? "#22c55e" : liveDAS.sustainPts >= 20 ? "#f59e0b" : "#ef4444"}
+                    ].map(b => (
+                      <div key={b.label} style={{ marginBottom: "0.7rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between",
+                                      fontSize: "0.68rem", marginBottom: "4px" }}>
+                          <span style={{ color: "#94a3b8" }}>{b.label}</span>
+                          <span style={{ color: b.color, fontWeight: 700 }}>{b.pts}<span style={{ color: "#475569", fontWeight: 400 }}>/{b.max}</span>
+                            <span style={{ color: "#475569", marginLeft: "6px" }}>{b.hint}</span>
+                          </span>
+                        </div>
+                        <div style={{ height: "6px", background: "#1e293b", borderRadius: "3px" }}>
+                          <div style={{ width: `${(b.pts / b.max) * 100}%`, height: "100%",
+                                        background: b.color, borderRadius: "3px",
+                                        transition: "width 0.5s ease" }}/>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* 5-tier bar */}
+                    <div style={{ display: "flex", gap: "2px", marginTop: "0.6rem" }}>
+                      {[["High Risk","#ef4444"],["At Risk","#f97316"],["Needs Attention","#f59e0b"],["Safe","#38bdf8"],["Elite","#22c55e"]]
+                        .map(([t, c]) => (
+                          <div key={t} style={{ flex: 1, height: "6px", borderRadius: "3px",
+                                               background: liveDAS.tier === t ? c : c + "33",
+                                               transition: "background 0.4s" }}/>
+                        ))}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                                  fontSize: "0.58rem", color: "#475569", marginTop: "3px" }}>
+                      <span>High Risk</span><span>At Risk</span><span>Needs Attention</span><span>Safe</span><span>Elite</span>
+                    </div>
+                  </div>
+                )}
+
               </div>{/* end analysis col */}
             </div>{/* end grid */}
 
@@ -713,30 +823,89 @@ export default function DrowsinessMonitorPage() {
               </div>
             )}
 
-            {/* Session summary */}
-            {sessionSummary && (
-              <div className="dw-card dw-summary-card">
-                <div className="dw-card-head">
-                  <span className="dw-card-title">Session Summary</span>
-                  <span className="dw-card-badge green">Completed</span>
-                </div>
-                <div className="dw-summary-grid">
-                  {[
-                    ["Frames Analyzed",  sessionSummary.total_frames,                    null],
-                    ["Avg BVI",          sessionSummary.avg_bvi?.toFixed(3)  ?? "—",     null],
-                    ["Peak BVI",         sessionSummary.peak_bvi?.toFixed(3) ?? "—",     "#ef4444"],
-                    ["Dominant Emotion", sessionSummary.dominant_emotion     || "—",     null],
-                    ["Drowsy Alerts",    sessionSummary.total_alerts         ?? 0,
-                      (sessionSummary.total_alerts ?? 0) > 0 ? "#ef4444" : "#22c55e"],
-                  ].map(([lbl, val, clr]) => (
-                    <div key={lbl} className="dw-sum-stat">
-                      <span className="dw-sum-val" style={clr ? { color: clr } : {}}>{val}</span>
-                      <span className="dw-sum-lbl">{lbl}</span>
+            {/* Session result (shown after stopping) */}
+            {sessionSummary && (() => {
+              const das   = sessionSummary.dss_score ?? 0;
+              const tier  = sessionSummary.dss_tier  ?? "—";
+              const tColor = { Elite: "#22c55e", Safe: "#38bdf8", "Needs Attention": "#f59e0b", "At Risk": "#f97316", "High Risk": "#ef4444" }[tier] ?? "#94a3b8";
+              const dPct  = sessionSummary.drowsy_pct ?? 0;
+              const rec   = tier === "Elite" || tier === "Safe"
+                ? "Excellent alertness — keep up the great driving habit."
+                : tier === "Needs Attention"
+                  ? "Some drowsiness detected. Consider a short break on long trips."
+                  : "Significant drowsiness detected. Stop and rest before continuing.";
+              return (
+                <div className="dw-card dw-summary-card">
+                  <div className="dw-card-head">
+                    <span className="dw-card-title">Session Result</span>
+                    <span className="dw-card-badge green">Completed</span>
+                  </div>
+
+                  {/* Score hero */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "1.5rem",
+                                padding: "1rem 0", borderBottom: "1px solid #1e293b", marginBottom: "1rem" }}>
+                    <div style={{ textAlign: "center", minWidth: "90px" }}>
+                      <div style={{ fontSize: "3rem", fontWeight: 800, lineHeight: 1, color: tColor }}>{das}</div>
+                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>/ 100 DAS</div>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "1.1rem", fontWeight: 700, color: tColor }}>{tier}</span>
+                      </div>
+                      <p style={{ fontSize: "0.73rem", color: "#94a3b8", margin: 0 }}>{rec}</p>
+                    </div>
+                  </div>
+
+                  {/* Score breakdown */}
+                  {[{label: "Alertness (drowsy rate)",
+                      pts:  dPct < 5 ? 50 : dPct < 15 ? 35 : dPct < 30 ? 20 : 0, max: 50,
+                      hint: `${dPct.toFixed(1)}% drowsy`,
+                      color: dPct < 5 ? "#22c55e" : dPct < 15 ? "#f59e0b" : "#ef4444"},
+                    {label: "Sustained Alertness",
+                      pts:  (sessionSummary.total_alerts ?? 0) === 0 ? 50 : (sessionSummary.total_alerts ?? 0) === 1 ? 35 : (sessionSummary.total_alerts ?? 0) <= 3 ? 20 : 0, max: 50,
+                      hint: `${sessionSummary.total_alerts ?? 0} alert event${(sessionSummary.total_alerts ?? 0) !== 1 ? "s" : ""}`,
+                      color: (sessionSummary.total_alerts ?? 0) === 0 ? "#22c55e" : (sessionSummary.total_alerts ?? 0) <= 2 ? "#f59e0b" : "#ef4444"},
+                  ].map(b => (
+                    <div key={b.label} style={{ marginBottom: "0.75rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between",
+                                    fontSize: "0.7rem", marginBottom: "4px" }}>
+                        <span style={{ color: "#94a3b8" }}>{b.label}</span>
+                        <span style={{ color: b.color, fontWeight: 700 }}>
+                          {b.pts}/{b.max} <span style={{ color: "#475569", fontWeight: 400 }}>({b.hint})</span>
+                        </span>
+                      </div>
+                      <div style={{ height: "6px", background: "#1e293b", borderRadius: "3px" }}>
+                        <div style={{ width: `${(b.pts / b.max) * 100}%`, height: "100%",
+                                      background: b.color, borderRadius: "3px" }}/>
+                      </div>
                     </div>
                   ))}
+
+                  {/* Stats grid */}
+                  <div className="dw-summary-grid" style={{ marginTop: "1rem" }}>
+                    {[
+                      ["Duration",      sessionSummary.duration_sec != null ? `${sessionSummary.duration_sec}s` : "—", null],
+                      ["Frames",        sessionSummary.total_frames ?? 0,                                              null],
+                      ["Drowsy Frames", sessionSummary.drowsy_frames ?? 0,
+                        (sessionSummary.drowsy_frames ?? 0) > 0 ? "#f59e0b" : "#22c55e"],
+                      ["Alert Events",  sessionSummary.total_alerts ?? 0,
+                        (sessionSummary.total_alerts  ?? 0) > 0 ? "#ef4444" : "#22c55e"],
+                      ["Drowsy %",      `${dPct.toFixed(1)}%`,
+                        dPct > 30 ? "#ef4444" : dPct > 10 ? "#f59e0b" : "#22c55e"],
+                    ].map(([lbl, val, clr]) => (
+                      <div key={lbl} className="dw-sum-stat">
+                        <span className="dw-sum-val" style={clr ? { color: clr } : {}}>{val}</span>
+                        <span className="dw-sum-lbl">{lbl}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p style={{ fontSize: "0.68rem", color: "#475569", marginTop: "0.75rem", marginBottom: 0 }}>
+                    Session saved to your driver profile. View historical trends on Dashboard → Analytics.
+                  </p>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
           </>)}{/* end live tab */}
 
@@ -894,58 +1063,129 @@ export default function DrowsinessMonitorPage() {
                       </div>
                     )}
 
-                    {/* Per-frame detail table */}
+                    {/* Per-frame card grid */}
                     <div style={{ marginTop: "1.2rem" }}>
-                      <div className="dw-card-head">
+                      <div className="dw-card-head" style={{ marginBottom: "0.75rem" }}>
                         <span className="dw-card-title">Per-frame Results</span>
-                        <span style={{ fontSize: "0.7rem", color: "#64748b" }}>{videoResult.timeline.length} frames analyzed</span>
+                        <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                          {videoResult.analyzed ?? videoResult.timeline.length} frames analyzed
+                          {videoResult.analyzed > videoResult.timeline.length
+                            ? ` (showing first ${videoResult.timeline.length})`
+                            : ""}
+                        </span>
                       </div>
-                      <div style={{ overflowX: "auto", maxHeight: "260px", overflowY: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.72rem", color: "#cbd5e1" }}>
-                          <thead>
-                            <tr style={{ background: "#0f172a", position: "sticky", top: 0 }}>
-                              {["Frame","Time","Verdict","Confidence","LSTM","RGB","IR","EAR","MAR","Pitch","Yaw"].map(h => (
-                                <th key={h} style={{ padding: "6px 8px", textAlign: "left", color: "#64748b",
-                                                     fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-                                                     borderBottom: "1px solid #1e293b" }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {videoResult.timeline.map((f, i) => {
-                              const conf = f.confidence ?? 0;
-                              const vColor = f.alert ? "#f59e0b" : f.verdict === "Drowsy" ? "#ef4444" : "#22c55e";
-                              return (
-                                <tr key={i} style={{ borderBottom: "1px solid #1e293b",
-                                  background: f.alert ? "rgba(245,158,11,0.06)" : f.verdict === "Drowsy" ? "rgba(239,68,68,0.04)" : "transparent" }}>
-                                  <td style={{ padding: "5px 8px" }}>{f.frame}</td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{f.ts}s</td>
-                                  <td style={{ padding: "5px 8px", color: vColor, fontWeight: 600 }}>
-                                    {f.alert ? "⚠ " : ""}{f.verdict ?? "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: vColor }}>{Math.round(conf * 100)}%</td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>
-                                    {f.models?.lstm?.available ? `${Math.round((f.models.lstm.drowsy_prob ?? 0) * 100)}%` : "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>
-                                    {f.models?.rgb?.available ? `${Math.round((f.models.rgb.drowsy_prob ?? 0) * 100)}%` : "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>
-                                    {f.models?.ir?.available ? `${Math.round((f.models.ir.drowsy_prob ?? 0) * 100)}%` : "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: f.features?.ear != null && f.features.ear < 0.25 ? "#ef4444" : "#94a3b8" }}>
-                                    {f.features?.ear?.toFixed(3) ?? "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: f.features?.mar != null && f.features.mar > 0.6 ? "#f59e0b" : "#94a3b8" }}>
-                                    {f.features?.mar?.toFixed(3) ?? "—"}
-                                  </td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{f.features?.pitch?.toFixed(1) ?? "—"}°</td>
-                                  <td style={{ padding: "5px 8px", color: "#94a3b8" }}>{f.features?.yaw?.toFixed(1) ?? "—"}°</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                        gap: "0.75rem",
+                      }}>
+                        {videoResult.timeline.map((f, i) => {
+                          const conf   = f.confidence ?? 0;
+                          const vColor = f.alert ? "#f59e0b" : f.verdict === "Drowsy" ? "#ef4444" : "#22c55e";
+                          const ear    = f.features?.ear;
+                          const mar    = f.features?.mar;
+                          return (
+                            <div key={i} style={{
+                              background: "#0f172a",
+                              borderRadius: "10px",
+                              overflow: "hidden",
+                              border: `1px solid ${f.alert ? "#f59e0b44" : f.verdict === "Drowsy" ? "#ef444433" : "#1e293b"}`,
+                            }}>
+                              {/* Thumbnail */}
+                              {f.image ? (
+                                <img
+                                  src={`data:image/jpeg;base64,${f.image}`}
+                                  alt={`Frame ${f.frame}`}
+                                  style={{ width: "100%", display: "block", aspectRatio: "4/3", objectFit: "cover" }}
+                                />
+                              ) : (
+                                <div style={{ width: "100%", aspectRatio: "4/3", background: "#1e293b",
+                                              display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  <span style={{ color: "#475569", fontSize: "0.7rem" }}>No face</span>
+                                </div>
+                              )}
+
+                              {/* Info panel */}
+                              <div style={{ padding: "0.55rem 0.65rem" }}>
+                                {/* Frame # + timestamp */}
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8" }}>
+                                    Frame {f.frame}
+                                  </span>
+                                  <span style={{ fontSize: "0.68rem", color: "#475569" }}>⏱ {f.ts}s</span>
+                                </div>
+
+                                {/* Verdict chip */}
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                                  <span style={{
+                                    fontSize: "0.72rem", fontWeight: 700,
+                                    padding: "2px 8px", borderRadius: "4px",
+                                    background: f.alert ? "rgba(245,158,11,0.15)" : f.verdict === "Drowsy" ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.10)",
+                                    color: vColor, border: `1px solid ${vColor}44`,
+                                  }}>
+                                    {f.alert ? "⚠ ALERT" : f.verdict === "Drowsy" ? "😴 Drowsy" : "✅ Alert"}
+                                  </span>
+                                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: vColor, marginLeft: "auto" }}>
+                                    {Math.round(conf * 100)}%
+                                  </span>
+                                </div>
+
+                                {/* Confidence bar */}
+                                <div style={{ height: "4px", background: "#1e293b", borderRadius: "2px", marginBottom: "7px" }}>
+                                  <div style={{ width: `${Math.round(conf * 100)}%`, height: "100%",
+                                                background: vColor, borderRadius: "2px", transition: "width 0.3s" }}/>
+                                </div>
+
+                                {/* EAR / MAR chips */}
+                                <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+                                  {ear != null && (
+                                    <span style={{
+                                      fontSize: "0.62rem", padding: "1px 6px", borderRadius: "3px",
+                                      background: ear < 0.25 ? "rgba(239,68,68,0.12)" : "rgba(30,41,59,0.8)",
+                                      color: ear < 0.25 ? "#ef4444" : "#64748b",
+                                      border: `1px solid ${ear < 0.25 ? "#ef444433" : "#1e293b"}`,
+                                    }}>EAR {ear.toFixed(3)}</span>
+                                  )}
+                                  {mar != null && (
+                                    <span style={{
+                                      fontSize: "0.62rem", padding: "1px 6px", borderRadius: "3px",
+                                      background: mar > 0.60 ? "rgba(245,158,11,0.12)" : "rgba(30,41,59,0.8)",
+                                      color: mar > 0.60 ? "#f59e0b" : "#64748b",
+                                      border: `1px solid ${mar > 0.60 ? "#f59e0b33" : "#1e293b"}`,
+                                    }}>MAR {mar.toFixed(3)}</span>
+                                  )}
+                                  {f.features?.pitch != null && (
+                                    <span style={{
+                                      fontSize: "0.62rem", padding: "1px 6px", borderRadius: "3px",
+                                      background: "rgba(30,41,59,0.8)", color: "#64748b", border: "1px solid #1e293b",
+                                    }}>P {f.features.pitch.toFixed(1)}°</span>
+                                  )}
+                                </div>
+
+                                {/* Model scores row */}
+                                {(f.models?.lstm?.available || f.models?.rgb?.available) && (
+                                  <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
+                                    {f.models.lstm?.available && (
+                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
+                                        LSTM {Math.round((f.models.lstm.drowsy_prob ?? 0) * 100)}%
+                                      </span>
+                                    )}
+                                    {f.models.rgb?.available && (
+                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
+                                        · RGB {Math.round((f.models.rgb.drowsy_prob ?? 0) * 100)}%
+                                      </span>
+                                    )}
+                                    {f.models.ir?.available && (
+                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
+                                        · IR {Math.round((f.models.ir.drowsy_prob ?? 0) * 100)}%
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

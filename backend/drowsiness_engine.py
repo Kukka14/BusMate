@@ -21,6 +21,7 @@ Model files expected in:  backend/Drownsiness/
   nthu_features.csv    – training features CSV for MinMaxScaler
 """
 
+import base64
 import logging
 import math
 import threading
@@ -28,8 +29,11 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import io
+
 import cv2
 import numpy as np
+from PIL import Image as _PILImage
 
 logger = logging.getLogger(__name__)
 
@@ -510,11 +514,13 @@ class DrowsinessEngine:
         fps_src   = cap.get(cv2.CAP_PROP_FPS) or 30.0
         raw_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        MAX_TIMELINE    = 60   # max frames with thumbnails in response
         timeline:     List[Dict] = []
         alert_events: List[Dict] = []
         frame_raw       = 0
         frame_processed = 0
         drowsy_count    = 0
+        total_scored    = 0
 
         try:
             while True:
@@ -533,20 +539,56 @@ class DrowsinessEngine:
                 if frame_processed <= _LSTM_SEQ_LEN:
                     continue
 
-                ts = round(frame_raw / fps_src, 2)
-                timeline.append({
-                    "frame":      frame_raw,
-                    "ts":         ts,
-                    "verdict":    res.get("verdict"),
-                    "confidence": res.get("confidence"),
-                    "alert":      res.get("alert"),
-                    "face":       res.get("face_detected"),
-                    "models":     res.get("models"),
-                    "features":   res.get("features"),
-                })
+                ts      = round(frame_raw / fps_src, 2)
+                verdict = res.get("verdict") or "—"
+                conf    = res.get("confidence", 0.0)
+                bbox    = res.get("bbox")
+                is_alert = res.get("alert", False)
 
+                total_scored += 1
                 if res.get("verdict") == "Drowsy":
                     drowsy_count += 1
+
+                # ── Annotate + encode thumbnail (capped at MAX_TIMELINE frames) ──
+                if len(timeline) < MAX_TIMELINE:
+                    ann = frame.copy()
+                    if bbox and res.get("face_detected"):
+                        x, y, w, h = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
+                        # BGR: red for drowsy, green for alert
+                        color = (0, 60, 239) if verdict == "Drowsy" else (34, 197, 80)
+                        cv2.rectangle(ann, (x, y), (x + w, y + h), color, 2)
+                        lbl = f"{verdict} {round(conf * 100)}%"
+                        tw  = len(lbl) * 8
+                        cv2.rectangle(ann, (x, max(0, y - 22)), (x + tw + 8, y), (0, 0, 0), -1)
+                        cv2.putText(ann, lbl, (x + 4, max(12, y - 5)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 1)
+                    if is_alert:
+                        cv2.rectangle(ann, (2, 2), (ann.shape[1] - 2, 32), (0, 50, 200), -1)
+                        cv2.putText(ann, "DROWSINESS ALERT", (8, 22),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    # Resize to max 320px wide for compact thumbnails
+                    h_ann, w_ann = ann.shape[:2]
+                    if w_ann > 320:
+                        scale = 320 / w_ann
+                        ann = cv2.resize(ann, (320, int(h_ann * scale)),
+                                         interpolation=cv2.INTER_AREA)
+                    # Use Pillow for JPEG encoding — avoids eventlet/cv2 issues on Windows
+                    pil_img = _PILImage.fromarray(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB))
+                    _buf = io.BytesIO()
+                    pil_img.save(_buf, format="JPEG", quality=50)
+                    img_b64 = base64.b64encode(_buf.getvalue()).decode()
+
+                    timeline.append({
+                        "frame":      frame_raw,
+                        "ts":         ts,
+                        "verdict":    verdict,
+                        "confidence": conf,
+                        "alert":      is_alert,
+                        "face":       res.get("face_detected"),
+                        "models":     res.get("models"),
+                        "features":   res.get("features"),
+                        "image":      img_b64,
+                    })
 
                 # De-duplicate alert events — require >= 2 s gap between entries
                 if res.get("alert") and (
@@ -564,13 +606,14 @@ class DrowsinessEngine:
             self.reset_session(SID)
 
         total_analyzed = len(timeline)
-        drowsy_pct     = round(drowsy_count / max(1, total_analyzed) * 100, 1)
+        drowsy_pct     = round(drowsy_count / max(1, total_scored) * 100, 1)
         duration_sec   = round(raw_total / fps_src, 1)
 
         return {
             "ok":            True,
             "total_frames":  raw_total,
-            "analyzed":      total_analyzed,
+            "analyzed":      total_scored,
+            "displayed":     total_analyzed,
             "drowsy_frames": drowsy_count,
             "drowsy_pct":    drowsy_pct,
             "alert_events":  alert_events,

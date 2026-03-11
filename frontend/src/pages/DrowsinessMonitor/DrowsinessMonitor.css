@@ -422,6 +422,13 @@
 .dw-al-conf { font-weight: 700; }
 .dw-al-ear  { color: #64748b; font-family: monospace; margin-left: auto; }
 
+/* ── Live Driver Alertness Score card ─────────────────────── */
+.dw-das-live-card {
+  border: 1px solid #1e40af44;
+  background: linear-gradient(135deg, #0f172a 0%, #0c1731 100%);
+}
+.dw-das-live-card .dw-card-title { color: #93c5fd; }
+
 /* ── Session summary ──────────────────────────────────────── */
 .dw-summary-grid {
   display: flex; flex-wrap: wrap; gap: 0;

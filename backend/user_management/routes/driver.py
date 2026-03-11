@@ -424,6 +424,15 @@ def session_stop(current_user):
     frames = session.get("frames", [])
     now    = datetime.utcnow().isoformat()
 
+    # Accept client-computed scores for sessions without persisted frames
+    # (e.g. Drowsiness Monitor which doesn't POST /session/frame)
+    client_dss           = body.get("dss_score")
+    client_tier          = body.get("dss_tier")
+    client_drowsy_frames = body.get("drowsy_frames")
+    client_drowsy_pct    = body.get("drowsy_pct")
+    client_duration      = body.get("duration_sec")
+    client_total_alerts  = body.get("total_alerts")
+
     # Compute aggregate summary
     bvi_scores = [f["bvi_score"] for f in frames if f.get("bvi_score") is not None]
     emotions   = [f["emotion"]   for f in frames if f.get("emotion")]
@@ -437,23 +446,41 @@ def session_stop(current_user):
         from collections import Counter
         dominant = Counter(emotions).most_common(1)[0][0]
 
-    dss, tier = _compute_dss(avg_bvi, frames)
+    # Use client-supplied DSS when no frames stored (Drowsiness Monitor sessions)
+    if not frames and client_dss is not None:
+        dss  = int(client_dss)
+        tier = str(client_tier) if client_tier else _compute_dss(None, [])[1]
+    else:
+        dss, tier = _compute_dss(avg_bvi, frames)
+
+    summary_doc = {
+        "total_frames":     len(frames) if frames else (client_total_alerts is not None and int(body.get("total_frames", 0))),
+        "avg_bvi":          avg_bvi,
+        "peak_bvi":         peak_bvi,
+        "dominant_emotion": dominant,
+        "erratic_count":    erratic,
+        "safety_alerts":    session["summary"].get("safety_alerts", []),
+        "dss_score":        dss,
+        "dss_tier":         tier,
+    }
+    # Persist extra drowsiness fields when supplied by client
+    if client_drowsy_frames is not None:
+        summary_doc["drowsy_frames"] = int(client_drowsy_frames)
+    if client_drowsy_pct is not None:
+        summary_doc["drowsy_pct"]    = float(client_drowsy_pct)
+    if client_duration is not None:
+        summary_doc["duration_sec"]  = int(client_duration)
+    if client_total_alerts is not None:
+        summary_doc["total_alerts"]  = int(client_total_alerts)
+    if not frames and client_dss is not None:
+        summary_doc["total_frames"]  = int(body.get("total_frames", 0))
 
     db.driving_sessions.update_one(
         {"_id": ObjectId(sid)},
         {"$set": {
             "status":   "completed",
             "ended_at": now,
-            "summary": {
-                "total_frames":     len(frames),
-                "avg_bvi":          avg_bvi,
-                "peak_bvi":         peak_bvi,
-                "dominant_emotion": dominant,
-                "erratic_count":    erratic,
-                "safety_alerts":    session["summary"].get("safety_alerts", []),
-                "dss_score":        dss,
-                "dss_tier":         tier,
-            },
+            "summary":  summary_doc,
         }}
     )
 
@@ -461,13 +488,17 @@ def session_stop(current_user):
         "session_id": sid,
         "ended_at":   now,
         "summary": {
-            "total_frames": len(frames),
-            "avg_bvi":      avg_bvi,
-            "peak_bvi":     peak_bvi,
+            "total_frames":     summary_doc["total_frames"],
+            "avg_bvi":          avg_bvi,
+            "peak_bvi":         peak_bvi,
             "dominant_emotion": dominant,
             "erratic_count":    erratic,
             "dss_score":        dss,
             "dss_tier":         tier,
+            "drowsy_frames":    summary_doc.get("drowsy_frames"),
+            "drowsy_pct":       summary_doc.get("drowsy_pct"),
+            "duration_sec":     summary_doc.get("duration_sec"),
+            "total_alerts":     summary_doc.get("total_alerts"),
         }
     }), 200
 
