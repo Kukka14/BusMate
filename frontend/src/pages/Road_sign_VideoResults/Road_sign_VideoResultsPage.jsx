@@ -2,7 +2,19 @@ import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
+import { buildSpeechAnnouncement } from "../../utils/roadSignInstructions";
 import "./Road_sign_VideoResultsPage.css";
+
+function speakText(text) {
+  if (!window.speechSynthesis || !text) return;
+  window.speechSynthesis.cancel();
+  const utt    = new SpeechSynthesisUtterance(text);
+  utt.lang     = "en-US";
+  utt.rate     = 0.92;
+  utt.pitch    = 1;
+  utt.volume   = 1;
+  window.speechSynthesis.speak(utt);
+}
 
 // ── Beep helper (no speech) ───────────────────────────────────────────────────
 function playBeep(freq = 880, duration = 0.25, vol = 0.4) {
@@ -38,14 +50,24 @@ export default function Road_sign_VideoResultsPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
 
-  // ── Beep once when results load ─────────────────────────────────────────
+  // ── Beep + speak announcement when results load ─────────────────────────
   useEffect(() => {
-    if (state?.results?.length) {
-      // Double beep: first note then second for "ding-ding" feel
-      playBeep(880, 0.18, 0.38);
-      setTimeout(() => playBeep(1100, 0.18, 0.3), 220);
-    }
-  }, []);
+    if (!state?.results?.length) return;
+
+    // Double beep
+    playBeep(880, 0.18, 0.38);
+    setTimeout(() => playBeep(1100, 0.18, 0.3), 220);
+
+    // Find most-frequent sign to announce
+    const freq = {};
+    state.results.forEach(r => { freq[r.class_name] = (freq[r.class_name] || 0) + 1; });
+    const topSign = Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+    const announcement = buildSpeechAnnouncement(topSign);
+
+    // Speak after beeps finish
+    const t = setTimeout(() => speakText(announcement), 700);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Compute summary from all results ────────────────────────────────────
   const summary = useMemo(() => {

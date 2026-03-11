@@ -803,3 +803,34 @@ export function getSignInstruction(className) {
   const key = className.toLowerCase().replace(/\s+/g, " ").trim();
   return SIGN_DB[key] ?? null;
 }
+
+/**
+ * Strip emoji / pictographic characters so TTS reads cleanly.
+ * Keeps letters, digits, spaces, common punctuation.
+ */
+export function forSpeech(str) {
+  if (!str) return "";
+  return str
+    // Remove emoji (broad unicode ranges)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}\u{1F000}-\u{1F02F}]/gu, "")
+    // Collapse extra whitespace
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Build the full TTS announcement string for a detected sign.
+ * Format: "Road Sign Detected. {Name}. Priority {n} — {label}. Driver Instructions: {first instruction}."
+ */
+export function buildSpeechAnnouncement(className) {
+  if (!className) return null;
+  const name  = className.replace(/_/g, " ");
+  const instr = getSignInstruction(className);
+
+  let speech = `Road Sign Detected. ${name}.`;
+  if (instr) {
+    // speech += ` Priority ${instr.priority} — ${instr.priorityLabel}.`;
+    speech += `  ${forSpeech(instr.instructions[0])}.`;
+  }
+  return speech;
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
+import { buildSpeechAnnouncement } from "../../utils/roadSignInstructions";
 import "./Road_sign_LivePage.css";
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
@@ -191,10 +192,10 @@ export default function Road_sign_LivePage() {
               lastSpokenRef.current = data.class_name;
 
               if (audioEnabledRef.current) {
-                const name = data.class_name.replace(/_/g, " ");
                 playBeep(880, 0.2, 0.35);
                 // Short delay so beep finishes before speech starts
-                setTimeout(() => speakText(`Road sign detected: ${name}`), 250);
+                const announcement = buildSpeechAnnouncement(data.class_name);
+                setTimeout(() => speakText(announcement), 300);
               }
 
               // Add to detection log
