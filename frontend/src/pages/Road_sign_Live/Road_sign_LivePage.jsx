@@ -4,6 +4,13 @@ import RoadSignInstructionPanel from "../../components/common/RoadSignInstructio
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_LivePage.css";
 
+// ── Inline SVG icons ──────────────────────────────────────────────────────────
+const IcoRoadSign = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+  </svg>
+);
+
 // ── Audio helpers ──────────────────────────────────────────────────────────────
 function playBeep(freq = 880, duration = 0.2, vol = 0.35) {
   try {

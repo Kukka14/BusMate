@@ -213,15 +213,17 @@ export default function LoginPage() {
             Need assistance?{" "}
             <a href="mailto:support@busmate.ai">Contact Support</a>
           </p>
-          <p className="lp-support" style={{ marginTop: "0.5rem" }}>
-            Don&apos;t have an account?{" "}
-            <button
-              style={{ background:"none", border:"none", padding:0, color:"#3b82f6", cursor:"pointer", fontSize:"inherit", fontWeight:600 }}
-              onClick={() => navigate("/signup")}
-            >
-              Sign Up
-            </button>
-          </p>
+          {role === "driver" && (
+            <p className="lp-support" style={{ marginTop: "0.5rem" }}>
+              Don&apos;t have an account?{" "}
+              <button
+                style={{ background:"none", border:"none", padding:0, color:"#3b82f6", cursor:"pointer", fontSize:"inherit", fontWeight:600 }}
+                onClick={() => navigate("/signup")}
+              >
+                Sign Up
+              </button>
+            </p>
+          )}
         </div>
       </main>
 

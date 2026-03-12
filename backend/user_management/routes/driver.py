@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import random, math
 from flask import Blueprint, jsonify, request
 from ..utils.auth_helpers import token_required
+from ..models.driver_profile import DriverProfile
 
 driver_bp = Blueprint("driver", __name__)
 
@@ -209,12 +210,12 @@ def get_profile(current_user):
     latest    = history30[-1]
     bvi_score = latest["bvi_score"]
 
-    # ── pull real sessions from MongoDB if available ──────────────────────
+    # ── pull real sessions + driver profile from MongoDB ─────────────────
     total_sessions = 0
     recent_events  = []
+    from ..database import get_db
+    db = get_db()
     try:
-        from ..database import get_db
-        db = get_db()
         sessions = list(
             db.driving_sessions.find(
                 {"driver_id": uid, "status": "completed"},
@@ -270,6 +271,14 @@ def get_profile(current_user):
     else:
         risk_level, risk_label = "High",   "RISK ZONE"
 
+    # ── load driver-specific profile from driver_profiles collection ──────
+    dp_doc = db.driver_profiles.find_one({"user_id": uid})
+    if not dp_doc:
+        # Back-fill: create a blank profile for pre-existing driver accounts
+        dp_doc = DriverProfile.new_doc(uid)
+        db.driver_profiles.insert_one(dp_doc)
+    dp = DriverProfile(dp_doc)
+
     return jsonify({
         # identity
         "id":            uid,
@@ -279,9 +288,16 @@ def get_profile(current_user):
         "company":       current_user.company,
         "role":          current_user.role,
         "status":        "ONLINE",
-        "vehicle":       "Volvo BSR #402",
-        "route":         "Route 42 – Downtown Loop",
-        "shift":         "08:00 – 16:00",
+        # profile fields from driver_profiles collection (editable by driver)
+        "vehicle":       dp.vehicle  or "Volvo BSR #402",
+        "route":         dp.route    or "Route 42 – Downtown Loop",
+        "shift":         dp.shift    or "08:00 – 16:00",
+        "phone":         dp.phone,
+        "license_number":  dp.license_number,
+        "license_expiry":  dp.license_expiry,
+        "emergency_contact": dp.emergency_contact,
+        "photo_url":     dp.photo_url,
+        "experience_years": dp.experience_years,
 
         # stat cards
         "stats": {
@@ -330,6 +346,32 @@ def get_profile(current_user):
     }), 200
 
 
+# ── Update driver profile ─────────────────────────────────────────────────────
+@driver_bp.put("/profile")
+@token_required
+def update_profile(current_user):
+    """Allow a driver to update their own extended profile fields."""
+    uid  = str(current_user.id)
+    body = request.get_json(force=True, silent=True) or {}
+    from ..database import get_db
+    db = get_db()
+
+    allowed = {"vehicle", "route", "shift", "phone", "license_number",
+               "license_expiry", "emergency_contact", "photo_url", "experience_years"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        return jsonify({"error": "No valid fields provided"}), 400
+
+    update["updated_at"] = datetime.utcnow()
+    result = db.driver_profiles.update_one(
+        {"user_id": uid},
+        {"$set": update},
+        upsert=True,   # handles pre-existing accounts that have no profile doc yet
+    )
+    doc = db.driver_profiles.find_one({"user_id": uid})
+    return jsonify({"message": "Profile updated", "profile": DriverProfile(doc).to_dict()}), 200
+
+
 # ── Start / stop shift ────────────────────────────────────────────────────────
 @driver_bp.get("/shift/start")
 @token_required
@@ -349,6 +391,167 @@ def start_shift(current_user):
 def stop_shift(current_user):
     return jsonify({"message": "Shift ended", "shift_active": False,
                     "end_time": datetime.utcnow().isoformat()}), 200
+
+
+# ── Shift score ───────────────────────────────────────────────────────────────
+
+def _compute_shift_score(data):
+    """
+    Compute a 0-100 shift safety score from 5 components (20 pts each).
+    Returns dict with total score, tier, and per-component breakdown.
+    """
+    # ── 1. Emotion component (20 pts) ──
+    avg_bvi = data.get("avg_bvi")
+    if avg_bvi is None:
+        emo_pts = 10  # no data
+    elif avg_bvi < 0.30:
+        emo_pts = 20
+    elif avg_bvi < 0.45:
+        emo_pts = 16
+    elif avg_bvi < 0.60:
+        emo_pts = 10
+    else:
+        emo_pts = max(0, round(5 * (1.0 - avg_bvi) / 0.4))
+
+    # ── 2. Drowsiness component (20 pts) ──
+    dw_total = data.get("dw_frames", 0)
+    dw_drowsy = data.get("dw_drowsy_frames", 0)
+    dw_alerts = data.get("dw_alerts", 0)
+    if dw_total == 0:
+        drow_pts = 10  # no data
+    else:
+        drowsy_pct = (dw_drowsy / dw_total) * 100
+        if drowsy_pct == 0:
+            drow_pts = 20
+        elif drowsy_pct < 5:
+            drow_pts = 16
+        elif drowsy_pct < 15:
+            drow_pts = 10
+        elif drowsy_pct < 30:
+            drow_pts = 5
+        else:
+            drow_pts = 0
+        # Penalty for high alert count
+        if dw_alerts > 10:
+            drow_pts = max(0, drow_pts - 4)
+        elif dw_alerts > 5:
+            drow_pts = max(0, drow_pts - 2)
+
+    # ── 3. Distraction component (20 pts) ──
+    em_total = data.get("em_frames", 0)
+    cheat_frames = data.get("cheat_frames", 0)
+    if em_total == 0:
+        dist_pts = 10  # no data
+    else:
+        cheat_pct = (cheat_frames / em_total) * 100
+        if cheat_pct == 0:
+            dist_pts = 20
+        elif cheat_pct < 3:
+            dist_pts = 15
+        elif cheat_pct < 10:
+            dist_pts = 8
+        else:
+            dist_pts = 0
+
+    # ── 4. Road sign awareness (20 pts) ──
+    signs_detected = data.get("signs_detected", 0)
+    damaged_signs = data.get("damaged_signs", 0)
+    if signs_detected == 0:
+        sign_pts = 10  # no data / no signs on route
+    else:
+        # More signs detected = good awareness; damaged signs deduct
+        sign_pts = min(20, 10 + signs_detected)
+        if damaged_signs > 0:
+            sign_pts = max(5, sign_pts - damaged_signs * 2)
+
+    # ── 5. Road scene hazard (20 pts) ──
+    avg_hazard = data.get("avg_scene_hazard")
+    if avg_hazard is None:
+        scene_pts = 10  # no data
+    elif avg_hazard < 5:
+        scene_pts = 20
+    elif avg_hazard < 15:
+        scene_pts = 15
+    elif avg_hazard < 35:
+        scene_pts = 10
+    else:
+        scene_pts = max(0, round(5 * (1.0 - avg_hazard / 100)))
+
+    total = emo_pts + drow_pts + dist_pts + sign_pts + scene_pts
+
+    if total >= 90:
+        tier = "Excellent"
+    elif total >= 75:
+        tier = "Good"
+    elif total >= 60:
+        tier = "Average"
+    elif total >= 40:
+        tier = "Needs Improvement"
+    else:
+        tier = "Poor"
+
+    return {
+        "total_score": total,
+        "tier": tier,
+        "components": {
+            "emotion":    {"score": emo_pts,   "max": 20, "label": "Emotional Stability"},
+            "drowsiness": {"score": drow_pts,  "max": 20, "label": "Alertness"},
+            "distraction":{"score": dist_pts,  "max": 20, "label": "Focus & Attention"},
+            "road_signs": {"score": sign_pts,  "max": 20, "label": "Sign Awareness"},
+            "road_scene": {"score": scene_pts, "max": 20, "label": "Road Scene Safety"},
+        },
+    }
+
+
+@driver_bp.post("/shift/score")
+@token_required
+def save_shift_score(current_user):
+    """Receive shift metrics from frontend, compute score, store in DB."""
+    data = request.get_json(silent=True) or {}
+    uid = str(current_user.id)
+
+    score_result = _compute_shift_score(data)
+
+    # Store in MongoDB
+    from ..database import get_db
+    db = get_db()
+
+    # Full shift document with schedule details + score
+    doc = {
+        "driver_id":    uid,
+        "driver_name":  current_user.username,
+        "scored_at":    datetime.utcnow().isoformat(),
+        "schedule_id":  data.get("schedule_id", ""),
+        "date":         data.get("date", ""),
+        "shift_time":   data.get("shift_time", ""),
+        "start_town":   data.get("start_town", ""),
+        "end_town":     data.get("end_town", ""),
+        "bus":          data.get("bus", ""),
+        "route_name":   data.get("route_name", ""),
+        "route":        data.get("route", ""),
+        "duration_sec": data.get("duration_sec", 0),
+        "metrics":      data,
+        "score":        score_result,
+        "status":       "Completed",
+    }
+    db.shift_scores.insert_one(doc)
+
+    return jsonify(score_result), 200
+
+
+@driver_bp.get("/shift/scores")
+@token_required
+def get_shift_scores(current_user):
+    """Return all stored shift scores for this driver."""
+    uid = str(current_user.id)
+    from ..database import get_db
+    db = get_db()
+    docs = list(
+        db.shift_scores.find({"driver_id": uid}, {"_id": 0})
+        .sort("scored_at", -1)
+        .limit(50)
+    )
+    return jsonify({"scores": docs}), 200
 
 
 # ── Schedule endpoints ────────────────────────────────────────────────────────
@@ -400,7 +603,31 @@ def _generate_schedules(user_id):
 @driver_bp.get("/schedules")
 @token_required
 def get_schedules(current_user):
-    schedules = _generate_schedules(str(current_user.id))
+    uid = str(current_user.id)
+    schedules = _generate_schedules(uid)
+
+    # Merge completed shifts from DB — override status & attach score
+    from ..database import get_db
+    db = get_db()
+    completed = list(
+        db.shift_scores.find(
+            {"driver_id": uid},
+            {"_id": 0, "schedule_id": 1, "score": 1, "duration_sec": 1, "scored_at": 1}
+        ).sort("scored_at", -1)
+    )
+    completed_map = {}
+    for c in completed:
+        sid = c.get("schedule_id")
+        if sid and sid not in completed_map:
+            completed_map[sid] = c
+
+    for s in schedules:
+        if s["id"] in completed_map:
+            s["status"] = "Completed"
+            s["score"]  = completed_map[s["id"]].get("score", {})
+            s["duration_sec"] = completed_map[s["id"]].get("duration_sec", 0)
+            s["scored_at"] = completed_map[s["id"]].get("scored_at", "")
+
     return jsonify({"schedules": schedules}), 200
 
 
