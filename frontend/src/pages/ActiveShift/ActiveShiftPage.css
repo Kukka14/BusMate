@@ -238,7 +238,31 @@
 .as-rs-analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .as-rs-results { display: flex; flex-direction: column; gap: 0.5rem; }
-.as-rs-video { width: 100%; max-height: 200px; border-radius: 6px; background: #000; }
+.as-rs-live { gap: 0.6rem; }
+.as-rs-live-img-wrap {
+  position: relative; width: 100%; border-radius: 8px; overflow: hidden;
+  background: #0a0e1a; border: 1px solid #1e293b;
+}
+.as-rs-live-img-wrap .as-rs-overlay {
+  width: 100%; display: block; border-radius: 8px;
+}
+.as-rs-live-badge {
+  position: absolute; top: 8px; left: 8px;
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.7); color: #e2e8f0;
+  padding: 3px 10px; border-radius: 12px; font-size: 0.7rem;
+}
+.as-rs-live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #22c55e; animation: rsDotPulse 1.2s infinite;
+}
+@keyframes rsDotPulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.as-rs-live-hazard {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.7); padding: 3px 10px;
+  border-radius: 12px; font-size: 0.75rem; font-weight: 700;
+  border: 1px solid;
+}
 .as-rs-detail { display: flex; gap: 0.5rem; align-items: flex-start; }
 .as-rs-overlay { width: 160px; border-radius: 6px; border: 1px solid #1e293b; }
 .as-rs-hazard { text-align: center; min-width: 70px; }
@@ -255,13 +279,86 @@
   font-size: 0.72rem; cursor: pointer; align-self: flex-end;
   background: #1e293b; color: #94a3b8; border: 1px solid #334155;
 }
+.as-rs-frame-nav {
+  display: flex; align-items: center; justify-content: center; gap: 0.75rem;
+  padding: 0.3rem 0; font-size: 0.78rem; color: #94a3b8;
+}
+.as-rs-frame-nav button {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  border-radius: 4px; padding: 0.2rem 0.5rem; cursor: pointer; font-size: 0.78rem;
+}
+.as-rs-frame-nav button:disabled { opacity: 0.35; cursor: default; }
 .as-rs-loading {
   display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
   padding: 1.5rem; color: #64748b; font-size: 0.8rem;
 }
 
+/* ── Road Sign panel ── */
+.as-rsign-panel { grid-column: 1 / -1; grid-row: 3; }
+.as-rsign-body  { padding: 0.65rem 0.85rem; display: flex; flex-direction: column; gap: 0.6rem; }
+
+.as-rsign-stream-wrap {
+  width: 100%; max-height: 240px; border-radius: 8px; overflow: hidden;
+  background: #0a0e1a; border: 1px solid #1e293b;
+  display: flex; align-items: center; justify-content: center;
+}
+.as-rsign-stream {
+  width: 100%; height: auto; max-height: 240px; object-fit: contain; display: block;
+}
+.as-rsign-no-stream {
+  padding: 2rem; text-align: center; color: #475569; font-size: 0.82rem;
+}
+
+.as-rsign-detection {
+  padding: 0.7rem 0.85rem; border-radius: 8px;
+  border: 1px solid #1e293b; background: #0a0e1a;
+  transition: all 0.3s;
+}
+.as-rsign-det-head {
+  display: flex; align-items: center; gap: 0.6rem;
+}
+.as-rsign-det-icon { font-size: 1.5rem; }
+.as-rsign-det-name {
+  font-size: 0.88rem; font-weight: 700; color: #f1f5f9;
+  text-transform: capitalize;
+}
+.as-rsign-det-conf {
+  font-size: 0.68rem; color: #94a3b8;
+}
+.as-rsign-priority {
+  margin-left: auto; padding: 0.15rem 0.5rem; border-radius: 4px;
+  font-size: 0.62rem; font-weight: 700; color: #fff; text-transform: uppercase;
+}
+.as-rsign-instructions {
+  list-style: none; padding: 0; margin: 0.5rem 0 0;
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+.as-rsign-instructions li {
+  font-size: 0.72rem; color: #cbd5e1; padding: 0.2rem 0;
+  border-bottom: 1px solid #1e293b15;
+}
+
+.as-rsign-no-detect {
+  text-align: center; padding: 1.2rem; color: #475569; font-size: 0.8rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+}
+
+.as-rsign-log { margin-top: 0.2rem; }
+.as-rsign-log-title {
+  font-size: 0.65rem; font-weight: 600; color: #64748b; text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+.as-rsign-log-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.2rem 0; border-bottom: 1px solid #1e293b;
+  font-size: 0.7rem;
+}
+.as-rsign-log-name { flex: 1; color: #e2e8f0; text-transform: capitalize; }
+.as-rsign-log-conf { color: #94a3b8; }
+.as-rsign-log-time { color: #475569; font-size: 0.62rem; }
+
 /* ── Hazard panel ── */
-.as-hz-panel { grid-column: 1 / -1; grid-row: 3; }
+.as-hz-panel { grid-column: 1 / -1; grid-row: 4; }
 .as-hz-body  { padding: 0.65rem 0.85rem; }
 .as-route-small { font-size: 0.7rem; color: #64748b; }
 .as-hz-error { color: #f87171; font-size: 0.78rem; padding: 0.5rem 0; }

@@ -672,6 +672,143 @@ def rs_stop_camera_route():
     return jsonify({"stopped": True})
 
 
+# ── Demo-video road-sign feed ─────────────────────────────────────────────────
+_DEMO_VIDEO_PATH = Path(__file__).resolve().parent / "Video" / "Demo.mp4"
+_rs_demo_running = False
+_rs_demo_latest_ann  = None
+_rs_demo_latest_info: dict = {}
+
+
+def _rs_demo_worker():
+    global _rs_demo_running, _rs_demo_latest_ann, _rs_demo_latest_info
+    cap = cv2.VideoCapture(str(_DEMO_VIDEO_PATH))
+    if not cap.isOpened():
+        _rs_demo_running = False
+        return
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    delay = max(0.01, 1.0 / fps)
+    while _rs_demo_running:
+        ret, frame = cap.read()
+        if not ret:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
+            continue
+        ann = frame.copy()
+        if _rs_ready:
+            res_det = _rs_detector(frame, conf=0.25, verbose=False)
+            boxes = res_det[0].boxes
+            if len(boxes) > 0:
+                best = max(boxes, key=lambda b: float(b.conf[0]))
+                x1, y1, x2, y2 = best.xyxy[0].cpu().numpy().astype(int)
+                crop = frame[y1:y2, x1:x2]
+                try:
+                    r = _rs_yolo_clf.predict(
+                        cv2.resize(crop, (_RS_IMG_SIZE, _RS_IMG_SIZE)), verbose=False)
+                    probs = r[0].probs.data.cpu().numpy()
+                    cls   = _rs_idx2class[int(np.argmax(probs))]
+                    conf  = float(np.max(probs))
+                except Exception:
+                    cls, conf = "Road Sign", float(best.conf[0])
+                status = (
+                    "Normal"           if conf >= _RS_NORM_THR else
+                    "Damaged"          if conf <  _RS_DMG_THR  else
+                    "Possibly unclear"
+                )
+                color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
+                cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
+                lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
+                tw  = len(lbl) * 9
+                cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
+                cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                _rs_demo_latest_info = {"class_name": cls, "confidence": conf, "status": status}
+            else:
+                _rs_demo_latest_info = {}
+        _rs_demo_latest_ann = ann
+        time.sleep(delay)
+    cap.release()
+
+
+def _rs_demo_gen_mjpeg():
+    while _rs_demo_running:
+        frame = _rs_demo_latest_ann
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+               + buf.tobytes() + b"\r\n")
+        time.sleep(0.033)
+
+
+@app.route("/video_feed_demo")
+def rs_video_feed_demo():
+    global _rs_demo_running
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    if not _DEMO_VIDEO_PATH.exists():
+        return jsonify({"error": "Demo video not found"}), 404
+    if not _rs_demo_running:
+        _rs_demo_running = True
+        threading.Thread(target=_rs_demo_worker, daemon=True).start()
+        time.sleep(0.3)  # let first frames populate
+    resp = Response(_rs_demo_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/get_demo_detection_info")
+def rs_get_demo_detection_info():
+    return jsonify(_rs_demo_latest_info)
+
+
+@app.route("/stop_demo_video")
+def rs_stop_demo_video():
+    global _rs_demo_running, _rs_demo_latest_ann, _rs_demo_latest_info
+    _rs_demo_running = False
+    time.sleep(0.15)
+    _rs_demo_latest_ann = None
+    _rs_demo_latest_info = {}
+    return jsonify({"stopped": True})
+
+
+# ── Demo-video road-scene analysis ────────────────────────────────────────────
+@app.route("/rsa/analyse-demo", methods=["POST"])
+def rsa_analyse_demo():
+    if not _rsa_ready:
+        return jsonify({"error": "RSA model not loaded."}), 503
+    if not _DEMO_VIDEO_PATH.exists():
+        return jsonify({"error": "Demo video not found"}), 404
+
+    _RSA_SAMPLE_EVERY = 30
+    _RSA_MAX_FRAMES   = 25
+
+    results = []
+    cap = cv2.VideoCapture(str(_DEMO_VIDEO_PATH))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_idx = 0
+    try:
+        while cap.isOpened() and len(results) < _RSA_MAX_FRAMES:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % _RSA_SAMPLE_EVERY == 0:
+                try:
+                    r = _rsa_run(frame)
+                    r["frame"] = frame_idx
+                    r["timestamp"] = round(frame_idx / fps, 2)
+                    results.append(r)
+                except Exception:
+                    pass
+            frame_idx += 1
+    finally:
+        cap.release()
+    if not results:
+        return jsonify({"error": "No frames could be processed from demo video."}), 400
+    return jsonify({"frames": results, "total": len(results)})
+
+
 @app.route("/", methods=["GET"])
 def index():
     return jsonify({

@@ -33,6 +33,18 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/road-sign/, ""),
       },
       "/rsa": "http://localhost:5000",
+      // Demo video endpoints for road sign detection
+      "/video_feed_demo": {
+        target: "http://localhost:5000",
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            proxyRes.headers["x-accel-buffering"] = "no";
+          });
+        },
+      },
+      "/get_demo_detection_info": "http://localhost:5000",
+      "/stop_demo_video": "http://localhost:5000",
       "/socket.io": {
         target: "http://localhost:5000",
         ws: true,
