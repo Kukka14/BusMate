@@ -199,6 +199,7 @@ export default function ActiveShiftPage() {
   const [shiftStart, setShiftStart]   = useState(null);
   const [elapsed, setElapsed]         = useState("00:00");
   const [activePanel, setActivePanel] = useState("all"); // "all"|"emotion"|"drowsiness"|"roadscene"|"hazard"
+  const [drivingMode, setDrivingMode] = useState(false);
 
   // ── Shared webcam ───────────────────────────────────────────────────────
   const videoRef   = useRef(null);
@@ -250,6 +251,9 @@ export default function ActiveShiftPage() {
   const hzMapInstance = useRef(null);
   const hzMarkerRef   = useRef(null);
   const hzAnimRef     = useRef(null);
+  const hudMapRef     = useRef(null);
+  const hudMapInst    = useRef(null);
+  const hudMarkerRef  = useRef(null);
   const [hzIdx, setHzIdx]             = useState(0);
   const [hzPoint, setHzPoint]         = useState(null);
   const [hzPlaying, setHzPlaying]     = useState(false);
@@ -266,6 +270,58 @@ export default function ActiveShiftPage() {
 
   // ── Auth guard ──────────────────────────────────────────────────────────
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
+
+  // ── ESC exits driving mode ────────────────────────────────────────────
+  useEffect(() => {
+    const handler = e => { if (e.key === "Escape" && drivingMode) setDrivingMode(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [drivingMode]);
+
+  // ── HUD map — init + sync with hazard data ─────────────────────────────
+  useEffect(() => {
+    if (!drivingMode || !hudMapRef.current) return;
+    if (hudMapInst.current) { hudMapInst.current.invalidateSize(); return; }
+    const map = L.map(hudMapRef.current).setView([7.0, 80.0], 8);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap" }).addTo(map);
+    hudMapInst.current = map;
+    setTimeout(() => map.invalidateSize(), 100);
+    setTimeout(() => map.invalidateSize(), 500);
+
+    // Draw route if hazard data is available
+    const pd = hzAnalysis?.path_data;
+    if (pd?.length) {
+      const coords = pd.map(p => [p.lat, p.lon]);
+      for (let i = 0; i < coords.length - 1; i++) {
+        L.polyline([coords[i], coords[i + 1]], { color: pd[i].color || "green", weight: 4, opacity: 0.8 }).addTo(map);
+      }
+      L.circleMarker(coords[0], { radius: 8, color: "#0b5fff", fillColor: "#0b5fff", opacity: 0.9 }).addTo(map);
+      L.circleMarker(coords[coords.length - 1], { radius: 8, color: "red", fillColor: "red", opacity: 0.8 }).addTo(map);
+      hudMarkerRef.current = L.marker(coords[0], {
+        icon: L.divIcon({
+          className: "as-vehicle-icon",
+          html: '<div class="as-bus-marker"><svg viewBox="0 0 24 24" width="22" height="22" fill="white"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18" stroke="#0b5fff" stroke-width="1" fill="none"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2" stroke="white" stroke-width="1" fill="none"/></svg></div>',
+          iconSize: [36, 36], iconAnchor: [18, 18]
+        })
+      }).addTo(map);
+      map.fitBounds(L.latLngBounds(coords), { padding: [30, 30] });
+    }
+    return () => { map.remove(); hudMapInst.current = null; hudMarkerRef.current = null; };
+  }, [drivingMode, hzAnalysis]);
+
+  // ── HUD map — follow bus position ──────────────────────────────────────
+  useEffect(() => {
+    if (!drivingMode || !hudMapInst.current || !hzPoint) return;
+    if (hudMarkerRef.current) {
+      hudMarkerRef.current.setLatLng([hzPoint.lat, hzPoint.lon]);
+      const el = hudMarkerRef.current.getElement();
+      if (el) {
+        const m = el.querySelector(".as-bus-marker");
+        if (m) m.className = hzPoint.risk_label === "Critical Risk" ? "as-bus-marker danger-critical" : hzPoint.risk_label === "High Risk" ? "as-bus-marker danger-high" : "as-bus-marker";
+      }
+    }
+    hudMapInst.current.panTo([hzPoint.lat, hzPoint.lon], { animate: true, duration: 0.3 });
+  }, [drivingMode, hzPoint]);
 
   // ── Elapsed timer ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -728,6 +784,7 @@ export default function ActiveShiftPage() {
               </span>
             </div>
             <button className="as-end-btn" onClick={handleEndShift}><IcoStop/> END SHIFT</button>
+            <button className="as-drive-mode-btn" onClick={()=>setDrivingMode(true)}>🚗 Driving Mode</button>
           </div>
         )}
 
@@ -1083,6 +1140,120 @@ export default function ActiveShiftPage() {
             <button className="as-score-close-btn" onClick={handleScoreClose}>
               Done — Back to Schedule
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── DRIVING MODE HUD ──────────────────────────────────────── */}
+      {drivingMode && shiftActive && (
+        <div className="hud-overlay">
+          {/* HUD Top Bar */}
+          <div className="hud-topbar">
+            <div className="hud-topbar-left">
+              <span className="hud-live-dot"/>
+              <span className="hud-route">{startTown} → {endTown}</span>
+              <span className="hud-meta">{routeName} · {busId}</span>
+            </div>
+            <div className="hud-topbar-center">
+              <span className="hud-elapsed">⏱ {elapsed}</span>
+            </div>
+            <div className="hud-topbar-right">
+              <button className="hud-exit-btn" onClick={()=>setDrivingMode(false)}>✕ Exit Driving Mode</button>
+            </div>
+          </div>
+
+          {/* HUD Main Area */}
+          <div className="hud-body">
+            {/* Large Map */}
+            <div className="hud-map-area">
+              <div ref={hudMapRef} className="hud-map"/>
+              {/* Hazard dashboard cards overlay on map */}
+              <div className="hud-hz-cards">
+                <HazardDashPanel currentPoint={hzPoint} nextPoints={pd?.slice(hzIdx)} isFinished={hzFinished} totalDistance={pd?.length ? pd[pd.length-1].distance : 0}/>
+              </div>
+            </div>
+
+            {/* Right sidebar — camera + alerts */}
+            <div className="hud-sidebar">
+              {/* PIP Camera */}
+              <div className="hud-cam">
+                <video ref={el => { if (el && streamRef.current) el.srcObject = streamRef.current; }} autoPlay playsInline muted className="hud-cam-video" style={{transform:"scaleX(-1)"}}/>
+              </div>
+
+              {/* Alert banners */}
+              {cheating && (
+                <div className="hud-alert red">
+                  <IcoAlert/> DISTRACTION: {emResult?.objects?.labels?.join(", ")}
+                </div>
+              )}
+              {dwResult?.alert && (
+                <div className="hud-alert red">
+                  <IcoAlert/> DROWSINESS — Pull over!
+                </div>
+              )}
+
+              {/* Drowsiness quick status */}
+              <div className="hud-status-card">
+                <div className="hud-status-head">😴 Drowsiness</div>
+                <div className="hud-status-row">
+                  <span>Status</span>
+                  <span style={{color: verdictColor(dwVerdict), fontWeight: 700}}>{dwVerdict || "Waiting"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>Confidence</span>
+                  <span>{dwConf != null ? `${(dwConf*100).toFixed(0)}%` : "—"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>Alert Streak</span>
+                  <span style={{color: dwStreak >= CONSECUTIVE_THRESHOLD ? "#ef4444" : "#94a3b8"}}>{dwStreak}/{CONSECUTIVE_THRESHOLD}</span>
+                </div>
+              </div>
+
+              {/* Emotion quick status */}
+              <div className="hud-status-card">
+                <div className="hud-status-head">😊 Emotion</div>
+                <div className="hud-status-row">
+                  <span>Current</span>
+                  <span style={{color: emoColor, fontWeight: 700}}>{emotion ? emotion.toUpperCase() : "—"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>BVI</span>
+                  <span style={{color: bviColor(bviScore)}}>{bviScore?.toFixed(3) ?? "—"}</span>
+                </div>
+              </div>
+
+              {/* Road sign detection */}
+              {rsSignInfo && (() => {
+                const instr = getSignInstruction(rsSignInfo.class_name);
+                const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                return (
+                  <div className="hud-sign-card" style={pc ? {borderColor: pc.border, background: pc.bg} : {}}>
+                    <div className="hud-sign-head">
+                      <span className="hud-sign-icon">{instr?.icon || "🔍"}</span>
+                      <div>
+                        <div className="hud-sign-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                        <div className="hud-sign-conf">{(rsSignInfo.confidence*100).toFixed(0)}%</div>
+                      </div>
+                      {instr && <span className="hud-sign-priority" style={{background: pc?.badge}}>{instr.priorityLabel}</span>}
+                    </div>
+                    {instr?.instructions && (
+                      <ul className="hud-sign-instructions">
+                        {instr.instructions.slice(0,2).map((ins,i) => <li key={i}>{ins}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
+              {!rsSignInfo && (
+                <div className="hud-status-card" style={{textAlign:"center", color:"#475569"}}>
+                  <div className="hud-status-head">🚦 Road Signs</div>
+                  <p style={{margin:"0.3rem 0 0",fontSize:"0.72rem"}}>Scanning…</p>
+                </div>
+              )}
+
+              {/* ESC hint */}
+              <div className="hud-esc-hint">Press <kbd>ESC</kbd> to exit</div>
+            </div>
           </div>
         </div>
       )}
