@@ -467,6 +467,196 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Driving Mode Button ────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+.as-drive-mode-btn {
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.45rem 1rem; border-radius: 6px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  background: linear-gradient(135deg, #6366f122, #8b5cf622);
+  color: #a78bfa; border: 1px solid #6366f155;
+  transition: all 0.2s;
+}
+.as-drive-mode-btn:hover {
+  background: linear-gradient(135deg, #6366f133, #8b5cf633);
+  box-shadow: 0 0 12px rgba(139,92,246,0.25);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Driving Mode HUD ───────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+.hud-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: #0a0e1a;
+  display: flex; flex-direction: column;
+  animation: hudFadeIn 0.3s ease;
+}
+@keyframes hudFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── HUD Top Bar ── */
+.hud-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: rgba(15, 22, 35, 0.95);
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0; z-index: 10;
+}
+.hud-topbar-left { display: flex; align-items: center; gap: 0.6rem; }
+.hud-topbar-center { display: flex; align-items: center; }
+.hud-topbar-right { display: flex; align-items: center; }
+
+.hud-live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #22c55e; animation: as-pulse 1.5s infinite;
+}
+.hud-route {
+  font-size: 0.9rem; font-weight: 700; color: #f1f5f9;
+}
+.hud-meta {
+  font-size: 0.72rem; color: #64748b;
+}
+.hud-elapsed {
+  font-size: 1.1rem; font-weight: 700; color: #f59e0b;
+  letter-spacing: 0.05em;
+}
+.hud-exit-btn {
+  padding: 0.4rem 0.8rem; border-radius: 6px;
+  font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  background: #1e293b; color: #94a3b8; border: 1px solid #334155;
+  transition: all 0.2s;
+}
+.hud-exit-btn:hover { background: #334155; color: #f1f5f9; }
+
+/* ── HUD Body ── */
+.hud-body {
+  flex: 1; display: flex; overflow: hidden;
+}
+
+/* ── HUD Map ── */
+.hud-map-area {
+  flex: 1; position: relative; display: flex; flex-direction: column;
+}
+.hud-map {
+  flex: 1; width: 100%; background: #0a0e1a;
+}
+.hud-hz-cards {
+  position: absolute; bottom: 12px; left: 12px; right: 290px;
+  z-index: 500; pointer-events: none;
+}
+.hud-hz-cards .as-hz-cards {
+  pointer-events: auto;
+  background: rgba(10, 14, 26, 0.85);
+  backdrop-filter: blur(6px);
+  border-radius: 10px; padding: 0.4rem;
+}
+.hud-hz-cards .as-hz-card {
+  background: rgba(10, 14, 26, 0.7);
+}
+
+/* ── HUD Sidebar ── */
+.hud-sidebar {
+  width: 270px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(15, 22, 35, 0.95);
+  border-left: 1px solid #1e293b;
+  overflow-y: auto;
+}
+
+/* ── HUD Camera PIP ── */
+.hud-cam {
+  border-radius: 8px; overflow: hidden;
+  border: 2px solid #1e293b; background: #0a0e1a;
+}
+.hud-cam-video {
+  width: 100%; height: auto; display: block;
+  max-height: 160px; object-fit: cover;
+}
+
+/* ── HUD Alerts ── */
+.hud-alert {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.55rem 0.7rem; border-radius: 8px;
+  font-size: 0.75rem; font-weight: 700;
+  animation: hudAlertPulse 0.8s ease infinite;
+}
+.hud-alert.red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171; border: 1px solid #ef444488;
+}
+@keyframes hudAlertPulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+/* ── HUD Status Cards ── */
+.hud-status-card {
+  background: #111827; border: 1px solid #1e293b;
+  border-radius: 8px; padding: 0.55rem 0.65rem;
+}
+.hud-status-head {
+  font-size: 0.72rem; font-weight: 700; color: #f1f5f9;
+  margin-bottom: 0.35rem; border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.25rem;
+}
+.hud-status-row {
+  display: flex; justify-content: space-between;
+  font-size: 0.7rem; padding: 0.15rem 0;
+}
+.hud-status-row span:first-child { color: #64748b; }
+.hud-status-row span:last-child  { color: #f1f5f9; }
+
+/* ── HUD Road Sign Card ── */
+.hud-sign-card {
+  background: #111827; border: 1px solid #1e293b;
+  border-radius: 8px; padding: 0.55rem 0.65rem;
+  transition: all 0.3s;
+}
+.hud-sign-head {
+  display: flex; align-items: center; gap: 0.45rem;
+}
+.hud-sign-icon { font-size: 1.2rem; }
+.hud-sign-name {
+  font-size: 0.78rem; font-weight: 700; color: #f1f5f9;
+  text-transform: capitalize;
+}
+.hud-sign-conf { font-size: 0.62rem; color: #94a3b8; }
+.hud-sign-priority {
+  margin-left: auto; padding: 0.12rem 0.4rem; border-radius: 4px;
+  font-size: 0.58rem; font-weight: 700; color: #fff; text-transform: uppercase;
+}
+.hud-sign-instructions {
+  list-style: none; padding: 0; margin: 0.35rem 0 0;
+}
+.hud-sign-instructions li {
+  font-size: 0.68rem; color: #cbd5e1; padding: 0.15rem 0;
+  border-bottom: 1px solid #1e293b15;
+}
+
+/* ── HUD ESC Hint ── */
+.hud-esc-hint {
+  margin-top: auto; text-align: center;
+  font-size: 0.65rem; color: #475569; padding: 0.3rem;
+}
+.hud-esc-hint kbd {
+  padding: 1px 6px; border-radius: 3px;
+  background: #1e293b; border: 1px solid #334155;
+  font-size: 0.62rem; color: #94a3b8;
+}
+
+/* ── HUD Responsive ── */
+@media (max-width: 800px) {
+  .hud-sidebar { width: 220px; }
+  .hud-hz-cards { right: 230px; }
+}
+@media (max-width: 600px) {
+  .hud-body { flex-direction: column; }
+  .hud-sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; border-left: none; border-top: 1px solid #1e293b; max-height: 40vh; }
+  .hud-cam { max-width: 160px; }
+  .hud-hz-cards { right: 12px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
 /* ── Shift Score Modal ──────────────────────────────────────────────────── */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 .as-score-overlay {
