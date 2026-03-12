@@ -457,3 +457,86 @@
   .dp-chart-side   { width: 100%; flex-direction: row; flex-wrap: wrap; gap: 0.75rem; }
   .dp-gauge-wrap   { justify-content: flex-start; }
 }
+
+/* ── Shift Score History Card ──────────────────────────────────────────────── */
+.dp-shift-scores-card { padding-bottom: 0.5rem; }
+.dp-ss-head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.75rem;
+  padding: 1rem 1.2rem 0.75rem;
+}
+.dp-ss-summary {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+.dp-ss-sum-item { text-align: center; }
+.dp-ss-sum-val {
+  display: block; font-size: 1.15rem; font-weight: 700; color: #e2e8f0; line-height: 1.1;
+}
+.dp-ss-sum-lbl { font-size: 0.62rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.dp-ss-sum-divider { width: 1px; height: 28px; background: #1e293b; }
+
+.dp-ss-list {
+  display: flex; flex-direction: column;
+  border-top: 1px solid #1e293b;
+}
+.dp-ss-row {
+  border-bottom: 1px solid #1e293b;
+}
+.dp-ss-row-main {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.7rem 1.2rem; cursor: pointer;
+  transition: background 0.15s;
+}
+.dp-ss-row-main:hover { background: #1e293b44; }
+
+.dp-ss-route-info { flex: 1; min-width: 0; }
+.dp-ss-route {
+  display: block; font-size: 0.82rem; font-weight: 600; color: #e2e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dp-ss-meta {
+  display: block; font-size: 0.68rem; color: #64748b; margin-top: 0.15rem;
+}
+
+.dp-ss-score-pill {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0.35rem 0.75rem; border-radius: 8px;
+  border: 1px solid; min-width: 56px;
+}
+.dp-ss-score-num { font-size: 1.1rem; font-weight: 700; line-height: 1.1; }
+.dp-ss-score-tier { font-size: 0.56rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.dp-ss-chevron {
+  color: #475569; transition: transform 0.2s; flex-shrink: 0;
+}
+.dp-ss-chevron.open { transform: rotate(90deg); }
+
+/* Expanded detail */
+.dp-ss-detail {
+  padding: 0.5rem 1.2rem 0.85rem 2.4rem;
+  background: #0d1117;
+  border-top: 1px solid #1e293b;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.dp-ss-bars { display: flex; flex-direction: column; gap: 0.4rem; }
+.dp-ss-bar-row { display: flex; align-items: center; gap: 0.5rem; }
+.dp-ss-bar-label { font-size: 0.7rem; color: #94a3b8; min-width: 110px; }
+.dp-ss-bar-track {
+  flex: 1; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden;
+}
+.dp-ss-bar-fill {
+  height: 100%; border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.dp-ss-bar-val { font-size: 0.68rem; color: #64748b; min-width: 32px; text-align: right; }
+
+.dp-ss-route-name, .dp-ss-duration {
+  font-size: 0.66rem; color: #475569;
+}
+
+@media (max-width: 600px) {
+  .dp-ss-head { flex-direction: column; align-items: flex-start; }
+  .dp-ss-row-main { flex-wrap: wrap; }
+  .dp-ss-detail { padding-left: 1.2rem; }
+  .dp-ss-bar-label { min-width: 80px; }
+}
