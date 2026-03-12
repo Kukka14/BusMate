@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import random, math
 from flask import Blueprint, jsonify, request
 from ..utils.auth_helpers import token_required
+from ..models.driver_profile import DriverProfile
 
 driver_bp = Blueprint("driver", __name__)
 
@@ -209,12 +210,12 @@ def get_profile(current_user):
     latest    = history30[-1]
     bvi_score = latest["bvi_score"]
 
-    # ── pull real sessions from MongoDB if available ──────────────────────
+    # ── pull real sessions + driver profile from MongoDB ─────────────────
     total_sessions = 0
     recent_events  = []
+    from ..database import get_db
+    db = get_db()
     try:
-        from ..database import get_db
-        db = get_db()
         sessions = list(
             db.driving_sessions.find(
                 {"driver_id": uid, "status": "completed"},
@@ -270,6 +271,14 @@ def get_profile(current_user):
     else:
         risk_level, risk_label = "High",   "RISK ZONE"
 
+    # ── load driver-specific profile from driver_profiles collection ──────
+    dp_doc = db.driver_profiles.find_one({"user_id": uid})
+    if not dp_doc:
+        # Back-fill: create a blank profile for pre-existing driver accounts
+        dp_doc = DriverProfile.new_doc(uid)
+        db.driver_profiles.insert_one(dp_doc)
+    dp = DriverProfile(dp_doc)
+
     return jsonify({
         # identity
         "id":            uid,
@@ -279,9 +288,16 @@ def get_profile(current_user):
         "company":       current_user.company,
         "role":          current_user.role,
         "status":        "ONLINE",
-        "vehicle":       "Volvo BSR #402",
-        "route":         "Route 42 – Downtown Loop",
-        "shift":         "08:00 – 16:00",
+        # profile fields from driver_profiles collection (editable by driver)
+        "vehicle":       dp.vehicle  or "Volvo BSR #402",
+        "route":         dp.route    or "Route 42 – Downtown Loop",
+        "shift":         dp.shift    or "08:00 – 16:00",
+        "phone":         dp.phone,
+        "license_number":  dp.license_number,
+        "license_expiry":  dp.license_expiry,
+        "emergency_contact": dp.emergency_contact,
+        "photo_url":     dp.photo_url,
+        "experience_years": dp.experience_years,
 
         # stat cards
         "stats": {
@@ -328,6 +344,32 @@ def get_profile(current_user):
             {"label": "Safety Workshop",   "route": "Depot HQ · 10:00 – 12:00",  "date": "Tue"},
         ],
     }), 200
+
+
+# ── Update driver profile ─────────────────────────────────────────────────────
+@driver_bp.put("/profile")
+@token_required
+def update_profile(current_user):
+    """Allow a driver to update their own extended profile fields."""
+    uid  = str(current_user.id)
+    body = request.get_json(force=True, silent=True) or {}
+    from ..database import get_db
+    db = get_db()
+
+    allowed = {"vehicle", "route", "shift", "phone", "license_number",
+               "license_expiry", "emergency_contact", "photo_url", "experience_years"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        return jsonify({"error": "No valid fields provided"}), 400
+
+    update["updated_at"] = datetime.utcnow()
+    result = db.driver_profiles.update_one(
+        {"user_id": uid},
+        {"$set": update},
+        upsert=True,   # handles pre-existing accounts that have no profile doc yet
+    )
+    doc = db.driver_profiles.find_one({"user_id": uid})
+    return jsonify({"message": "Profile updated", "profile": DriverProfile(doc).to_dict()}), 200
 
 
 # ── Start / stop shift ────────────────────────────────────────────────────────

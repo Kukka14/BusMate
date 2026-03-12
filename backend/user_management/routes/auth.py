@@ -11,9 +11,15 @@ auth_bp = Blueprint("auth", __name__)
 @auth_bp.post("/register")
 def register():
     data = request.get_json()
-    # Accept role from request; default to 'driver' for new signups
     requested_role = data.get("role", "driver")
-    if requested_role not in ("admin", "driver"):
+    # Admin accounts cannot be self-registered through the public endpoint.
+    if requested_role == "admin":
+        return jsonify({
+            "error": "Admin accounts cannot be self-registered. "
+                     "Contact your system administrator."
+        }), 403
+    # Force to 'driver' for any unknown roles
+    if requested_role not in ("driver",):
         requested_role = "driver"
     result, status = UserService.register(
         username=data.get("username"),

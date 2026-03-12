@@ -136,29 +136,6 @@ export default function SignUpPage() {
           {error && <div className="sp-error" role="alert">{error}</div>}
 
           <form className="sp-form" onSubmit={handleSignUp} noValidate>
-
-            {/* Role selector */}
-            <div className="sp-field-group">
-              <label>Account Type</label>
-              <div className="sp-role-toggle">
-                <button
-                  type="button"
-                  className={`sp-role-btn ${role === "admin" ? "active" : ""}`}
-                  onClick={() => setRole("admin")}
-                >
-                  <span className="sp-role-tick">{role === "admin" && <IconTick />}</span>
-                  <IconAdmin /> Admin
-                </button>
-                <button
-                  type="button"
-                  className={`sp-role-btn ${role === "driver" ? "active" : ""}`}
-                  onClick={() => setRole("driver")}
-                >
-                  <span className="sp-role-tick">{role === "driver" && <IconTick />}</span>
-                  <IconDriver /> Driver
-                </button>
-              </div>
-            </div>
             <div className="sp-field-group">
               <label htmlFor="fullName">Full Name</label>
               <div className="sp-input-wrap">
