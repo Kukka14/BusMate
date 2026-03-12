@@ -29,7 +29,18 @@ from drowsiness_engine import DrowsinessEngine
 
 app = Flask(__name__)
 app.config.from_object(Config)
-CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"])
+CORS(
+    app,
+    origins=[
+        "http://localhost:5173", "http://localhost:5174",
+        "http://localhost:5175", "http://localhost:5176",
+        "http://127.0.0.1:5173", "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175", "http://127.0.0.1:5176",
+    ],
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Register user management blueprints (MongoDB — no table creation needed)

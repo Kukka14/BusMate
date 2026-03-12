@@ -3,9 +3,16 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    sourcemap: true,
+  },
   server: {
     port: 5174,
     strictPort: true,
+    headers: {
+      "Content-Security-Policy":
+        "script-src 'self' 'unsafe-eval' 'unsafe-inline'; object-src 'none';",
+    },
     proxy: {
       "/api": "http://localhost:5000",
       // MJPEG stream — needs buffering disabled so frames flow through immediately
