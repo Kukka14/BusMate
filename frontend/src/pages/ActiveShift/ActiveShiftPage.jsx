@@ -229,6 +229,12 @@ export default function ActiveShiftPage() {
   const [dwAlerts, setDwAlerts]       = useState(0);
   const [dwDrowsyFrames, setDwDrowsyFrames] = useState(0);
 
+  // ── Shift scoring accumulators ───────────────────────────────────────────
+  const bviSumRef    = useRef(0);
+  const bviCountRef  = useRef(0);
+  const cheatCountRef = useRef(0);
+  const [shiftScore, setShiftScore]     = useState(null); // score result to show in modal
+
   // ── Road Scene state ────────────────────────────────────────────────────
   const [rsResult, setRsResult]       = useState(null);
   const [rsLoading, setRsLoading]     = useState(false);
@@ -308,6 +314,15 @@ export default function ActiveShiftPage() {
       if (payload?.ok===false) return;
       setEmResult(payload);
       setEmFrames(c=>c+1);
+      // Accumulate BVI for scoring
+      if (payload?.bvi?.bvi_score != null) {
+        bviSumRef.current += payload.bvi.bvi_score;
+        bviCountRef.current += 1;
+      }
+      // Count cheating/distraction frames
+      if (payload?.objects?.cheating) {
+        cheatCountRef.current += 1;
+      }
     });
     return () => { if(emSendIvRef.current) clearInterval(emSendIvRef.current); socket.disconnect(); };
   }, []);
@@ -574,21 +589,69 @@ export default function ActiveShiftPage() {
     setShiftActive(true);
     setShiftStart(Date.now());
     setEmFrames(0); setDwFrames(0); setDwAlerts(0); setDwDrowsyFrames(0);
+    bviSumRef.current = 0; bviCountRef.current = 0; cheatCountRef.current = 0;
+    setShiftScore(null);
     // Auto-start hazard analysis + road scene demo analysis
     analyzeRoute();
     analyzeRsVideo();
   }
 
   async function handleEndShift() {
+    // Compute & send score before navigating away
+    const durationSec = shiftStart ? Math.round((Date.now() - shiftStart) / 1000) : 0;
+    const avgBvi = bviCountRef.current > 0 ? bviSumRef.current / bviCountRef.current : null;
+    const avgSceneHazard = rsResult?.frames?.length
+      ? rsResult.frames.reduce((s, f) => s + (f.hazard?.score || 0), 0) / rsResult.frames.length
+      : null;
+    const signLog = rsSignLog || [];
+    const normalSigns = signLog.filter(s => s.status === "Normal").length;
+    const damagedSigns = signLog.filter(s => s.status !== "Normal").length;
+
+    const metrics = {
+      schedule_id: scheduleInfo.schedule_id || "",
+      shift_time: scheduleInfo.shift_time || "",
+      date: scheduleInfo.date || "",
+      start_town: startTown,
+      end_town: endTown,
+      bus: busId,
+      route_name: routeName,
+      route: `${startTown} → ${endTown}`,
+      duration_sec: durationSec,
+      em_frames: emFrames,
+      avg_bvi: avgBvi != null ? Math.round(avgBvi * 1000) / 1000 : null,
+      cheat_frames: cheatCountRef.current,
+      dw_frames: dwFrames,
+      dw_drowsy_frames: dwDrowsyFrames,
+      dw_alerts: dwAlerts,
+      signs_detected: normalSigns,
+      damaged_signs: damagedSigns,
+      avg_scene_hazard: avgSceneHazard != null ? Math.round(avgSceneHazard * 100) / 100 : null,
+    };
+
     try {
-      await fetch(`${API}/api/driver/shift/stop`,{method:"POST",headers:{Authorization:`Bearer ${token}`}});
+      const res = await fetch(`${API}/api/driver/shift/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(metrics),
+      });
+      const scoreData = await res.json();
+      if (res.ok) setShiftScore(scoreData);
+    } catch {}
+
+    try {
+      await fetch(`${API}/api/driver/shift/stop`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     } catch {}
     // Stop demo video
-    fetch("/stop_demo_video").catch(()=>{});
+    fetch("/stop_demo_video").catch(() => {});
     setShiftActive(false); setShiftStart(null);
     setEmResult(null); setDwResult(null);
     setRsSignInfo(null); setRsSignLog([]);
     setHzPlaying(false);
+    // Don't navigate yet — modal will show
+  }
+
+  function handleScoreClose() {
+    setShiftScore(null);
     navigate("/driver/schedule");
   }
 
@@ -989,6 +1052,40 @@ export default function ActiveShiftPage() {
 
 
       </main>
+
+      {/* ── SHIFT SCORE MODAL ─────────────────────────────────────── */}
+      {shiftScore && (
+        <div className="as-score-overlay" onClick={handleScoreClose}>
+          <div className="as-score-modal" onClick={e => e.stopPropagation()}>
+            <h2 className="as-score-title">Shift Complete</h2>
+
+            <div className={`as-score-ring ${shiftScore.tier?.replace(/\s+/g, "-").toLowerCase()}`}>
+              <span className="as-score-number">{shiftScore.total_score}</span>
+              <span className="as-score-max">/ 100</span>
+            </div>
+            <div className="as-score-tier">{shiftScore.tier}</div>
+
+            <div className="as-score-bars">
+              {shiftScore.components && Object.entries(shiftScore.components).map(([key, comp]) => (
+                <div key={key} className="as-score-bar-row">
+                  <span className="as-score-bar-label">{comp.label}</span>
+                  <div className="as-score-bar-track">
+                    <div
+                      className="as-score-bar-fill"
+                      style={{ width: `${(comp.score / comp.max) * 100}%` }}
+                    />
+                  </div>
+                  <span className="as-score-bar-val">{comp.score}/{comp.max}</span>
+                </div>
+              ))}
+            </div>
+
+            <button className="as-score-close-btn" onClick={handleScoreClose}>
+              Done — Back to Schedule
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .as-vehicle-icon {

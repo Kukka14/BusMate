@@ -164,7 +164,15 @@ export default function SchedulePage() {
                         <IcoPlay /> START SHIFT
                       </button>
                     ) : s.status === "Completed" ? (
-                      <span className="sch-completed-badge"><IcoCheck /> Done</span>
+                      <div className="sch-completed-info">
+                        <span className="sch-completed-badge"><IcoCheck /> Done</span>
+                        {s.score?.total_score != null && (
+                          <div className="sch-score-badge" data-tier={s.score.tier?.toLowerCase().replace(/\s+/g, "-")}>
+                            <span className="sch-score-num">{s.score.total_score}</span>
+                            <span className="sch-score-label">{s.score.tier}</span>
+                          </div>
+                        )}
+                      </div>
                     ) : null}
                   </div>
                 </div>
