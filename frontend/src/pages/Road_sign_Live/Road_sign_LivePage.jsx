@@ -52,6 +52,10 @@ const IcoCapture  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
+// Number of consecutive 400 ms poll results that must return "Normal" before
+// the banner, overlay chip, metrics and audio fire (≈ 1.2 s of stable detection)
+const CONFIRM_THRESHOLD = 3;
+
 export default function Road_sign_LivePage() {
   const navigate = useNavigate();
   const token    = localStorage.getItem("token");
@@ -63,14 +67,16 @@ export default function Road_sign_LivePage() {
   const [log,          setLog]          = useState([]);     // detection history
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [streamError,  setStreamError]  = useState(false);
+  const [confirmed,    setConfirmed]    = useState(false); // true once ≥ CONFIRM_THRESHOLD consecutive Normal frames
   // Unique URL per mount forces the browser to make a fresh HTTP request
   // instead of reusing the cached last-frame from a previous MJPEG session.
   const [streamSrc] = useState(() => `/road-sign/video_feed?t=${Date.now()}`);
 
   // Refs to avoid stale closures inside the polling interval
-  const audioEnabledRef = useRef(true);
-  const lastSpokenRef   = useRef(null);
-  const pollRef         = useRef(null);
+  const audioEnabledRef      = useRef(true);
+  const lastSpokenRef        = useRef(null);
+  const pollRef              = useRef(null);
+  const consecutiveNormalRef = useRef(0); // counts back-to-back Normal poll results
 
   // Keep audioEnabledRef in sync with state
   useEffect(() => { audioEnabledRef.current = audioEnabled; }, [audioEnabled]);
@@ -94,8 +100,12 @@ export default function Road_sign_LivePage() {
           setInfo(hasSign ? data : null);
 
           if (hasSign && data.status === "Normal") {
-            // Only trigger alert when the sign name changes
-            if (lastSpokenRef.current !== data.class_name) {
+            consecutiveNormalRef.current += 1;
+            const isConfirmed = consecutiveNormalRef.current >= CONFIRM_THRESHOLD;
+            setConfirmed(isConfirmed);
+
+            // Only trigger audio + log once threshold is reached AND sign name changes
+            if (isConfirmed && lastSpokenRef.current !== data.class_name) {
               lastSpokenRef.current = data.class_name;
 
               if (audioEnabledRef.current) {
@@ -116,9 +126,11 @@ export default function Road_sign_LivePage() {
                 ...prev.slice(0, 29), // keep last 30 entries
               ]);
             }
-          } else if (!hasSign) {
-            // Reset so next appearance of same sign triggers alert again
-            lastSpokenRef.current = null;
+          } else {
+            // Not Normal (or no sign) — reset consecutive counter immediately
+            consecutiveNormalRef.current = 0;
+            setConfirmed(false);
+            if (!hasSign) lastSpokenRef.current = null;
           }
         })
         .catch(() => {});
@@ -177,9 +189,9 @@ export default function Road_sign_LivePage() {
               {audioEnabled ? "🔊 Audio ON" : "🔇 Audio OFF"}
             </button>
 
-            <div className={`rsl-status-pill ${info ? "active" : ""}`}>
+            <div className={`rsl-status-pill ${info?.status === "Normal" && confirmed ? "active" : ""}`}>
               <span className="rsl-status-dot" />
-              {info ? "DETECTING" : "SCANNING…"}
+              {info?.status === "Normal" && confirmed ? "DETECTING" : "SCANNING…"}
             </div>
           </div>
         </header>
@@ -187,23 +199,13 @@ export default function Road_sign_LivePage() {
         <div className="rsl-content">
 
           {/* ── Normal sign alert banner ── */}
-          {info?.status === "Normal" && (
+          {info?.status === "Normal" && confirmed && (
             <div className="rsl-alert-banner normal">
-              <IcoRoadSign />
+              🚦
               <strong>ROAD SIGN DETECTED:</strong>&nbsp;
               {info.class_name.replace(/_/g, " ")}&nbsp;
               <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
               <span className="rsl-audio-hint">🔊 Audio alert triggered</span>
-            </div>
-          )}
-
-          {/* ── Damaged / unclear sign banner ── */}
-          {info?.status && info.status !== "Normal" && (
-            <div className="rsl-alert-banner warn">
-              <IcoAlert />
-              <strong>{info.status.toUpperCase()}:</strong>&nbsp;
-              {info.class_name.replace(/_/g, " ")}&nbsp;
-              <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
             </div>
           )}
 
@@ -214,7 +216,7 @@ export default function Road_sign_LivePage() {
               <div className="rsl-card-head">
                 <div>
                   <span className="rsl-card-title">Live Camera Feed</span>
-                  <span className="rsl-card-hint">YOLO detection with bounding boxes drawn server-side (green = Normal, red = Damaged)</span>
+                  <span className="rsl-card-hint">Bounding box and label shown only for high-confidence Normal (🟢) signs</span>
                 </div>
                 <div className="rsl-head-right">
                   <span className="rsl-live-badge">
@@ -239,8 +241,8 @@ export default function Road_sign_LivePage() {
                   </div>
                 )}
 
-                {/* Overlay chip showing current detection info */}
-                {info?.class_name && (
+                {/* Overlay chip — only shown after CONFIRM_THRESHOLD consecutive Normal frames */}
+                {info?.status === "Normal" && confirmed && (
                   <div
                     className="rsl-overlay-chip"
                     style={{ borderColor: statusColor(info.status), color: statusColor(info.status) }}
@@ -280,20 +282,20 @@ export default function Road_sign_LivePage() {
                 <div className="rsl-card-head">
                   <div>
                     <span className="rsl-card-title">Current Detection</span>
-                    <span className="rsl-card-hint">Live YOLO output</span>
+                <span className="rsl-card-hint">High-confidence Normal signs only</span>
                   </div>
                   <span
                     className="rsl-card-badge"
                     style={{
-                      background: statusColor(info?.status) + "22",
-                      color:      statusColor(info?.status),
+                      background: (info?.status === "Normal" && confirmed) ? statusColor("Normal") + "22" : undefined,
+                      color:      (info?.status === "Normal" && confirmed) ? statusColor("Normal")        : undefined,
                     }}
                   >
-                    {info?.status || "No Sign"}
+                    {info?.status === "Normal" && confirmed ? "Normal" : "No Sign"}
                   </span>
                 </div>
 
-                {info?.class_name ? (
+                {info?.status === "Normal" && confirmed ? (
                   <div className="rsl-det-body">
                     <div className="rsl-sign-icon">🚦</div>
                     <div className="rsl-det-name">{info.class_name.replace(/_/g, " ")}</div>
