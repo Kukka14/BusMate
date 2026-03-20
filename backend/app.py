@@ -290,6 +290,11 @@ def compute_bvi_for_session(session_id):
 # (Vite proxy strips the /road-sign prefix so the paths arrive here as-is)
 # =============================================================================
 
+
+from sahi import AutoDetectionModel
+from sahi.predict import get_sliced_prediction
+
+
 _RS_W            = Path(__file__).resolve().parent / "Road_sign_detection" / "Weight"
 _RS_IMG_SIZE     = 224
 _RS_MARGIN       = 0.15
@@ -303,6 +308,7 @@ _rs_detector   = None
 _rs_mobilenet  = None
 _rs_custom_mdl = None
 _rs_yolo_clf   = None
+_rs_sahi_model = None
 _rs_idx2class: dict = {}
 
 
@@ -322,6 +328,14 @@ def _rs_init():
 
     try:
         _rs_detector = YOLO(str(det_pt))
+
+        # SAHI wrapper for small object detection
+        global _rs_sahi_model
+        _rs_sahi_model = AutoDetectionModel.from_pretrained(
+            model_type="yolov8",
+            model_path=str(det_pt),
+            confidence_threshold=0.25,
+        )
 
         with open(map_json) as _f:
             _ci = json.load(_f)
@@ -438,18 +452,79 @@ def rs_process_frame(frame: np.ndarray):
     if not _rs_ready:
         return None
     orig    = frame.copy()
-    res_det = _rs_detector(frame, conf=0.25, verbose=False)
-    boxes   = res_det[0].boxes
-    if len(boxes) == 0:
+    # Run normal YOLO on full frame (catches big signs)
+    full_result = _rs_detector(frame, conf=0.25, verbose=False)
+    full_boxes = full_result[0].boxes
+
+    # Run SAHI on sliced frame (catches small/distant signs)
+    sahi_result = get_sliced_prediction(
+        frame,
+        _rs_sahi_model,
+        slice_height=320,
+        slice_width=320,
+        overlap_height_ratio=0.2,
+        overlap_width_ratio=0.2,
+    )
+    sahi_boxes = sahi_result.object_prediction_list
+
+    # Build combined candidate list
+    all_candidates = []
+
+    # Add full-frame YOLO detections
+    for box in full_boxes:
+        coords = box.xyxy[0].cpu().numpy().astype(int)
+        all_candidates.append({
+            "x1": coords[0], "y1": coords[1],
+            "x2": coords[2], "y2": coords[3],
+            "conf": float(box.conf[0])
+        })
+
+    # Add SAHI detections
+    for box in sahi_boxes:
+        all_candidates.append({
+            "x1": int(box.bbox.minx), "y1": int(box.bbox.miny),
+            "x2": int(box.bbox.maxx), "y2": int(box.bbox.maxy),
+            "conf": float(box.score.value)
+        })
+
+    # If nothing detected at all
+    if len(all_candidates) == 0:
         return None
 
-    best = max(boxes, key=lambda b: float(b.conf[0]))
-    x1, y1, x2, y2 = best.xyxy[0].cpu().numpy().astype(int)
+    # Pick highest confidence from combined list
+    best = max(all_candidates, key=lambda b: b["conf"])
+    x1, y1 = best["x1"], best["y1"]
+    x2, y2 = best["x2"], best["y2"]
+    
     w, h   = x2 - x1, y2 - y1
     mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
     x1, y1 = max(0, x1 - mx), max(0, y1 - my)
     x2, y2 = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
     crop    = frame[y1:y2, x1:x2]
+
+    # Multi-version enhancement
+    versions = [
+        ("Original", crop),
+        ("Sharpen",  _rs_sharpen(crop)),
+        ("CLAHE",    _rs_clahe(crop)),
+    ]
+
+    # Run ensemble on each version, pick best
+    best_version_name = None
+    best_crop         = None
+    best_class        = None
+    best_conf         = -1.0
+
+    for ver_name, ver_img in versions:
+        cls, conf = _rs_ensemble(ver_img)
+        if conf > best_conf:
+            best_conf         = conf
+            best_class        = cls
+            best_crop         = ver_img
+            best_version_name = ver_name
+
+    class_name = best_class
+    confidence = best_conf
 
     candidates = [(c, *_rs_ensemble(c)) for c in [crop, _rs_sharpen(crop), _rs_clahe(crop)]]
     best_crop, class_name, confidence = max(candidates, key=lambda v: v[2])
@@ -669,6 +744,162 @@ def rs_capture_webcam():
 @app.route("/stop_camera")
 def rs_stop_camera_route():
     _rs_stop_camera()
+    return jsonify({"stopped": True})
+
+
+# ── Road-sign video-file streaming ───────────────────────────────────────────
+_rs_video_lock        = threading.Lock()
+_rs_video_cap         = None
+_rs_video_path        = None
+_rs_video_running     = False
+_rs_video_latest_ann  = None
+_rs_video_latest_info: dict = {}
+
+
+def _rs_video_worker():
+    global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
+    global _rs_video_cap
+    if _rs_video_cap is None:
+        _rs_video_running = False
+        return
+    fps = _rs_video_cap.get(cv2.CAP_PROP_FPS) or 30.0
+    delay = max(0.01, 1.0 / fps)
+    while _rs_video_running:
+        with _rs_video_lock:
+            cap = _rs_video_cap
+        if cap is None:
+            break
+        ret, frame = cap.read()
+        if not ret:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
+            continue
+        ann = frame.copy()
+        if _rs_ready:
+            res_det = _rs_detector(frame, conf=0.25, verbose=False)
+            boxes = res_det[0].boxes
+            info_list = []
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                w, h = x2 - x1, y2 - y1
+                mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
+                x1m, y1m = max(0, x1 - mx), max(0, y1 - my)
+                x2m, y2m = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
+                crop = frame[y1m:y2m, x1m:x2m]
+                if crop.size == 0:
+                    continue
+                try:
+                    cls, conf = _rs_ensemble(crop)
+                except Exception:
+                    cls, conf = "Road Sign", float(box.conf[0])
+                status = (
+                    "Normal"           if conf >= _RS_NORM_THR else
+                    "Damaged"          if conf <  _RS_DMG_THR  else
+                    "Possibly unclear"
+                )
+                color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
+                cv2.rectangle(ann, (x1m, y1m), (x2m, y2m), color, 2)
+                lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
+                tw  = len(lbl) * 9
+                cv2.rectangle(ann, (x1m, max(0, y1m - 24)), (x1m + tw, y1m), (0, 0, 0), -1)
+                cv2.putText(ann, lbl, (x1m + 3, max(14, y1m - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                info_list.append({"class_name": cls, "confidence": conf, "status": status})
+            _rs_video_latest_info = {"detections": info_list} if info_list else {}
+        _rs_video_latest_ann = ann
+        time.sleep(delay)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+
+
+def _rs_video_gen_mjpeg():
+    while _rs_video_running:
+        frame = _rs_video_latest_ann
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+               + buf.tobytes() + b"\r\n")
+        time.sleep(0.033)
+
+
+@app.route("/upload_video_stream", methods=["POST"])
+def rs_upload_video_stream():
+    global _rs_video_running, _rs_video_cap, _rs_video_path
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    # Stop any existing stream
+    if _rs_video_running:
+        _rs_video_running = False
+        time.sleep(0.15)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+    if _rs_video_path and os.path.exists(_rs_video_path):
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+        file.save(tmp.name)
+        _rs_video_path = tmp.name
+
+    cap = cv2.VideoCapture(_rs_video_path)
+    if not cap.isOpened():
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+        _rs_video_path = None
+        return jsonify({"error": "Could not open video"}), 400
+
+    with _rs_video_lock:
+        _rs_video_cap = cap
+    _rs_video_running = True
+    threading.Thread(target=_rs_video_worker, daemon=True).start()
+    time.sleep(0.3)
+    return jsonify({"started": True})
+
+
+@app.route("/video_stream_feed")
+def rs_video_stream_feed():
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    if not _rs_video_running:
+        return jsonify({"error": "Video stream not active"}), 400
+    resp = Response(_rs_video_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"]     = "no-cache, no-store, must-revalidate"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/stop_video_stream")
+def rs_stop_video_stream():
+    global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
+    global _rs_video_cap, _rs_video_path
+    _rs_video_running = False
+    time.sleep(0.15)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+    if _rs_video_path and os.path.exists(_rs_video_path):
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+    _rs_video_path = None
+    _rs_video_latest_ann = None
+    _rs_video_latest_info = {}
     return jsonify({"stopped": True})
 
 

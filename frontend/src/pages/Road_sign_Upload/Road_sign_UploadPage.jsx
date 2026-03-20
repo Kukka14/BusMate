@@ -29,6 +29,8 @@ export default function Road_sign_UploadPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
   const [liveInfo, setLiveInfo] = useState(null);
+  const [videoStreamOn, setVideoStreamOn] = useState(false);
+  const [videoStreamSrc, setVideoStreamSrc] = useState("");
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -36,6 +38,8 @@ export default function Road_sign_UploadPage() {
     setPreview(null);
     setError("");
     setLiveInfo(null);
+    setVideoStreamOn(false);
+    setVideoStreamSrc("");
   }, [mode]);
 
   // ── Webcam: poll detection info + stop camera on mode leave ────────────────
@@ -55,6 +59,14 @@ export default function Road_sign_UploadPage() {
     };
   }, [mode]);
 
+  // ── Video stream: stop stream on mode leave / unmount ─────────────────────
+  useEffect(() => {
+    if (mode !== "video") return;
+    return () => {
+      fetch("/road-sign/stop_video_stream").catch(() => {});
+    };
+  }, [mode]);
+
   // ── File change ────────────────────────────────────────────────────────────
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -70,6 +82,19 @@ export default function Road_sign_UploadPage() {
     setError("");
     setLoading(true);
     try {
+      if (mode === "video") {
+        const body = new FormData();
+        body.append("file", file);
+        const res  = await fetch("/road-sign/upload_video_stream", { method: "POST", body });
+        const data = await res.json();
+
+        if (!res.ok || data.error) { setError(data.error || "Processing failed."); return; }
+
+        setVideoStreamSrc(`/road-sign/video_stream_feed?t=${Date.now()}`);
+        setVideoStreamOn(true);
+        return;
+      }
+
       const body = new FormData();
       body.append("file", file);
       body.append("input_type", mode);
@@ -80,11 +105,7 @@ export default function Road_sign_UploadPage() {
       if (!res.ok || data.error)  { setError(data.error || "Processing failed."); return; }
       if (!data.detected)         { setError(data.message || "No road sign detected."); return; }
 
-      if (mode === "video") {
-        navigate("/road-sign/video-results", { state: data });
-      } else {
-        navigate("/road-sign/results", { state: data });
-      }
+      navigate("/road-sign/results", { state: data });
     } catch {
       setError("Network error — is the road-sign server running on port 5001?");
     } finally {
@@ -267,13 +288,46 @@ export default function Road_sign_UploadPage() {
 
             {error && <div className="rs-error">{error}</div>}
 
-            <button type="submit" className="rs-btn" disabled={loading}>
-              {loading ? (
-                <><span className="rs-spinner" /> Processing…</>
-              ) : (
-                "🔍 Process"
-              )}
-            </button>
+            {!videoStreamOn ? (
+              <button type="submit" className="rs-btn" disabled={loading}>
+                {loading ? (
+                  <><span className="rs-spinner" /> Starting stream…</>
+                ) : (
+                  "▶ Start Live Stream"
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rs-btn"
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await fetch("/road-sign/stop_video_stream");
+                  } catch {}
+                  setVideoStreamOn(false);
+                  setVideoStreamSrc("");
+                  setLoading(false);
+                }}
+              >
+                ⏹ Stop Stream
+              </button>
+            )}
+
+            {videoStreamOn && (
+              <div className="rs-webcam-wrap" style={{ marginTop: "1rem" }}>
+                <div className="rs-stream-container">
+                  <img
+                    src={videoStreamSrc}
+                    alt="Live road-sign detection feed"
+                    className="rs-stream"
+                  />
+                </div>
+                <p className="rs-note">
+                  Live stream shows road-sign detections overlaid on the video.
+                </p>
+              </div>
+            )}
           </form>
         )}
       </div> {/* rs-card */}
