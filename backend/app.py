@@ -310,7 +310,7 @@ def _rs_init():
     """Load all road-sign models once at startup; no-op if weights are missing."""
     global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class
 
-    det_pt   = _RS_W / "Detect_Model/RoadSignDetector_v22/weights/best.pt"
+    det_pt   = _RS_W / "Detect_Model/Yolo/best.pt"
     mob_h5   = _RS_W / "mobilenet_weights/Mobilenetv2_Retrain_weight/phase2_epoch_015.weights.h5"
     cst_h5   = _RS_W / "Custom_model2_weights/epoch_026.weights.h5"
     clf_pt   = _RS_W / "YOLO8/YOLOv8_Classifier/weights/best.pt"
