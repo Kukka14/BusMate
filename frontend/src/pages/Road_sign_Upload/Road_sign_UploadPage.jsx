@@ -31,6 +31,8 @@ export default function Road_sign_UploadPage() {
   const [liveInfo, setLiveInfo] = useState(null);
   const [videoStreamOn, setVideoStreamOn] = useState(false);
   const [videoStreamSrc, setVideoStreamSrc] = useState("");
+  const [videoInfo, setVideoInfo] = useState(null);
+  const [videoLog, setVideoLog] = useState([]);
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -38,6 +40,8 @@ export default function Road_sign_UploadPage() {
     setPreview(null);
     setError("");
     setLiveInfo(null);
+    setVideoInfo(null);
+    setVideoLog([]);
     setVideoStreamOn(false);
     setVideoStreamSrc("");
   }, [mode]);
@@ -58,6 +62,35 @@ export default function Road_sign_UploadPage() {
       fetch("/road-sign/stop_camera").catch(() => {});
     };
   }, [mode]);
+
+  // ── Video stream: poll detection info + maintain log
+  useEffect(() => {
+    if (mode !== "video" || !videoStreamOn) return;
+
+    const id = setInterval(() => {
+      fetch("/road-sign/get_video_detection_info")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.class_name) {
+            setVideoInfo(data);
+            setVideoLog((prev) => {
+              const next = [{
+                class_name: data.class_name,
+                confidence: data.confidence,
+                status:     data.status,
+                time:       new Date().toLocaleTimeString(),
+              }, ...prev];
+              return next.slice(0, 30);
+            });
+          } else {
+            setVideoInfo(null);
+          }
+        })
+        .catch(() => {});
+    }, 400);
+
+    return () => clearInterval(id);
+  }, [mode, videoStreamOn]);
 
   // ── Video stream: stop stream on mode leave / unmount ─────────────────────
   useEffect(() => {
@@ -315,17 +348,64 @@ export default function Road_sign_UploadPage() {
             )}
 
             {videoStreamOn && (
-              <div className="rs-webcam-wrap" style={{ marginTop: "1rem" }}>
-                <div className="rs-stream-container">
-                  <img
-                    src={videoStreamSrc}
-                    alt="Live road-sign detection feed"
-                    className="rs-stream"
-                  />
+              <div className="rs-video-grid" style={{ marginTop: "1rem" }}>
+                <div className="rs-video-stream-col">
+                  <div className="rs-stream-container">
+                    <img
+                      src={videoStreamSrc}
+                      alt="Live road-sign detection feed"
+                      className="rs-stream"
+                    />
+                  </div>
+                  <p className="rs-note">
+                    Live stream shows road-sign detections overlaid on the video.
+                  </p>
                 </div>
-                <p className="rs-note">
-                  Live stream shows road-sign detections overlaid on the video.
-                </p>
+
+                <div className="rs-video-info-col">
+                  <div className="rs-card rs-mini-card">
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Current Detection</span>
+                    </div>
+                    {videoInfo ? (
+                      <div className="rs-det-body">
+                        <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
+                        <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: statusColor(videoInfo.status) }}
+                        >
+                          {videoInfo.status}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No detection yet</div>
+                    )}
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Detection Log</span>
+                      <span className="rs-card-hint">Last 30</span>
+                    </div>
+                    <div className="rs-log-list">
+                      {videoLog.length > 0 ? (
+                        videoLog.map((entry, idx) => (
+                          <div key={idx} className="rs-log-row">
+                            <span className="rs-log-time">{entry.time}</span>
+                            <span className="rs-log-name">{entry.class_name.replace(/_/g, " ")}</span>
+                            <span className="rs-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                            <span className="rs-log-status" style={{ color: statusColor(entry.status) }}>
+                              {entry.status}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rs-no-data">No sign detections yet</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </form>

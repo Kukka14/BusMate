@@ -804,7 +804,17 @@ def _rs_video_worker():
                 cv2.putText(ann, lbl, (x1m + 3, max(14, y1m - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
                 info_list.append({"class_name": cls, "confidence": conf, "status": status})
-            _rs_video_latest_info = {"detections": info_list} if info_list else {}
+
+            if info_list:
+                best_walk = max(info_list, key=lambda i: i["confidence"])
+                _rs_video_latest_info = {
+                    "class_name": best_walk["class_name"],
+                    "confidence": best_walk["confidence"],
+                    "status":     best_walk["status"],
+                    "detections": info_list,
+                }
+            else:
+                _rs_video_latest_info = {}
         _rs_video_latest_ann = ann
         time.sleep(delay)
     with _rs_video_lock:
@@ -880,6 +890,11 @@ def rs_video_stream_feed():
     resp.headers["X-Accel-Buffering"] = "no"
     resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
+
+
+@app.route("/get_video_detection_info")
+def rs_get_video_detection_info():
+    return jsonify(_rs_video_latest_info)
 
 
 @app.route("/stop_video_stream")
