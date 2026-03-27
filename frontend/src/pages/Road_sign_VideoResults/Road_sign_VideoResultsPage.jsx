@@ -34,6 +34,11 @@ function parseConf(c) {
   return parseFloat(String(c).replace("%", "")) / 100 || 0;
 }
 
+function formatDistance(m) {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+}
+
 export default function Road_sign_VideoResultsPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -190,6 +195,9 @@ export default function Road_sign_VideoResultsPage() {
                   {r.status}
                 </span>
               )}
+              <span className="rvr-frame-status" style={{ color: "#0ea5e9" }}>
+                Distance: {formatDistance(r.estimated_distance_m)}
+              </span>
 
               {/* Mini confidence bar */}
               <div className="rvr-frame-bar-wrap">

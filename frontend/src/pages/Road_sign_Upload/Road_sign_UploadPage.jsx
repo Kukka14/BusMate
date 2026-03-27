@@ -16,6 +16,11 @@ const statusColor = (s) => {
   return "#f59e0b";
 };
 
+const formatDistance = (m) => {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+};
+
 export default function Road_sign_UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -78,6 +83,7 @@ export default function Road_sign_UploadPage() {
                 class_name: data.class_name,
                 confidence: data.confidence,
                 status:     data.status,
+                estimated_distance_m: data.estimated_distance_m,
                 time:       new Date().toLocaleTimeString(),
               }, ...prev];
               return next.slice(0, 30);
@@ -371,6 +377,9 @@ export default function Road_sign_UploadPage() {
                       <div className="rs-det-body">
                         <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
                         <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          {formatDistance(videoInfo.estimated_distance_m)}
+                        </div>
                         <div
                           className="rs-det-status"
                           style={{ color: statusColor(videoInfo.status) }}
@@ -395,6 +404,7 @@ export default function Road_sign_UploadPage() {
                             <span className="rs-log-time">{entry.time}</span>
                             <span className="rs-log-name">{entry.class_name.replace(/_/g, " ")}</span>
                             <span className="rs-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                            <span className="rs-log-conf">{formatDistance(entry.estimated_distance_m)}</span>
                             <span className="rs-log-status" style={{ color: statusColor(entry.status) }}>
                               {entry.status}
                             </span>
