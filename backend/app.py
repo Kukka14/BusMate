@@ -487,47 +487,110 @@ def rs_process_frame(frame: np.ndarray):
             "conf": float(box.score.value)
         })
 
-    # If nothing detected at all
     if len(all_candidates) == 0:
         return None
 
-    # Pick highest confidence from combined list
-    best = max(all_candidates, key=lambda b: b["conf"])
-    x1, y1 = best["x1"], best["y1"]
-    x2, y2 = best["x2"], best["y2"]
-    
-    w, h   = x2 - x1, y2 - y1
-    mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
-    x1, y1 = max(0, x1 - mx), max(0, y1 - my)
-    x2, y2 = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
-    crop    = frame[y1:y2, x1:x2]
+    # ── Deduplicate overlapping boxes (IoU > 0.5 = same sign) ──
+    def _iou(a, b):
+        ix1 = max(a["x1"], b["x1"])
+        iy1 = max(a["y1"], b["y1"])
+        ix2 = min(a["x2"], b["x2"])
+        iy2 = min(a["y2"], b["y2"])
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        if inter == 0:
+            return 0.0
+        area_a = (a["x2"]-a["x1"]) * (a["y2"]-a["y1"])
+        area_b = (b["x2"]-b["x1"]) * (b["y2"]-b["y1"])
+        return inter / (area_a + area_b - inter)
 
-    # Multi-version enhancement
-    versions = [
-        ("Original", crop),
-        ("Sharpen",  _rs_sharpen(crop)),
-        ("CLAHE",    _rs_clahe(crop)),
-    ]
+    # Sort by confidence descending
+    all_candidates.sort(key=lambda b: b["conf"], reverse=True)
 
-    # Run ensemble on each version, pick best
-    best_version_name = None
-    best_crop         = None
-    best_class        = None
-    best_conf         = -1.0
+    # Keep boxes that dont overlap with already kept boxes
+    kept = []
+    for cand in all_candidates:
+        if all(_iou(cand, k) < 0.5 for k in kept):
+            kept.append(cand)
 
-    for ver_name, ver_img in versions:
-        cls, conf = _rs_ensemble(ver_img)
-        if conf > best_conf:
-            best_conf         = conf
-            best_class        = cls
-            best_crop         = ver_img
-            best_version_name = ver_name
+    # ── Process EACH unique detected sign ──
+    sign_results = []
 
-    class_name = best_class
-    confidence = best_conf
+    for det in kept:
+        x1, y1 = det["x1"], det["y1"]
+        x2, y2 = det["x2"], det["y2"]
 
-    candidates = [(c, *_rs_ensemble(c)) for c in [crop, _rs_sharpen(crop), _rs_clahe(crop)]]
-    best_crop, class_name, confidence = max(candidates, key=lambda v: v[2])
+        w, h   = x2 - x1, y2 - y1
+        mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
+        x1, y1 = max(0, x1 - mx), max(0, y1 - my)
+        x2, y2 = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
+        crop   = frame[y1:y2, x1:x2]
+
+        if crop.size == 0:
+            continue
+
+        # Multi-version + ensemble on each sign
+        versions = [
+            ("Original", crop),
+            ("Sharpen",  _rs_sharpen(crop)),
+            ("CLAHE",    _rs_clahe(crop)),
+        ]
+
+        best_conf  = -1.0
+        best_class = None
+        best_crop  = None
+
+        for ver_name, ver_img in versions:
+            cls, conf = _rs_ensemble(ver_img)
+            if conf > best_conf:
+                best_conf  = conf
+                best_class = cls
+                best_crop  = ver_img
+
+        sign_results.append({
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "class_name": best_class,
+            "confidence": best_conf,
+            "crop":       best_crop,
+        })
+
+    if not sign_results:
+        return None
+
+    # ── For output use the highest confidence sign as primary ──
+    primary = max(sign_results, key=lambda s: s["confidence"])
+    class_name = primary["class_name"]
+    confidence = primary["confidence"]
+    best_crop  = primary["crop"]
+    x1 = primary["x1"]
+    y1 = primary["y1"]
+    x2 = primary["x2"]
+    y2 = primary["y2"]
+    # # Multi-version enhancement
+    # versions = [
+    #     ("Original", crop),
+    #     ("Sharpen",  _rs_sharpen(crop)),
+    #     ("CLAHE",    _rs_clahe(crop)),
+    # ]
+
+    # # Run ensemble on each version, pick best
+    # best_version_name = None
+    # best_crop         = None
+    # best_class        = None
+    # best_conf         = -1.0
+
+    # for ver_name, ver_img in versions:
+    #     cls, conf = _rs_ensemble(ver_img)
+    #     if conf > best_conf:
+    #         best_conf         = conf
+    #         best_class        = cls
+    #         best_crop         = ver_img
+    #         best_version_name = ver_name
+
+    # class_name = best_class
+    # confidence = best_conf
+
+    # candidates = [(c, *_rs_ensemble(c)) for c in [crop, _rs_sharpen(crop), _rs_clahe(crop)]]
+    # best_crop, class_name, confidence = max(candidates, key=lambda v: v[2])
 
     status = (
         "Normal"           if confidence >= _RS_NORM_THR else
@@ -537,9 +600,22 @@ def rs_process_frame(frame: np.ndarray):
     color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
 
     det = orig.copy()
-    cv2.rectangle(det, (x1, y1), (x2, y2), color, 3)
-    cv2.putText(det, f"{class_name.replace('_', ' ')} ({confidence:.2f})",
-                (x1, max(14, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+
+    # Draw ALL detected signs on the frame
+    for sign in sign_results:
+        s_color = (0, 255, 0) if sign["confidence"] >= _RS_NORM_THR else (0, 0, 255)
+        cv2.rectangle(det,
+                    (sign["x1"], sign["y1"]),
+                    (sign["x2"], sign["y2"]),
+                    s_color, 3)
+        cv2.putText(det,
+                    f"{sign['class_name'].replace('_',' ')} ({sign['confidence']:.2f})",
+                    (sign["x1"], max(14, sign["y1"] - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, s_color, 2)
+
+
+
+
 
     crop_disp = best_crop.copy()
     cv2.putText(crop_disp, class_name.replace("_", " "),
