@@ -309,18 +309,33 @@ _rs_mobilenet  = None
 _rs_custom_mdl = None
 _rs_yolo_clf   = None
 _rs_sahi_model = None
+_rs_dist_model = None
+_rs_dist_input_rank = 2
 _rs_idx2class: dict = {}
+
+
+def _rs_build_distance_fallback_model():
+    """Fallback architecture for legacy distance model weights (input: 4 bbox values)."""
+    return _keras.Sequential([
+        _layers.Input(shape=(4,)),
+        _layers.Dense(6, activation="relu", name="dense_1"),
+        _layers.Dense(5, activation="relu", name="dense_2"),
+        _layers.Dense(2, activation="relu", name="dense_3"),
+        _layers.Dense(1, activation="linear", name="dense_4"),
+    ])
 
 
 def _rs_init():
     """Load all road-sign models once at startup; no-op if weights are missing."""
-    global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class
+    global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class, _rs_dist_model, _rs_dist_input_rank
 
     det_pt   = _RS_W / "Detect_Model/Yolo/best.pt"
     mob_h5   = _RS_W / "mobilenet_weights/Mobilenetv2_Retrain_weight/phase2_epoch_015.weights.h5"
     cst_h5   = _RS_W / "Custom_model2_weights/epoch_026.weights.h5"
     clf_pt   = _RS_W / "YOLO8/YOLOv8_Classifier/weights/best.pt"
     map_json = _RS_W / "Custom_model2_weights/class_mapping.json"
+    dist_json = _RS_W / "Distance_Estimate_model/model@1535477330.json"
+    dist_h5   = _RS_W / "Distance_Estimate_model/model@1535477330.h5"
 
     if not all(p.exists() for p in [det_pt, mob_h5, cst_h5, clf_pt, map_json]):
         print("\u26a0  Road-sign weights not found \u2014 /upload and related routes disabled.")
@@ -393,6 +408,45 @@ def _rs_init():
 
         _rs_yolo_clf = YOLO(str(clf_pt))
 
+        # Optional distance-estimation model (input: [xmin, ymin, xmax, ymax])
+        _rs_dist_model = None
+        if dist_json.exists() and dist_h5.exists():
+            try:
+                with open(dist_json, "r", encoding="utf-8") as _f:
+                    _rs_dist_model = _keras.models.model_from_json(
+                        _f.read(),
+                        custom_objects={
+                            "Sequential": _keras.Sequential,
+                            "Dense": _layers.Dense,
+                        },
+                    )
+                _rs_dist_model.load_weights(str(dist_h5))
+                _rs_dist_input_rank = (
+                    len(_rs_dist_model.input_shape)
+                    if isinstance(_rs_dist_model.input_shape, tuple)
+                    else 2
+                )
+                print("✅ Road-sign distance model loaded.")
+            except Exception as _dist_e:
+                # Keras 2.x JSON models may fail to deserialize on newer TF/Keras.
+                try:
+                    _rs_dist_model = _rs_build_distance_fallback_model()
+                    _rs_dist_model.load_weights(str(dist_h5))
+                    _rs_dist_input_rank = (
+                        len(_rs_dist_model.input_shape)
+                        if isinstance(_rs_dist_model.input_shape, tuple)
+                        else 2
+                    )
+                    print("✅ Road-sign distance model loaded (fallback architecture).")
+                except Exception as _dist_fallback_e:
+                    _rs_dist_model = None
+                    _rs_dist_input_rank = 2
+                    print(f"⚠  Distance model load failed — distance output disabled: {_dist_e}")
+                    print(f"⚠  Distance fallback load failed: {_dist_fallback_e}")
+        else:
+            _rs_dist_input_rank = 2
+            print("⚠  Road-sign distance model not found — distance output disabled.")
+
         _rs_ready = True
         print("\u2705 Road-sign detection models loaded.")
 
@@ -420,6 +474,53 @@ def _rs_clahe(img: np.ndarray) -> np.ndarray:
     l, a, b_ch = cv2.split(lab)
     cl = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
     return cv2.cvtColor(cv2.merge((cl, a, b_ch)), cv2.COLOR_LAB2BGR)
+
+
+def _rs_log_bbox(xmin: int, ymin: int, xmax: int, ymax: int, source: str = "road_sign"):
+    """Print road-sign bounding box coordinates to terminal."""
+    print(f"[{source}] xmin: {xmin}")
+    print(f"[{source}] ymin: {ymin}")
+    print(f"[{source}] xmax: {xmax}")
+    print(f"[{source}] ymax: {ymax}")
+
+
+def _rs_estimate_distance(
+    xmin: int,
+    ymin: int,
+    xmax: int,
+    ymax: int,
+    frame_shape: Optional[tuple] = None,
+) -> Optional[float]:
+    """Estimate distance (meters) from a road-sign bounding box."""
+    # Match test_distance.py logic exactly (legacy scaler behavior + input rank handling).
+    if _rs_dist_model is None:
+        return None
+
+    try:
+        input_box = np.array([[xmin, ymin, xmax, ymax]], dtype="float32")
+
+        # StandardScaler fitted on [[0,0,0,0], [1000,1000,1000,1000]]
+        # => mean=500, std=500 for each feature
+        input_scaled = (input_box - 500.0) / 500.0
+
+        if _rs_dist_input_rank == 3:
+            model_input = input_scaled.reshape((1, 1, 4))
+        else:
+            model_input = input_scaled
+
+        pred_scaled = _rs_dist_model.predict(model_input, verbose=0)
+        pred_scaled_2d = np.array(pred_scaled, dtype="float32").reshape(-1, 1)
+
+        # StandardScaler fitted on [[0], [100]] => mean=50, std=50
+        distance = (pred_scaled_2d * 50.0) + 50.0
+        dist_m = float(distance[0][0])
+
+        if not np.isfinite(dist_m):
+            return None
+        dist_m = dist_m - 10.0
+        return round(dist_m, 2)
+    except Exception:
+        return None
 
 
 # ── Road-sign prediction helpers ───────────────────────────────────────────────
@@ -550,6 +651,7 @@ def rs_process_frame(frame: np.ndarray):
             "x1": x1, "y1": y1, "x2": x2, "y2": y2,
             "class_name": best_class,
             "confidence": best_conf,
+            "estimated_distance_m": _rs_estimate_distance(x1, y1, x2, y2, frame.shape),
             "crop":       best_crop,
         })
 
@@ -560,6 +662,7 @@ def rs_process_frame(frame: np.ndarray):
     primary = max(sign_results, key=lambda s: s["confidence"])
     class_name = primary["class_name"]
     confidence = primary["confidence"]
+    estimated_distance_m = primary.get("estimated_distance_m")
     best_crop  = primary["crop"]
     x1 = primary["x1"]
     y1 = primary["y1"]
@@ -603,6 +706,7 @@ def rs_process_frame(frame: np.ndarray):
 
     # Draw ALL detected signs on the frame
     for sign in sign_results:
+        _rs_log_bbox(sign["x1"], sign["y1"], sign["x2"], sign["y2"], source="road_sign/image_or_video")
         s_color = (0, 255, 0) if sign["confidence"] >= _RS_NORM_THR else (0, 0, 255)
         cv2.rectangle(det,
                     (sign["x1"], sign["y1"]),
@@ -629,6 +733,8 @@ def rs_process_frame(frame: np.ndarray):
         "class_name":     class_name,
         "confidence":     f"{confidence * 100:.1f}%",
         "status":         status,
+        "estimated_distance_m": estimated_distance_m,
+        "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
     }
 
 
@@ -674,6 +780,8 @@ def _rs_cam_worker():
                     "Damaged"          if conf <  _RS_DMG_THR  else
                     "Possibly unclear"
                 )
+                _rs_log_bbox(x1, y1, x2, y2, source="road_sign/webcam_live")
+                estimated_distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
                 color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
                 cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
                 lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
@@ -681,7 +789,13 @@ def _rs_cam_worker():
                 cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
                 cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-                _rs_latest_info = {"class_name": cls, "confidence": conf, "status": status}
+                _rs_latest_info = {
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                }
             else:
                 _rs_latest_info = {}
         _rs_latest_ann = ann
@@ -872,6 +986,8 @@ def _rs_video_worker():
                     "Damaged"          if conf <  _RS_DMG_THR  else
                     "Possibly unclear"
                 )
+                _rs_log_bbox(x1m, y1m, x2m, y2m, source="road_sign/video_stream")
+                estimated_distance_m = _rs_estimate_distance(x1m, y1m, x2m, y2m, frame.shape)
                 color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
                 cv2.rectangle(ann, (x1m, y1m), (x2m, y2m), color, 2)
                 lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
@@ -879,7 +995,13 @@ def _rs_video_worker():
                 cv2.rectangle(ann, (x1m, max(0, y1m - 24)), (x1m + tw, y1m), (0, 0, 0), -1)
                 cv2.putText(ann, lbl, (x1m + 3, max(14, y1m - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-                info_list.append({"class_name": cls, "confidence": conf, "status": status})
+                info_list.append({
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                })
 
             if info_list:
                 best_walk = max(info_list, key=lambda i: i["confidence"])
@@ -887,6 +1009,8 @@ def _rs_video_worker():
                     "class_name": best_walk["class_name"],
                     "confidence": best_walk["confidence"],
                     "status":     best_walk["status"],
+                    "estimated_distance_m": best_walk.get("estimated_distance_m"),
+                    "estimated_distance_text": best_walk.get("estimated_distance_text"),
                     "detections": info_list,
                 }
             else:

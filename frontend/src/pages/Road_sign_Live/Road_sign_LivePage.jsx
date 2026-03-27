@@ -47,6 +47,11 @@ const statusColor = (s) => {
   return "#f59e0b";
 };
 
+const formatDistance = (m) => {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+};
+
 // ── Icons ──────────────────────────────────────────────────────────────────────
 const IcoCapture  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M20 7h-2.5l-1-2h-9l-1 2H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/></svg>;
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
@@ -111,6 +116,7 @@ export default function Road_sign_LivePage() {
                   class_name: data.class_name,
                   confidence: data.confidence,
                   status:     data.status,
+                  estimated_distance_m: data.estimated_distance_m,
                   time:       new Date().toLocaleTimeString(),
                 },
                 ...prev.slice(0, 29), // keep last 30 entries
@@ -193,6 +199,7 @@ export default function Road_sign_LivePage() {
               <strong>ROAD SIGN DETECTED:</strong>&nbsp;
               {info.class_name.replace(/_/g, " ")}&nbsp;
               <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
+              <span className="rsl-conf-chip">Distance: {formatDistance(info.estimated_distance_m)}</span>
               <span className="rsl-audio-hint">🔊 Audio alert triggered</span>
             </div>
           )}
@@ -204,6 +211,7 @@ export default function Road_sign_LivePage() {
               <strong>{info.status.toUpperCase()}:</strong>&nbsp;
               {info.class_name.replace(/_/g, " ")}&nbsp;
               <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
+              <span className="rsl-conf-chip">Distance: {formatDistance(info.estimated_distance_m)}</span>
             </div>
           )}
 
@@ -250,6 +258,8 @@ export default function Road_sign_LivePage() {
                     <span className="rsl-overlay-conf">{(info.confidence * 100).toFixed(1)}%</span>
                     <span className="rsl-overlay-sep">·</span>
                     <span className="rsl-overlay-status">{info.status}</span>
+                    <span className="rsl-overlay-sep">·</span>
+                    <span className="rsl-overlay-status">{formatDistance(info.estimated_distance_m)}</span>
                   </div>
                 )}
               </div>
@@ -316,6 +326,7 @@ export default function Road_sign_LivePage() {
                       {[
                         ["Status",       info.status,                              statusColor(info.status)],
                         ["Sign Class",   info.class_name.replace(/_/g, " "),       null],
+                        ["Distance",     formatDistance(info.estimated_distance_m),  "#0ea5e9"],
                         ["Audio Alert",  audioEnabled ? "Enabled ✓" : "Muted",    audioEnabled ? "#22c55e" : "#64748b"],
                         ["Log Entries",  log.length,                               null],
                       ].map(([lbl, val, clr]) => (
@@ -359,6 +370,7 @@ export default function Road_sign_LivePage() {
                         <span className="rsl-log-time">{entry.time}</span>
                         <span className="rsl-log-name">{entry.class_name.replace(/_/g, " ")}</span>
                         <span className="rsl-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                        <span className="rsl-log-conf">{formatDistance(entry.estimated_distance_m)}</span>
                         <span
                           className="rsl-log-status"
                           style={{ color: statusColor(entry.status) }}

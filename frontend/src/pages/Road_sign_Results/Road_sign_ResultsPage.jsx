@@ -15,6 +15,11 @@ const statusColor = (s) => {
   return "#f59e0b";
 };
 
+const formatDistance = (m) => {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+};
+
 export default function Road_sign_ResultsPage() {
   const { state } = useLocation();
   const navigate  = useNavigate();
@@ -48,6 +53,7 @@ export default function Road_sign_ResultsPage() {
     confidence,
     status,
     input_type,
+    estimated_distance_m,
   } = state;
 
   return (
@@ -82,6 +88,13 @@ export default function Road_sign_ResultsPage() {
             <div className="rs-summary-label">Confidence</div>
             <div className="rs-summary-value" style={{ color: "#22c55e" }}>
               {confidence ?? "—"}
+            </div>
+          </div>
+
+          <div className="rs-summary-item">
+            <div className="rs-summary-label">Estimated Distance</div>
+            <div className="rs-summary-value" style={{ color: "#0ea5e9" }}>
+              {formatDistance(estimated_distance_m)}
             </div>
           </div>
 
