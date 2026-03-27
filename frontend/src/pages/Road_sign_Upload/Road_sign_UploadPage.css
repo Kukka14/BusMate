@@ -259,3 +259,78 @@
   font-size: 0.8rem;
   margin-top: 0.2rem;
 }
+
+/* video mode detection layout */
+.rs-video-grid {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.rs-video-stream-col,
+.rs-video-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+/* video mode detection panel */
+.rs-detection-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.rs-mini-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+}
+.rs-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+.rs-card-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.rs-card-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.rs-det-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+.rs-det-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.rs-det-conf,
+.rs-det-status {
+  font-size: 0.82rem;
+}
+.rs-log-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.3rem;
+}
+.rs-log-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 60px 80px;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  background: rgba(148,163,184,0.04);
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.45rem;
+}
+.rs-log-time { color: var(--color-text-muted); }
+.rs-log-name { font-weight: 600; }
+.rs-log-conf { text-align: right; }
+.rs-no-data { color: var(--color-text-muted); font-size: 0.85rem; }
+}

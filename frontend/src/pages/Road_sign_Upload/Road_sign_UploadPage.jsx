@@ -29,6 +29,10 @@ export default function Road_sign_UploadPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
   const [liveInfo, setLiveInfo] = useState(null);
+  const [videoStreamOn, setVideoStreamOn] = useState(false);
+  const [videoStreamSrc, setVideoStreamSrc] = useState("");
+  const [videoInfo, setVideoInfo] = useState(null);
+  const [videoLog, setVideoLog] = useState([]);
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -36,6 +40,10 @@ export default function Road_sign_UploadPage() {
     setPreview(null);
     setError("");
     setLiveInfo(null);
+    setVideoInfo(null);
+    setVideoLog([]);
+    setVideoStreamOn(false);
+    setVideoStreamSrc("");
   }, [mode]);
 
   // ── Webcam: poll detection info + stop camera on mode leave ────────────────
@@ -55,6 +63,43 @@ export default function Road_sign_UploadPage() {
     };
   }, [mode]);
 
+  // ── Video stream: poll detection info + maintain log
+  useEffect(() => {
+    if (mode !== "video" || !videoStreamOn) return;
+
+    const id = setInterval(() => {
+      fetch("/road-sign/get_video_detection_info")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.class_name) {
+            setVideoInfo(data);
+            setVideoLog((prev) => {
+              const next = [{
+                class_name: data.class_name,
+                confidence: data.confidence,
+                status:     data.status,
+                time:       new Date().toLocaleTimeString(),
+              }, ...prev];
+              return next.slice(0, 30);
+            });
+          } else {
+            setVideoInfo(null);
+          }
+        })
+        .catch(() => {});
+    }, 400);
+
+    return () => clearInterval(id);
+  }, [mode, videoStreamOn]);
+
+  // ── Video stream: stop stream on mode leave / unmount ─────────────────────
+  useEffect(() => {
+    if (mode !== "video") return;
+    return () => {
+      fetch("/road-sign/stop_video_stream").catch(() => {});
+    };
+  }, [mode]);
+
   // ── File change ────────────────────────────────────────────────────────────
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -70,6 +115,19 @@ export default function Road_sign_UploadPage() {
     setError("");
     setLoading(true);
     try {
+      if (mode === "video") {
+        const body = new FormData();
+        body.append("file", file);
+        const res  = await fetch("/road-sign/upload_video_stream", { method: "POST", body });
+        const data = await res.json();
+
+        if (!res.ok || data.error) { setError(data.error || "Processing failed."); return; }
+
+        setVideoStreamSrc(`/road-sign/video_stream_feed?t=${Date.now()}`);
+        setVideoStreamOn(true);
+        return;
+      }
+
       const body = new FormData();
       body.append("file", file);
       body.append("input_type", mode);
@@ -80,11 +138,7 @@ export default function Road_sign_UploadPage() {
       if (!res.ok || data.error)  { setError(data.error || "Processing failed."); return; }
       if (!data.detected)         { setError(data.message || "No road sign detected."); return; }
 
-      if (mode === "video") {
-        navigate("/road-sign/video-results", { state: data });
-      } else {
-        navigate("/road-sign/results", { state: data });
-      }
+      navigate("/road-sign/results", { state: data });
     } catch {
       setError("Network error — is the road-sign server running on port 5001?");
     } finally {
@@ -267,13 +321,93 @@ export default function Road_sign_UploadPage() {
 
             {error && <div className="rs-error">{error}</div>}
 
-            <button type="submit" className="rs-btn" disabled={loading}>
-              {loading ? (
-                <><span className="rs-spinner" /> Processing…</>
-              ) : (
-                "🔍 Process"
-              )}
-            </button>
+            {!videoStreamOn ? (
+              <button type="submit" className="rs-btn" disabled={loading}>
+                {loading ? (
+                  <><span className="rs-spinner" /> Starting stream…</>
+                ) : (
+                  "▶ Start Live Stream"
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rs-btn"
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await fetch("/road-sign/stop_video_stream");
+                  } catch {}
+                  setVideoStreamOn(false);
+                  setVideoStreamSrc("");
+                  setLoading(false);
+                }}
+              >
+                ⏹ Stop Stream
+              </button>
+            )}
+
+            {videoStreamOn && (
+              <div className="rs-video-grid" style={{ marginTop: "1rem" }}>
+                <div className="rs-video-stream-col">
+                  <div className="rs-stream-container">
+                    <img
+                      src={videoStreamSrc}
+                      alt="Live road-sign detection feed"
+                      className="rs-stream"
+                    />
+                  </div>
+                  <p className="rs-note">
+                    Live stream shows road-sign detections overlaid on the video.
+                  </p>
+                </div>
+
+                <div className="rs-video-info-col">
+                  <div className="rs-card rs-mini-card">
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Current Detection</span>
+                    </div>
+                    {videoInfo ? (
+                      <div className="rs-det-body">
+                        <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
+                        <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: statusColor(videoInfo.status) }}
+                        >
+                          {videoInfo.status}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No detection yet</div>
+                    )}
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Detection Log</span>
+                      <span className="rs-card-hint">Last 30</span>
+                    </div>
+                    <div className="rs-log-list">
+                      {videoLog.length > 0 ? (
+                        videoLog.map((entry, idx) => (
+                          <div key={idx} className="rs-log-row">
+                            <span className="rs-log-time">{entry.time}</span>
+                            <span className="rs-log-name">{entry.class_name.replace(/_/g, " ")}</span>
+                            <span className="rs-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                            <span className="rs-log-status" style={{ color: statusColor(entry.status) }}>
+                              {entry.status}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rs-no-data">No sign detections yet</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </form>
         )}
       </div> {/* rs-card */}
