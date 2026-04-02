@@ -752,6 +752,8 @@ _rs_last_saved_at: dict = {}
 _rs_last_saved_meta: dict = {}
 _rs_mongo_client = None
 _rs_mongo_db = None
+_rs_webcam_session_active = False
+_rs_webcam_session_id: Optional[str] = None
 
 
 def _rs_get_db():
@@ -781,6 +783,7 @@ def _rs_save_event(
     source: str,
     bbox: Optional[dict] = None,
     video_session_id: Optional[str] = None,
+    webcam_session_id: Optional[str] = None,
 ):
     """Persist one road-sign detection event to MongoDB (best-effort)."""
     # Save only confident detections (> 45%).
@@ -812,6 +815,8 @@ def _rs_save_event(
         }
         if video_session_id:
             doc["video_session_id"] = str(video_session_id)
+        if webcam_session_id:
+            doc["webcam_session_id"] = str(webcam_session_id)
 
         db.road_sign.insert_one(doc)
     except Exception as _e:
@@ -827,6 +832,7 @@ def _rs_save_event_throttled(
     bbox: Optional[dict] = None,
     min_gap_sec: float = 10.0,
     video_session_id: Optional[str] = None,
+    webcam_session_id: Optional[str] = None,
 ):
     # Keep DB only for confident signs (> 45%).
     if confidence is None or float(confidence) <= 0.45:
@@ -846,11 +852,13 @@ def _rs_save_event_throttled(
         source,
         bbox,
         video_session_id=video_session_id,
+        webcam_session_id=webcam_session_id,
     )
 
 
 def _rs_cam_worker():
     global _rs_latest_raw, _rs_latest_ann, _rs_latest_info, _rs_cam_running
+    global _rs_webcam_session_active, _rs_webcam_session_id
     while _rs_cam_running:
         with _rs_cam_lock:
             if _rs_cap is None:
@@ -861,7 +869,7 @@ def _rs_cam_worker():
             continue
         _rs_latest_raw = frame.copy()
         ann = frame.copy()
-        if _rs_ready:
+        if _rs_ready and _rs_webcam_session_active:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes   = res_det[0].boxes
             if len(boxes) > 0:
@@ -897,16 +905,21 @@ def _rs_cam_worker():
                     "estimated_distance_m": estimated_distance_m,
                     "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
                 }
-                _rs_save_event_throttled(
-                    class_name=cls,
-                    confidence=conf,
-                    status=status,
-                    estimated_distance_m=estimated_distance_m,
-                    source="webcam_live",
-                    bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
-                )
+                if _rs_webcam_session_active and _rs_webcam_session_id:
+                    _rs_save_event_throttled(
+                        class_name=cls,
+                        confidence=conf,
+                        status=status,
+                        estimated_distance_m=estimated_distance_m,
+                        source="webcam_live",
+                        bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
+                        min_gap_sec=35.0,
+                        webcam_session_id=_rs_webcam_session_id,
+                    )
             else:
                 _rs_latest_info = {}
+        else:
+            _rs_latest_info = {}
         _rs_latest_ann = ann
         time.sleep(0.01)
 
@@ -1042,6 +1055,22 @@ def rs_get_detection_info():
     return jsonify(_rs_latest_info)
 
 
+@app.route("/start_webcam_session", methods=["POST"])
+def rs_start_webcam_session():
+    global _rs_webcam_session_active, _rs_webcam_session_id
+    _rs_webcam_session_id = uuid.uuid4().hex
+    _rs_webcam_session_active = True
+    return jsonify({"started": True, "webcam_session_id": _rs_webcam_session_id})
+
+
+@app.route("/stop_webcam_session", methods=["POST"])
+def rs_stop_webcam_session():
+    global _rs_webcam_session_active, _rs_webcam_session_id
+    _rs_webcam_session_active = False
+    _rs_webcam_session_id = None
+    return jsonify({"stopped": True})
+
+
 @app.route("/capture_webcam", methods=["POST"])
 def rs_capture_webcam():
     frame = _rs_latest_raw
@@ -1063,7 +1092,10 @@ def rs_capture_webcam():
 
 @app.route("/stop_camera")
 def rs_stop_camera_route():
+    global _rs_webcam_session_active, _rs_webcam_session_id
     _rs_stop_camera()
+    _rs_webcam_session_active = False
+    _rs_webcam_session_id = None
     return jsonify({"stopped": True})
 
 
@@ -1075,12 +1107,15 @@ def rs_analytics():
 
         source = request.args.get("source", type=str)
         video_session_id = request.args.get("video_session_id", type=str)
+        webcam_session_id = request.args.get("webcam_session_id", type=str)
 
         match_stage = {}
         if source:
             match_stage["source"] = source
         if video_session_id:
             match_stage["video_session_id"] = video_session_id
+        if webcam_session_id:
+            match_stage["webcam_session_id"] = webcam_session_id
 
         pipeline = [
             *([{"$match": match_stage}] if match_stage else []),

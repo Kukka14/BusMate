@@ -70,17 +70,21 @@ export default function Road_sign_LivePage() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [streamError,  setStreamError]  = useState(false);
   const [analytics,    setAnalytics]    = useState([]);
+  const [webcamSessionId, setWebcamSessionId] = useState("");
+  const [sessionStarting, setSessionStarting] = useState(false);
   // Unique URL per mount forces the browser to make a fresh HTTP request
   // instead of reusing the cached last-frame from a previous MJPEG session.
   const [streamSrc] = useState(() => `/road-sign/video_feed?t=${Date.now()}`);
 
   // Refs to avoid stale closures inside the polling interval
   const audioEnabledRef = useRef(true);
+  const sessionActiveRef = useRef(false);
   const lastSpokenRef   = useRef(null);
   const pollRef         = useRef(null);
 
   // Keep audioEnabledRef in sync with state
   useEffect(() => { audioEnabledRef.current = audioEnabled; }, [audioEnabled]);
+  useEffect(() => { sessionActiveRef.current = Boolean(webcamSessionId); }, [webcamSessionId]);
 
   // Auth guard
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
@@ -97,6 +101,12 @@ export default function Road_sign_LivePage() {
       fetch("/road-sign/get_detection_info")
         .then(r => r.json())
         .then(data => {
+          if (!sessionActiveRef.current) {
+            setInfo(null);
+            lastSpokenRef.current = null;
+            return;
+          }
+
           const hasSign = data?.class_name;
           setInfo(hasSign ? data : null);
 
@@ -136,12 +146,21 @@ export default function Road_sign_LivePage() {
       clearInterval(pollRef.current);
       // Stop server-side camera on page leave
       fetch("/road-sign/stop_camera").catch(() => {});
+      fetch("/road-sign/stop_webcam_session", { method: "POST" }).catch(() => {});
     };
   }, []); // intentionally empty — runs once on mount/unmount
 
   useEffect(() => {
+    if (!webcamSessionId) {
+      setAnalytics([]);
+      return;
+    }
     const loadAnalytics = () => {
-      fetch("/road-sign/road_sign_analytics")
+      const qp = new URLSearchParams({
+        source: "webcam_live",
+        webcam_session_id: webcamSessionId,
+      }).toString();
+      fetch(`/road-sign/road_sign_analytics?${qp}`)
         .then((r) => r.json())
         .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
         .catch(() => setAnalytics([]));
@@ -149,7 +168,39 @@ export default function Road_sign_LivePage() {
     loadAnalytics();
     const id = setInterval(loadAnalytics, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [webcamSessionId]);
+
+  const handleStartSession = async () => {
+    setSessionStarting(true);
+    try {
+      const res = await fetch("/road-sign/start_webcam_session", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data?.webcam_session_id) {
+        setWebcamSessionId(data.webcam_session_id);
+        setInfo(null);
+        setLog([]);
+        lastSpokenRef.current = null;
+        setAnalytics([]);
+      }
+    } catch (_) {
+      // keep existing UI behavior silent on session start failure
+    } finally {
+      setSessionStarting(false);
+    }
+  };
+
+  const handleStopSession = async () => {
+    try {
+      await fetch("/road-sign/stop_webcam_session", { method: "POST" });
+    } catch (_) {
+      // silent
+    }
+    setWebcamSessionId("");
+    setInfo(null);
+    setLog([]);
+    lastSpokenRef.current = null;
+    setAnalytics([]);
+  };
 
   // ── Capture & full-ensemble analysis ──────────────────────────────────────
   const handleCapture = async () => {
@@ -195,6 +246,24 @@ export default function Road_sign_LivePage() {
               title={audioEnabled ? "Mute audio alerts" : "Enable audio alerts"}
             >
               {audioEnabled ? "🔊 Audio ON" : "🔇 Audio OFF"}
+            </button>
+
+            <button
+              className="rsl-audio-toggle on"
+              onClick={handleStartSession}
+              disabled={sessionStarting || Boolean(webcamSessionId)}
+              title="Start webcam analytics session"
+            >
+              {sessionStarting ? "Starting..." : (webcamSessionId ? "✅ Session Active" : "▶ Start Session")}
+            </button>
+
+            <button
+              className="rsl-audio-toggle off"
+              onClick={handleStopSession}
+              disabled={!webcamSessionId}
+              title="Stop webcam analytics session"
+            >
+              ⏹ Stop Session
             </button>
 
             <div className={`rsl-status-pill ${info ? "active" : ""}`}>
