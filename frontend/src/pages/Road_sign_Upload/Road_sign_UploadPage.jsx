@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_UploadPage.css";
 
@@ -198,11 +198,19 @@ export default function Road_sign_UploadPage() {
     }
   };
 
+  const videoTrendData = [...videoLog]
+    .reverse()
+    .map((entry, idx) => ({
+      time: entry.time,
+      confidence: Number((entry.confidence * 100).toFixed(1)),
+      detections: idx + 1,
+    }));
+
   return (
     <div className="dd-root">
       <Sidebar />
       <main className="dd-page-main">
-      <div className="rs-page">
+      <div className={`rs-page${mode === "video" ? " rs-video-layout" : ""}`}>
       {/* Page header */}
       <div className="rs-header">
         <span className="rs-header-icon">🚦</span>
@@ -468,6 +476,43 @@ export default function Road_sign_UploadPage() {
                       </div>
                     ) : (
                       <div className="rs-no-data">No analytics data yet</div>
+                    )}
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">📈 Detection Trend Over Time</span>
+                      <span className="rs-card-hint">Current stream session</span>
+                    </div>
+                    {videoTrendData.length > 0 ? (
+                      <div style={{ width: "100%", height: 240 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={videoTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="time" interval="preserveStartEnd" minTickGap={20} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Line
+                              type="monotone"
+                              dataKey="detections"
+                              stroke="#10b981"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Detections"
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="confidence"
+                              stroke="#6366f1"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Confidence %"
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No trend data yet</div>
                     )}
                   </div>
                 </div>
