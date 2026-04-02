@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_LivePage.css";
@@ -68,6 +69,7 @@ export default function Road_sign_LivePage() {
   const [log,          setLog]          = useState([]);     // detection history
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [streamError,  setStreamError]  = useState(false);
+  const [analytics,    setAnalytics]    = useState([]);
   // Unique URL per mount forces the browser to make a fresh HTTP request
   // instead of reusing the cached last-frame from a previous MJPEG session.
   const [streamSrc] = useState(() => `/road-sign/video_feed?t=${Date.now()}`);
@@ -136,6 +138,18 @@ export default function Road_sign_LivePage() {
       fetch("/road-sign/stop_camera").catch(() => {});
     };
   }, []); // intentionally empty — runs once on mount/unmount
+
+  useEffect(() => {
+    const loadAnalytics = () => {
+      fetch("/road-sign/road_sign_analytics")
+        .then((r) => r.json())
+        .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
+        .catch(() => setAnalytics([]));
+    };
+    loadAnalytics();
+    const id = setInterval(loadAnalytics, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── Capture & full-ensemble analysis ──────────────────────────────────────
   const handleCapture = async () => {
@@ -382,6 +396,36 @@ export default function Road_sign_LivePage() {
                   </div>
                 ) : (
                   <p className="rsl-no-data">No detections yet — waiting for road signs…</p>
+                )}
+              </div>
+
+              <div className="rsl-card rsl-log-card" style={{ marginTop: "0.8rem" }}>
+                <div className="rsl-card-head">
+                  <div>
+                    <span className="rsl-card-title">Sign Frequency Analytics</span>
+                    <span className="rsl-card-hint">Road sign name · frequency · latest timestamp</span>
+                  </div>
+                </div>
+                {analytics.length > 0 ? (
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={analytics} margin={{ top: 10, right: 10, left: 0, bottom: 45 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="sign_name" angle={-20} textAnchor="end" interval={0} height={70} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip
+                          formatter={(value) => [value, "Frequency"]}
+                          labelFormatter={(label, payload) => {
+                            const last = payload?.[0]?.payload?.last_seen;
+                            return `${label}${last ? ` | Last seen: ${new Date(last).toLocaleString()}` : ""}`;
+                          }}
+                        />
+                        <Bar dataKey="frequency" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="rsl-no-data">No analytics data yet.</p>
                 )}
               </div>
 

@@ -2,8 +2,10 @@ import os
 import json
 import tempfile
 import base64
+import uuid
 from collections import defaultdict, deque, Counter
 from typing import Dict, Optional, Any
+from datetime import datetime, timezone
 
 import cv2
 import numpy as np
@@ -746,6 +748,105 @@ _rs_cam_running = False
 _rs_latest_raw  = None
 _rs_latest_ann  = None
 _rs_latest_info: dict = {}
+_rs_last_saved_at: dict = {}
+_rs_last_saved_meta: dict = {}
+_rs_mongo_client = None
+_rs_mongo_db = None
+
+
+def _rs_get_db():
+    """Road-sign specific MongoDB accessor (independent from user-management indexes)."""
+    global _rs_mongo_client, _rs_mongo_db
+    if _rs_mongo_db is not None:
+        return _rs_mongo_db
+
+    from pymongo import MongoClient
+
+    uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/driveguard")
+    _rs_mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+    db_name = uri.rsplit("/", 1)[-1].split("?")[0] or "driveguard"
+    _rs_mongo_db = _rs_mongo_client[db_name]
+
+    # Ensure collection and useful indexes exist for analytics queries
+    _rs_mongo_db.road_sign.create_index([("class_name", 1), ("timestamp", -1)])
+    _rs_mongo_db.road_sign.create_index([("source", 1), ("timestamp", -1)])
+    return _rs_mongo_db
+
+
+def _rs_save_event(
+    class_name: str,
+    confidence: float,
+    status: str,
+    estimated_distance_m: Optional[float],
+    source: str,
+    bbox: Optional[dict] = None,
+    video_session_id: Optional[str] = None,
+):
+    """Persist one road-sign detection event to MongoDB (best-effort)."""
+    # Save only confident detections (> 45%).
+    # Only persist detections where confidence is strictly greater than 45%.
+    if confidence is None or float(confidence) <= 0.45:
+        return
+
+    try:
+        db = _rs_get_db()
+
+        clean_bbox = {}
+        if isinstance(bbox, dict):
+            for k, v in bbox.items():
+                if isinstance(v, np.integer):
+                    clean_bbox[k] = int(v)
+                elif isinstance(v, np.floating):
+                    clean_bbox[k] = float(v)
+                else:
+                    clean_bbox[k] = v
+
+        doc = {
+            "class_name": str(class_name),
+            "confidence": float(confidence),
+            "status": str(status),
+            "estimated_distance_m": float(estimated_distance_m) if estimated_distance_m is not None else None,
+            "source": str(source),
+            "bbox": clean_bbox,
+            "timestamp": datetime.utcnow(),
+        }
+        if video_session_id:
+            doc["video_session_id"] = str(video_session_id)
+
+        db.road_sign.insert_one(doc)
+    except Exception as _e:
+        app.logger.warning(f"Road-sign event save failed: {_e}")
+
+
+def _rs_save_event_throttled(
+    class_name: str,
+    confidence: float,
+    status: str,
+    estimated_distance_m: Optional[float],
+    source: str,
+    bbox: Optional[dict] = None,
+    min_gap_sec: float = 10.0,
+    video_session_id: Optional[str] = None,
+):
+    # Keep DB only for confident signs (> 45%).
+    if confidence is None or float(confidence) <= 0.45:
+        return
+
+    key = str(class_name)
+    now = time.time()
+    last = _rs_last_saved_at.get(key, 0.0)
+    if (now - last) < min_gap_sec:
+        return
+    _rs_last_saved_at[key] = now
+    _rs_save_event(
+        class_name,
+        confidence,
+        status,
+        estimated_distance_m,
+        source,
+        bbox,
+        video_session_id=video_session_id,
+    )
 
 
 def _rs_cam_worker():
@@ -796,6 +897,14 @@ def _rs_cam_worker():
                     "estimated_distance_m": estimated_distance_m,
                     "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
                 }
+                _rs_save_event_throttled(
+                    class_name=cls,
+                    confidence=conf,
+                    status=status,
+                    estimated_distance_m=estimated_distance_m,
+                    source="webcam_live",
+                    bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
+                )
             else:
                 _rs_latest_info = {}
         _rs_latest_ann = ann
@@ -867,6 +976,13 @@ def rs_upload():
         result = rs_process_frame(img)
         if not result:
             return jsonify({"detected": False, "message": "No road sign detected."})
+        _rs_save_event(
+            class_name=result["class_name"],
+            confidence=float(str(result["confidence"]).replace("%", "")) / 100.0,
+            status=result["status"],
+            estimated_distance_m=result.get("estimated_distance_m"),
+            source="image_upload",
+        )
         result["input_type"] = "image"
         return jsonify(result)
 
@@ -885,6 +1001,13 @@ def rs_upload():
                 if fi % _RS_SAMPLE_EVERY == 0:
                     r = rs_process_frame(frame)
                     if r:
+                        _rs_save_event(
+                            class_name=r["class_name"],
+                            confidence=float(str(r["confidence"]).replace("%", "")) / 100.0,
+                            status=r["status"],
+                            estimated_distance_m=r.get("estimated_distance_m"),
+                            source="video_upload",
+                        )
                         r["frame"] = fi
                         results_list.append(r)
                 fi += 1
@@ -927,6 +1050,13 @@ def rs_capture_webcam():
     result = rs_process_frame(frame)
     if not result:
         return jsonify({"detected": False, "message": "No road sign in current frame."})
+    _rs_save_event(
+        class_name=result["class_name"],
+        confidence=float(str(result["confidence"]).replace("%", "")) / 100.0,
+        status=result["status"],
+        estimated_distance_m=result.get("estimated_distance_m"),
+        source="webcam_capture",
+    )
     result["input_type"] = "webcam"
     return jsonify(result)
 
@@ -937,6 +1067,52 @@ def rs_stop_camera_route():
     return jsonify({"stopped": True})
 
 
+@app.route("/road_sign_analytics", methods=["GET"])
+def rs_analytics():
+    """Road-sign analytics: frequency per sign with latest timestamp."""
+    try:
+        db = _rs_get_db()
+
+        source = request.args.get("source", type=str)
+        video_session_id = request.args.get("video_session_id", type=str)
+
+        match_stage = {}
+        if source:
+            match_stage["source"] = source
+        if video_session_id:
+            match_stage["video_session_id"] = video_session_id
+
+        pipeline = [
+            *([{"$match": match_stage}] if match_stage else []),
+            {
+                "$group": {
+                    "_id": "$class_name",
+                    "frequency": {"$sum": 1},
+                    "last_seen": {"$max": "$timestamp"},
+                }
+            },
+            {"$sort": {"frequency": -1}},
+            {"$limit": 50},
+        ]
+
+        rows = list(db.road_sign.aggregate(pipeline))
+        items = []
+        for r in rows:
+            ts = r.get("last_seen")
+            ts_str = None
+            if isinstance(ts, datetime):
+                ts_str = ts.replace(tzinfo=timezone.utc).isoformat() if ts.tzinfo is None else ts.astimezone(timezone.utc).isoformat()
+            items.append({
+                "sign_name": r.get("_id") or "Unknown",
+                "frequency": int(r.get("frequency", 0)),
+                "last_seen": ts_str,
+            })
+
+        return jsonify({"items": items, "total_sign_types": len(items)})
+    except Exception as _e:
+        return jsonify({"error": str(_e), "items": [], "total_sign_types": 0}), 500
+
+
 # ── Road-sign video-file streaming ───────────────────────────────────────────
 _rs_video_lock        = threading.Lock()
 _rs_video_cap         = None
@@ -944,11 +1120,12 @@ _rs_video_path        = None
 _rs_video_running     = False
 _rs_video_latest_ann  = None
 _rs_video_latest_info: dict = {}
+_rs_video_session_id: Optional[str] = None
 
 
 def _rs_video_worker():
     global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
-    global _rs_video_cap
+    global _rs_video_cap, _rs_video_session_id
     if _rs_video_cap is None:
         _rs_video_running = False
         return
@@ -961,8 +1138,9 @@ def _rs_video_worker():
             break
         ret, frame = cap.read()
         if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
-            continue
+            # End-of-video: stop the stream instead of looping.
+            _rs_video_running = False
+            break
         ann = frame.copy()
         if _rs_ready:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
@@ -1002,6 +1180,16 @@ def _rs_video_worker():
                     "estimated_distance_m": estimated_distance_m,
                     "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
                 })
+                _rs_save_event_throttled(
+                    class_name=cls,
+                    confidence=conf,
+                    status=status,
+                    estimated_distance_m=estimated_distance_m,
+                    source="video_stream",
+                    bbox={"xmin": x1m, "ymin": y1m, "xmax": x2m, "ymax": y2m},
+                    min_gap_sec=35.0,
+                    video_session_id=_rs_video_session_id,
+                )
 
             if info_list:
                 best_walk = max(info_list, key=lambda i: i["confidence"])
@@ -1021,6 +1209,7 @@ def _rs_video_worker():
         if _rs_video_cap:
             _rs_video_cap.release()
             _rs_video_cap = None
+    _rs_video_latest_ann = None
 
 
 def _rs_video_gen_mjpeg():
@@ -1037,7 +1226,7 @@ def _rs_video_gen_mjpeg():
 
 @app.route("/upload_video_stream", methods=["POST"])
 def rs_upload_video_stream():
-    global _rs_video_running, _rs_video_cap, _rs_video_path
+    global _rs_video_running, _rs_video_cap, _rs_video_path, _rs_video_session_id
     if not _rs_ready:
         return jsonify({"error": "Road-sign models not loaded"}), 503
     file = request.files.get("file")
@@ -1073,10 +1262,11 @@ def rs_upload_video_stream():
 
     with _rs_video_lock:
         _rs_video_cap = cap
+    _rs_video_session_id = uuid.uuid4().hex
     _rs_video_running = True
     threading.Thread(target=_rs_video_worker, daemon=True).start()
     time.sleep(0.3)
-    return jsonify({"started": True})
+    return jsonify({"started": True, "video_session_id": _rs_video_session_id})
 
 
 @app.route("/video_stream_feed")
@@ -1100,7 +1290,7 @@ def rs_get_video_detection_info():
 @app.route("/stop_video_stream")
 def rs_stop_video_stream():
     global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
-    global _rs_video_cap, _rs_video_path
+    global _rs_video_cap, _rs_video_path, _rs_video_session_id
     _rs_video_running = False
     time.sleep(0.15)
     with _rs_video_lock:
@@ -1113,6 +1303,7 @@ def rs_stop_video_stream():
         except OSError:
             pass
     _rs_video_path = None
+    _rs_video_session_id = None
     _rs_video_latest_ann = None
     _rs_video_latest_info = {}
     return jsonify({"stopped": True})

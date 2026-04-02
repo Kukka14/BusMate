@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_UploadPage.css";
 
@@ -38,6 +39,8 @@ export default function Road_sign_UploadPage() {
   const [videoStreamSrc, setVideoStreamSrc] = useState("");
   const [videoInfo, setVideoInfo] = useState(null);
   const [videoLog, setVideoLog] = useState([]);
+  const [analytics, setAnalytics] = useState([]);
+  const [videoSessionId, setVideoSessionId] = useState("");
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -47,6 +50,8 @@ export default function Road_sign_UploadPage() {
     setLiveInfo(null);
     setVideoInfo(null);
     setVideoLog([]);
+    setAnalytics([]);
+    setVideoSessionId("");
     setVideoStreamOn(false);
     setVideoStreamSrc("");
   }, [mode]);
@@ -98,6 +103,26 @@ export default function Road_sign_UploadPage() {
     return () => clearInterval(id);
   }, [mode, videoStreamOn]);
 
+  // ── Video analytics: load sign frequency for bar chart (video mode only)
+  useEffect(() => {
+    if (mode !== "video" || !videoStreamOn || !videoSessionId) return;
+
+    const loadAnalytics = () => {
+      const qp = new URLSearchParams({
+        source: "video_stream",
+        video_session_id: videoSessionId,
+      }).toString();
+      fetch(`/road-sign/road_sign_analytics?${qp}`)
+        .then((r) => r.json())
+        .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
+        .catch(() => setAnalytics([]));
+    };
+
+    loadAnalytics();
+    const id = setInterval(loadAnalytics, 5000);
+    return () => clearInterval(id);
+  }, [mode, videoStreamOn, videoSessionId]);
+
   // ── Video stream: stop stream on mode leave / unmount ─────────────────────
   useEffect(() => {
     if (mode !== "video") return;
@@ -130,6 +155,7 @@ export default function Road_sign_UploadPage() {
         if (!res.ok || data.error) { setError(data.error || "Processing failed."); return; }
 
         setVideoStreamSrc(`/road-sign/video_stream_feed?t=${Date.now()}`);
+        setVideoSessionId(data?.video_session_id || "");
         setVideoStreamOn(true);
         return;
       }
@@ -346,6 +372,7 @@ export default function Road_sign_UploadPage() {
                   } catch {}
                   setVideoStreamOn(false);
                   setVideoStreamSrc("");
+                  setVideoSessionId("");
                   setLoading(false);
                 }}
               >
@@ -414,6 +441,34 @@ export default function Road_sign_UploadPage() {
                         <div className="rs-no-data">No sign detections yet</div>
                       )}
                     </div>
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">📊 Sign Frequency Analytics</span>
+                      <span className="rs-card-hint">Video mode only</span>
+                    </div>
+                    {analytics.length > 0 ? (
+                      <div style={{ width: "100%", height: 240 }}>
+                        <ResponsiveContainer>
+                          <BarChart data={analytics} margin={{ top: 10, right: 10, left: 0, bottom: 45 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="sign_name" angle={-20} textAnchor="end" interval={0} height={70} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip
+                              formatter={(value) => [value, "Frequency"]}
+                              labelFormatter={(label, payload) => {
+                                const last = payload?.[0]?.payload?.last_seen;
+                                return `${label}${last ? ` | Last seen: ${new Date(last).toLocaleString()}` : ""}`;
+                              }}
+                            />
+                            <Bar dataKey="frequency" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No analytics data yet</div>
+                    )}
                   </div>
                 </div>
               </div>
