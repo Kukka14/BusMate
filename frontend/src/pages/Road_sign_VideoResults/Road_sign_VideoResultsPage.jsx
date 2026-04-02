@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Sidebar from "../../components/common/Sidebar";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import "./Road_sign_VideoResultsPage.css";
@@ -42,6 +43,7 @@ function formatDistance(m) {
 export default function Road_sign_VideoResultsPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
+  const [analytics, setAnalytics] = useState([]);
 
   // ── Beep once when results load ─────────────────────────────────────────
   useEffect(() => {
@@ -50,6 +52,13 @@ export default function Road_sign_VideoResultsPage() {
       playBeep(880, 0.18, 0.38);
       setTimeout(() => playBeep(1100, 0.18, 0.3), 220);
     }
+  }, []);
+
+  useEffect(() => {
+    fetch("/road-sign/road_sign_analytics")
+      .then((r) => r.json())
+      .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
+      .catch(() => setAnalytics([]));
   }, []);
 
   // ── Compute summary from all results ────────────────────────────────────
@@ -172,6 +181,38 @@ export default function Road_sign_VideoResultsPage() {
       )}
 
       {/* ── Frame cards ── */}
+      <div className="rvr-summary-card" style={{ marginBottom: "1rem" }}>
+        <div className="rvr-summary-title" style={{ marginBottom: "0.8rem" }}>📊 Sign Frequency Analytics</div>
+        {analytics.length > 0 ? (
+          <>
+            <div style={{ width: "100%", height: 280 }}>
+              <ResponsiveContainer>
+                <BarChart data={analytics} margin={{ top: 10, right: 20, left: 0, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="sign_name" angle={-20} textAnchor="end" interval={0} height={70} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value) => [value, "Frequency"]}
+                    labelFormatter={(label, payload) => {
+                      const last = payload?.[0]?.payload?.last_seen;
+                      return `${label}${last ? ` | Last seen: ${new Date(last).toLocaleString()}` : ""}`;
+                    }}
+                  />
+                  <Bar dataKey="frequency" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ marginTop: "0.6rem", fontSize: "0.86rem", opacity: 0.85 }}>
+              Each bar shows how many times a sign appeared. Tooltip includes latest timestamp.
+            </div>
+          </>
+        ) : (
+          <div className="rvr-empty" style={{ padding: "0.8rem" }}>
+            No analytics data yet.
+          </div>
+        )}
+      </div>
+
       <div className="rvr-frame-list">
         {results.map((r, i) => (
           <div key={i} className="rvr-frame-card">
