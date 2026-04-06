@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Sidebar from "../../components/common/Sidebar";
@@ -22,6 +22,22 @@ const formatDistance = (m) => {
   return `${Number(m).toFixed(2)} m`;
 };
 
+function playBeep(freq = 520, duration = 0.22, vol = 0.4) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + duration);
+  } catch (_) {}
+}
+
 export default function Road_sign_UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -41,6 +57,7 @@ export default function Road_sign_UploadPage() {
   const [videoLog, setVideoLog] = useState([]);
   const [analytics, setAnalytics] = useState([]);
   const [videoSessionId, setVideoSessionId] = useState("");
+  const lastCollisionBeepAtRef = useRef(0);
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -81,6 +98,13 @@ export default function Road_sign_UploadPage() {
       fetch("/road-sign/get_video_detection_info")
         .then((r) => r.json())
         .then((data) => {
+          if (data?.collision_high_risk) {
+            const now = Date.now();
+            if ((now - lastCollisionBeepAtRef.current) > 1200) {
+              lastCollisionBeepAtRef.current = now;
+              playBeep();
+            }
+          }
           if (data?.class_name) {
             setVideoInfo(data);
             setVideoLog((prev) => {
@@ -417,9 +441,21 @@ export default function Road_sign_UploadPage() {
                         </div>
                         <div
                           className="rs-det-status"
-                          style={{ color: statusColor(videoInfo.status) }}
+                          style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}
+                        >
+                          Collision Risk: {videoInfo.vehicle_collision_risk || "LOW"}
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: statusColor(videoInfo.status), gridColumn: "1 / -1" }}
                         >
                           {videoInfo.status}
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.collision_high_risk ? "#ef4444" : "#64748b", gridColumn: "1 / -1" }}
+                        >
+                          High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}
                         </div>
                       </div>
                     ) : (

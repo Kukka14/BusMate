@@ -80,6 +80,7 @@ export default function Road_sign_LivePage() {
   const audioEnabledRef = useRef(true);
   const sessionActiveRef = useRef(false);
   const lastSpokenRef   = useRef(null);
+  const lastCollisionBeepAtRef = useRef(0);
   const pollRef         = useRef(null);
 
   // Keep audioEnabledRef in sync with state
@@ -105,6 +106,14 @@ export default function Road_sign_LivePage() {
             setInfo(null);
             lastSpokenRef.current = null;
             return;
+          }
+
+          if (data?.collision_high_risk && audioEnabledRef.current) {
+            const now = Date.now();
+            if ((now - lastCollisionBeepAtRef.current) > 1200) {
+              lastCollisionBeepAtRef.current = now;
+              playBeep(520, 0.24, 0.45);
+            }
           }
 
           const hasSign = data?.class_name;
@@ -418,6 +427,8 @@ export default function Road_sign_LivePage() {
                         ["Status",       info.status,                              statusColor(info.status)],
                         ["Sign Class",   info.class_name.replace(/_/g, " "),       null],
                         ["Distance",     formatDistance(info.estimated_distance_m),  "#0ea5e9"],
+                        ["Collision Risk", info.vehicle_collision_risk || "LOW", (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
+                        ["High Risk Distance", formatDistance(info.nearest_vehicle_distance_m), info.collision_high_risk ? "#ef4444" : "#64748b"],
                         ["Audio Alert",  audioEnabled ? "Enabled ✓" : "Muted",    audioEnabled ? "#22c55e" : "#64748b"],
                         ["Log Entries",  log.length,                               null],
                       ].map(([lbl, val, clr]) => (

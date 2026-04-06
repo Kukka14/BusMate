@@ -307,6 +307,7 @@ _RS_MAX_DET      = 20
 
 _rs_ready      = False
 _rs_detector   = None
+_rs_vehicle_detector = None
 _rs_mobilenet  = None
 _rs_custom_mdl = None
 _rs_yolo_clf   = None
@@ -314,6 +315,46 @@ _rs_sahi_model = None
 _rs_dist_model = None
 _rs_dist_input_rank = 2
 _rs_idx2class: dict = {}
+_RS_VEHICLE_LABELS = {"car", "bus", "truck", "motorcycle"}
+_rs_last_collision_beep_at = 0.0
+
+
+def _rs_get_traffic_level(count):
+    if count > 10:
+        return "HIGH"
+    elif count > 5:
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+
+def _rs_vehicle_risk_count(distance_m: Optional[float]) -> int:
+    """Map distance to a risk-count scale used by _rs_get_traffic_level."""
+    if distance_m is None:
+        return 0
+    try:
+        d = float(distance_m)
+    except Exception:
+        return 0
+    if not np.isfinite(d):
+        return 0
+    # Calibrated so ~5m => HIGH, 6-10m => MEDIUM, far distance => LOW
+    return max(0, int(round(16.0 - d)))
+
+
+def _rs_maybe_collision_beep(should_beep: bool, min_gap_sec: float = 1.2):
+    """Emit a simple server-side beep (best effort) when high collision risk is present."""
+    global _rs_last_collision_beep_at
+    if not should_beep:
+        return
+    now = time.time()
+    if (now - _rs_last_collision_beep_at) < min_gap_sec:
+        return
+    _rs_last_collision_beep_at = now
+    try:
+        print("\a", end="", flush=True)
+    except Exception:
+        pass
 
 
 def _rs_build_distance_fallback_model():
@@ -329,7 +370,7 @@ def _rs_build_distance_fallback_model():
 
 def _rs_init():
     """Load all road-sign models once at startup; no-op if weights are missing."""
-    global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class, _rs_dist_model, _rs_dist_input_rank
+    global _rs_ready, _rs_detector, _rs_vehicle_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class, _rs_dist_model, _rs_dist_input_rank
 
     det_pt   = _RS_W / "Detect_Model/Yolo/best.pt"
     mob_h5   = _RS_W / "mobilenet_weights/Mobilenetv2_Retrain_weight/phase2_epoch_015.weights.h5"
@@ -338,6 +379,7 @@ def _rs_init():
     map_json = _RS_W / "Custom_model2_weights/class_mapping.json"
     dist_json = _RS_W / "Distance_Estimate_model/model@1535477330.json"
     dist_h5   = _RS_W / "Distance_Estimate_model/model@1535477330.h5"
+    vehicle_pt = Path(__file__).resolve().parent / "yolov8n.pt"
 
     if not all(p.exists() for p in [det_pt, mob_h5, cst_h5, clf_pt, map_json]):
         print("\u26a0  Road-sign weights not found \u2014 /upload and related routes disabled.")
@@ -345,6 +387,12 @@ def _rs_init():
 
     try:
         _rs_detector = YOLO(str(det_pt))
+        if vehicle_pt.exists():
+            _rs_vehicle_detector = YOLO(str(vehicle_pt))
+            print("✅ Vehicle detector loaded (yolov8n.pt).")
+        else:
+            _rs_vehicle_detector = None
+            print("⚠  Vehicle detector weights not found (yolov8n.pt) — vehicle overlay disabled.")
 
         # SAHI wrapper for small object detection
         global _rs_sahi_model
@@ -484,6 +532,76 @@ def _rs_log_bbox(xmin: int, ymin: int, xmax: int, ymax: int, source: str = "road
     print(f"[{source}] ymin: {ymin}")
     print(f"[{source}] xmax: {xmax}")
     print(f"[{source}] ymax: {ymax}")
+
+
+def _rs_draw_vehicle_detections(frame: np.ndarray, ann: np.ndarray):
+    """Draw vehicle-only detections; return per-vehicle risk summary."""
+    if _rs_vehicle_detector is None:
+        return [], "LOW", None, False
+    try:
+        veh_res = _rs_vehicle_detector(frame, conf=0.25, verbose=False)
+        boxes = veh_res[0].boxes
+        names = getattr(_rs_vehicle_detector, "names", {}) or {}
+        vehicles = []
+        nearest_distance = None
+        highest_risk_rank = 0
+
+        def _risk_rank(level: str) -> int:
+            return {"LOW": 0, "MEDIUM": 1, "HIGH": 2}.get(level, 0)
+
+        for box in boxes:
+            cls_idx = int(box.cls[0])
+            label = str(names.get(cls_idx, cls_idx)).lower()
+            if label not in _RS_VEHICLE_LABELS:
+                continue
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = float(box.conf[0])
+            distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
+            risk_count = _rs_vehicle_risk_count(distance_m)
+            risk_level = _rs_get_traffic_level(risk_count)
+            highest_risk_rank = max(highest_risk_rank, _risk_rank(risk_level))
+            if distance_m is not None and (nearest_distance is None or distance_m < nearest_distance):
+                nearest_distance = distance_m
+
+            color = (0, 165, 255)
+            if risk_level == "HIGH":
+                color = (0, 0, 255)
+            elif risk_level == "MEDIUM":
+                color = (0, 140, 255)
+
+            cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
+            lbl_top = f"{label} {conf * 100:.0f}%"
+            dist_text = f"{distance_m:.1f}m" if distance_m is not None else "--m"
+            lbl_bottom = f"{dist_text} | {risk_level} RISK"
+            tw = max(len(lbl_top), len(lbl_bottom)) * 9
+            top_y = max(0, y1 - 44)
+            mid_y = max(0, y1 - 22)
+            cv2.rectangle(ann, (x1, top_y), (x1 + tw, y1), (0, 0, 0), -1)
+            cv2.putText(ann, lbl_top, (x1 + 3, max(14, mid_y - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
+            cv2.putText(ann, lbl_bottom, (x1 + 3, max(14, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+            vehicles.append({
+                "class_name": label,
+                "confidence": conf,
+                "estimated_distance_m": distance_m,
+                "risk_level": risk_level,
+                "risk_count": risk_count,
+                "bbox": {"xmin": int(x1), "ymin": int(y1), "xmax": int(x2), "ymax": int(y2)},
+            })
+
+        risk_summary = "LOW"
+        if highest_risk_rank == 2:
+            risk_summary = "HIGH"
+        elif highest_risk_rank == 1:
+            risk_summary = "MEDIUM"
+
+        high_risk = risk_summary == "HIGH"
+        _rs_maybe_collision_beep(high_risk)
+        return vehicles, risk_summary, nearest_distance, high_risk
+    except Exception:
+        # Keep stream alive even if vehicle inference fails for a frame.
+        return [], "LOW", None, False
 
 
 def _rs_estimate_distance(
@@ -869,6 +987,12 @@ def _rs_cam_worker():
             continue
         _rs_latest_raw = frame.copy()
         ann = frame.copy()
+        vehicle_items = []
+        vehicle_risk = "LOW"
+        nearest_vehicle_distance_m = None
+        collision_high_risk = False
+        if _rs_ready:
+            vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
         if _rs_ready and _rs_webcam_session_active:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes   = res_det[0].boxes
@@ -904,6 +1028,11 @@ def _rs_cam_worker():
                     "status": status,
                     "estimated_distance_m": estimated_distance_m,
                     "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": len(vehicle_items),
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
                 }
                 if _rs_webcam_session_active and _rs_webcam_session_id:
                     _rs_save_event_throttled(
@@ -917,9 +1046,21 @@ def _rs_cam_worker():
                         webcam_session_id=_rs_webcam_session_id,
                     )
             else:
-                _rs_latest_info = {}
+                _rs_latest_info = {
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": len(vehicle_items),
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
         else:
-            _rs_latest_info = {}
+            _rs_latest_info = {
+                "vehicle_detections": vehicle_items,
+                "vehicle_count": len(vehicle_items),
+                "vehicle_collision_risk": vehicle_risk,
+                "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                "collision_high_risk": collision_high_risk,
+            }
         _rs_latest_ann = ann
         time.sleep(0.01)
 
@@ -1177,6 +1318,12 @@ def _rs_video_worker():
             _rs_video_running = False
             break
         ann = frame.copy()
+        vehicle_items = []
+        vehicle_risk = "LOW"
+        nearest_vehicle_distance_m = None
+        collision_high_risk = False
+        if _rs_ready:
+            vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
         if _rs_ready:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes = res_det[0].boxes
@@ -1235,9 +1382,20 @@ def _rs_video_worker():
                     "estimated_distance_m": best_walk.get("estimated_distance_m"),
                     "estimated_distance_text": best_walk.get("estimated_distance_text"),
                     "detections": info_list,
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": len(vehicle_items),
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
                 }
             else:
-                _rs_video_latest_info = {}
+                _rs_video_latest_info = {
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": len(vehicle_items),
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
         _rs_video_latest_ann = ann
         time.sleep(delay)
     with _rs_video_lock:
