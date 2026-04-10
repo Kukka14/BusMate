@@ -319,38 +319,28 @@ _RS_VEHICLE_LABELS = {"car", "bus", "truck", "motorcycle"}
 _rs_last_collision_beep_at = 0.0
 
 
-def _rs_get_traffic_level(count):
-    if count > 10:
+def _rs_get_collision_risk(distance_m: Optional[float]) -> str:
+    """Collision risk based on estimated vehicle distance (meters)."""
+    if distance_m is None:
+        return "LOW"
+    try:
+        d = float(distance_m)
+    except Exception:
+        return "LOW"
+    if not np.isfinite(d):
+        return "LOW"
+    if d < 2:
         return "HIGH"
-    elif count > 5:
+    elif d <= 15:
         return "MEDIUM"
     else:
         return "LOW"
 
 
-def _rs_vehicle_risk_count(distance_m: Optional[float]) -> int:
-    """Map distance to a risk-count scale used by _rs_get_traffic_level."""
-    if distance_m is None:
-        return 0
-    try:
-        d = float(distance_m)
-    except Exception:
-        return 0
-    if not np.isfinite(d):
-        return 0
-    # Calibrated so ~5m => HIGH, 6-10m => MEDIUM, far distance => LOW
-    return max(0, int(round(16.0 - d)))
-
-
 def _rs_maybe_collision_beep(should_beep: bool, min_gap_sec: float = 1.2):
     """Emit a simple server-side beep (best effort) when high collision risk is present."""
-    global _rs_last_collision_beep_at
-    if not should_beep:
-        return
-    now = time.time()
-    if (now - _rs_last_collision_beep_at) < min_gap_sec:
-        return
-    _rs_last_collision_beep_at = now
+    # intentionally left as a no-op to disable server-side collision beeps
+    return
     try:
         print("\a", end="", flush=True)
     except Exception:
@@ -556,9 +546,8 @@ def _rs_draw_vehicle_detections(frame: np.ndarray, ann: np.ndarray):
                 continue
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
             conf = float(box.conf[0])
-            distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
-            risk_count = _rs_vehicle_risk_count(distance_m)
-            risk_level = _rs_get_traffic_level(risk_count)
+            distance_m = _rs_estimate_vehicle_distance(x1, y1, x2, y2, frame.shape)
+            risk_level = _rs_get_collision_risk(distance_m)
             highest_risk_rank = max(highest_risk_rank, _risk_rank(risk_level))
             if distance_m is not None and (nearest_distance is None or distance_m < nearest_distance):
                 nearest_distance = distance_m
@@ -586,7 +575,6 @@ def _rs_draw_vehicle_detections(frame: np.ndarray, ann: np.ndarray):
                 "confidence": conf,
                 "estimated_distance_m": distance_m,
                 "risk_level": risk_level,
-                "risk_count": risk_count,
                 "bbox": {"xmin": int(x1), "ymin": int(y1), "xmax": int(x2), "ymax": int(y2)},
             })
 
@@ -638,6 +626,45 @@ def _rs_estimate_distance(
         if not np.isfinite(dist_m):
             return None
         dist_m = dist_m - 10.0
+        return round(dist_m, 2)
+    except Exception:
+        return None
+
+
+def _rs_estimate_vehicle_distance(
+    xmin: int,
+    ymin: int,
+    xmax: int,
+    ymax: int,
+    frame_shape: Optional[tuple] = None,
+) -> Optional[float]:
+    """Estimate distance (meters) from a vehicle bounding box for collision-risk logic."""
+    # Keep road-sign estimator unchanged; vehicle path uses a different offset.
+    if _rs_dist_model is None:
+        return None
+
+    try:
+        input_box = np.array([[xmin, ymin, xmax, ymax]], dtype="float32")
+
+        # StandardScaler fitted on [[0,0,0,0], [1000,1000,1000,1000]]
+        # => mean=500, std=500 for each feature
+        input_scaled = (input_box - 500.0) / 500.0
+
+        if _rs_dist_input_rank == 3:
+            model_input = input_scaled.reshape((1, 1, 4))
+        else:
+            model_input = input_scaled
+
+        pred_scaled = _rs_dist_model.predict(model_input, verbose=0)
+        pred_scaled_2d = np.array(pred_scaled, dtype="float32").reshape(-1, 1)
+
+        # StandardScaler fitted on [[0], [100]] => mean=50, std=50
+        distance = (pred_scaled_2d * 50.0) + 50.0
+        dist_m = float(distance[0][0])
+
+        if not np.isfinite(dist_m):
+            return None
+        dist_m = dist_m + 2.0
         return round(dist_m, 2)
     except Exception:
         return None

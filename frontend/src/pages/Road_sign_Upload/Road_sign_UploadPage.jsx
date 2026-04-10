@@ -98,15 +98,19 @@ export default function Road_sign_UploadPage() {
       fetch("/road-sign/get_video_detection_info")
         .then((r) => r.json())
         .then((data) => {
-          if (data?.collision_high_risk) {
-            const now = Date.now();
-            if ((now - lastCollisionBeepAtRef.current) > 1200) {
-              lastCollisionBeepAtRef.current = now;
-              playBeep();
-            }
-          }
-          if (data?.class_name) {
+          // Collision beeps disabled for vehicle-distance alerts.
+          const hasSign = Boolean(data?.class_name);
+          const hasVehicleMeta =
+            data?.nearest_vehicle_distance_m !== undefined ||
+            data?.vehicle_collision_risk !== undefined;
+
+          if (hasSign || hasVehicleMeta) {
             setVideoInfo(data);
+          } else {
+            setVideoInfo(null);
+          }
+
+          if (hasSign) {
             setVideoLog((prev) => {
               const next = [{
                 class_name: data.class_name,
@@ -117,8 +121,6 @@ export default function Road_sign_UploadPage() {
               }, ...prev];
               return next.slice(0, 30);
             });
-          } else {
-            setVideoInfo(null);
           }
         })
         .catch(() => {});
@@ -432,7 +434,7 @@ export default function Road_sign_UploadPage() {
                     <div className="rs-card-head">
                       <span className="rs-card-title">Current Detection</span>
                     </div>
-                    {videoInfo ? (
+                    {videoInfo?.class_name ? (
                       <div className="rs-det-body">
                         <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
                         <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
@@ -453,8 +455,18 @@ export default function Road_sign_UploadPage() {
                         </div>
                         <div
                           className="rs-det-status"
-                          style={{ color: videoInfo.collision_high_risk ? "#ef4444" : "#64748b", gridColumn: "1 / -1" }}
+                          style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}
                         >
+                          High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}
+                        </div>
+                      </div>
+                    ) : videoInfo ? (
+                      <div className="rs-det-body">
+                        <div className="rs-det-name">No road sign detected</div>
+                        <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          Collision Risk: {videoInfo.vehicle_collision_risk || "LOW"}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}>
                           High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}
                         </div>
                       </div>

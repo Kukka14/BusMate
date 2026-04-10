@@ -108,16 +108,13 @@ export default function Road_sign_LivePage() {
             return;
           }
 
-          if (data?.collision_high_risk && audioEnabledRef.current) {
-            const now = Date.now();
-            if ((now - lastCollisionBeepAtRef.current) > 1200) {
-              lastCollisionBeepAtRef.current = now;
-              playBeep(520, 0.24, 0.45);
-            }
-          }
+          // Collision beeps disabled: only road-sign alerts remain active.
 
           const hasSign = data?.class_name;
-          setInfo(hasSign ? data : null);
+          const hasVehicleMeta =
+            data?.nearest_vehicle_distance_m !== undefined ||
+            data?.vehicle_collision_risk !== undefined;
+          setInfo(hasSign || hasVehicleMeta ? data : null);
 
           if (hasSign && data.status === "Normal") {
             // Only trigger alert when the sign name changes
@@ -283,9 +280,9 @@ export default function Road_sign_LivePage() {
               ⏹ Stop Session
             </button>
 
-            <div className={`rsl-status-pill ${info ? "active" : ""}`}>
+            <div className={`rsl-status-pill ${info?.class_name ? "active" : ""}`}>
               <span className="rsl-status-dot" />
-              {info ? "DETECTING" : "SCANNING…"}
+              {info?.class_name ? "DETECTING" : "SCANNING…"}
             </div>
           </div>
         </header>
@@ -428,7 +425,7 @@ export default function Road_sign_LivePage() {
                         ["Sign Class",   info.class_name.replace(/_/g, " "),       null],
                         ["Distance",     formatDistance(info.estimated_distance_m),  "#0ea5e9"],
                         ["Collision Risk", info.vehicle_collision_risk || "LOW", (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
-                        ["High Risk Distance", formatDistance(info.nearest_vehicle_distance_m), info.collision_high_risk ? "#ef4444" : "#64748b"],
+                        ["High Risk Distance", formatDistance(info.nearest_vehicle_distance_m), (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
                         ["Audio Alert",  audioEnabled ? "Enabled ✓" : "Muted",    audioEnabled ? "#22c55e" : "#64748b"],
                         ["Log Entries",  log.length,                               null],
                       ].map(([lbl, val, clr]) => (
@@ -444,6 +441,24 @@ export default function Road_sign_LivePage() {
                     {/* Driver instruction panel */}
                     <div className="rsl-live-instruction">
                       <RoadSignInstructionPanel className={info.class_name} compact />
+                    </div>
+                  </div>
+                ) : info ? (
+                  <div className="rsl-det-body">
+                    <div className="rsl-det-name">No road sign detected</div>
+                    <div className="rsl-det-metrics" style={{ marginTop: "0.6rem" }}>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Collision Risk</span>
+                        <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          {info.vehicle_collision_risk || "LOW"}
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">High Risk Distance</span>
+                        <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          {formatDistance(info.nearest_vehicle_distance_m)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ) : (
