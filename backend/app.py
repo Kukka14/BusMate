@@ -317,6 +317,8 @@ _rs_dist_input_rank = 2
 _rs_idx2class: dict = {}
 _RS_VEHICLE_LABELS = {"car", "bus", "truck", "motorcycle"}
 _rs_last_collision_beep_at = 0.0
+_rs_webcam_vehicle_count_hist = deque(maxlen=10)
+_rs_video_vehicle_count_hist = deque(maxlen=10)
 
 
 def _rs_get_collision_risk(distance_m: Optional[float]) -> str:
@@ -345,6 +347,30 @@ def _rs_maybe_collision_beep(should_beep: bool, min_gap_sec: float = 1.2):
         print("\a", end="", flush=True)
     except Exception:
         pass
+
+
+def _rs_get_traffic_congestion(avg_vehicle_count: float) -> str:
+    """Classify traffic congestion from smoothed vehicle count."""
+    try:
+        c = float(avg_vehicle_count)
+    except Exception:
+        c = 0.0
+    if c > 10:
+        return "HIGH"
+    elif c > 5:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _rs_update_traffic_congestion(count_hist: deque, vehicle_count: int):
+    """Update rolling vehicle-count window and return (avg_count, congestion_level)."""
+    try:
+        vc = int(vehicle_count)
+    except Exception:
+        vc = 0
+    count_hist.append(vc)
+    avg_count = float(np.mean(count_hist)) if len(count_hist) else 0.0
+    return round(avg_count, 2), _rs_get_traffic_congestion(avg_count)
 
 
 def _rs_build_distance_fallback_model():
@@ -927,6 +953,9 @@ def _rs_save_event(
     estimated_distance_m: Optional[float],
     source: str,
     bbox: Optional[dict] = None,
+    vehicle_count: Optional[int] = None,
+    avg_vehicle_count: Optional[float] = None,
+    traffic_congestion: Optional[str] = None,
     video_session_id: Optional[str] = None,
     webcam_session_id: Optional[str] = None,
 ):
@@ -956,6 +985,9 @@ def _rs_save_event(
             "estimated_distance_m": float(estimated_distance_m) if estimated_distance_m is not None else None,
             "source": str(source),
             "bbox": clean_bbox,
+            "vehicle_count": int(vehicle_count) if vehicle_count is not None else 0,
+            "avg_vehicle_count": float(avg_vehicle_count) if avg_vehicle_count is not None else 0.0,
+            "traffic_congestion": str(traffic_congestion) if traffic_congestion is not None else "LOW",
             "timestamp": datetime.utcnow(),
         }
         if video_session_id:
@@ -976,6 +1008,9 @@ def _rs_save_event_throttled(
     source: str,
     bbox: Optional[dict] = None,
     min_gap_sec: float = 10.0,
+    vehicle_count: Optional[int] = None,
+    avg_vehicle_count: Optional[float] = None,
+    traffic_congestion: Optional[str] = None,
     video_session_id: Optional[str] = None,
     webcam_session_id: Optional[str] = None,
 ):
@@ -996,6 +1031,9 @@ def _rs_save_event_throttled(
         estimated_distance_m,
         source,
         bbox,
+        vehicle_count=vehicle_count,
+        avg_vehicle_count=avg_vehicle_count,
+        traffic_congestion=traffic_congestion,
         video_session_id=video_session_id,
         webcam_session_id=webcam_session_id,
     )
@@ -1018,8 +1056,25 @@ def _rs_cam_worker():
         vehicle_risk = "LOW"
         nearest_vehicle_distance_m = None
         collision_high_risk = False
+        vehicle_count = 0
+        avg_vehicle_count = 0.0
+        traffic_congestion = "LOW"
         if _rs_ready:
             vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
+            vehicle_count = len(vehicle_items)
+            avg_vehicle_count, traffic_congestion = _rs_update_traffic_congestion(
+                _rs_webcam_vehicle_count_hist, vehicle_count
+            )
+            congestion_color = (34, 197, 94) if traffic_congestion == "LOW" else ((0, 165, 255) if traffic_congestion == "MEDIUM" else (0, 0, 255))
+            cv2.putText(
+                ann,
+                f"Traffic: {traffic_congestion} ({vehicle_count} veh, avg {avg_vehicle_count:.1f})",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                congestion_color,
+                2,
+            )
         if _rs_ready and _rs_webcam_session_active:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes   = res_det[0].boxes
@@ -1056,7 +1111,9 @@ def _rs_cam_worker():
                     "estimated_distance_m": estimated_distance_m,
                     "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
                     "vehicle_detections": vehicle_items,
-                    "vehicle_count": len(vehicle_items),
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
                     "vehicle_collision_risk": vehicle_risk,
                     "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
                     "collision_high_risk": collision_high_risk,
@@ -1070,12 +1127,17 @@ def _rs_cam_worker():
                         source="webcam_live",
                         bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
                         min_gap_sec=35.0,
+                        vehicle_count=vehicle_count,
+                        avg_vehicle_count=avg_vehicle_count,
+                        traffic_congestion=traffic_congestion,
                         webcam_session_id=_rs_webcam_session_id,
                     )
             else:
                 _rs_latest_info = {
                     "vehicle_detections": vehicle_items,
-                    "vehicle_count": len(vehicle_items),
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
                     "vehicle_collision_risk": vehicle_risk,
                     "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
                     "collision_high_risk": collision_high_risk,
@@ -1083,7 +1145,9 @@ def _rs_cam_worker():
         else:
             _rs_latest_info = {
                 "vehicle_detections": vehicle_items,
-                "vehicle_count": len(vehicle_items),
+                "vehicle_count": vehicle_count,
+                "avg_vehicle_count": avg_vehicle_count,
+                "traffic_congestion": traffic_congestion,
                 "vehicle_collision_risk": vehicle_risk,
                 "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
                 "collision_high_risk": collision_high_risk,
@@ -1103,6 +1167,7 @@ def _rs_start_camera() -> bool:
         return False
     with _rs_cam_lock:
         _rs_cap = cap
+    _rs_webcam_vehicle_count_hist.clear()
     _rs_cam_running = True
     threading.Thread(target=_rs_cam_worker, daemon=True).start()
     return True
@@ -1120,6 +1185,7 @@ def _rs_stop_camera():
     _rs_latest_ann  = None
     _rs_latest_raw  = None
     _rs_latest_info = {}
+    _rs_webcam_vehicle_count_hist.clear()
 
 
 def _rs_gen_mjpeg():
@@ -1349,8 +1415,25 @@ def _rs_video_worker():
         vehicle_risk = "LOW"
         nearest_vehicle_distance_m = None
         collision_high_risk = False
+        vehicle_count = 0
+        avg_vehicle_count = 0.0
+        traffic_congestion = "LOW"
         if _rs_ready:
             vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
+            vehicle_count = len(vehicle_items)
+            avg_vehicle_count, traffic_congestion = _rs_update_traffic_congestion(
+                _rs_video_vehicle_count_hist, vehicle_count
+            )
+            congestion_color = (34, 197, 94) if traffic_congestion == "LOW" else ((0, 165, 255) if traffic_congestion == "MEDIUM" else (0, 0, 255))
+            cv2.putText(
+                ann,
+                f"Traffic: {traffic_congestion} ({vehicle_count} veh, avg {avg_vehicle_count:.1f})",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                congestion_color,
+                2,
+            )
         if _rs_ready:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes = res_det[0].boxes
@@ -1397,6 +1480,9 @@ def _rs_video_worker():
                     source="video_stream",
                     bbox={"xmin": x1m, "ymin": y1m, "xmax": x2m, "ymax": y2m},
                     min_gap_sec=35.0,
+                    vehicle_count=vehicle_count,
+                    avg_vehicle_count=avg_vehicle_count,
+                    traffic_congestion=traffic_congestion,
                     video_session_id=_rs_video_session_id,
                 )
 
@@ -1410,7 +1496,9 @@ def _rs_video_worker():
                     "estimated_distance_text": best_walk.get("estimated_distance_text"),
                     "detections": info_list,
                     "vehicle_detections": vehicle_items,
-                    "vehicle_count": len(vehicle_items),
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
                     "vehicle_collision_risk": vehicle_risk,
                     "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
                     "collision_high_risk": collision_high_risk,
@@ -1418,7 +1506,9 @@ def _rs_video_worker():
             else:
                 _rs_video_latest_info = {
                     "vehicle_detections": vehicle_items,
-                    "vehicle_count": len(vehicle_items),
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
                     "vehicle_collision_risk": vehicle_risk,
                     "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
                     "collision_high_risk": collision_high_risk,
@@ -1482,6 +1572,7 @@ def rs_upload_video_stream():
 
     with _rs_video_lock:
         _rs_video_cap = cap
+    _rs_video_vehicle_count_hist.clear()
     _rs_video_session_id = uuid.uuid4().hex
     _rs_video_running = True
     threading.Thread(target=_rs_video_worker, daemon=True).start()
@@ -1526,6 +1617,7 @@ def rs_stop_video_stream():
     _rs_video_session_id = None
     _rs_video_latest_ann = None
     _rs_video_latest_info = {}
+    _rs_video_vehicle_count_hist.clear()
     return jsonify({"stopped": True})
 
 

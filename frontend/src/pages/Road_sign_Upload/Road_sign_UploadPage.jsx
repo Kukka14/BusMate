@@ -22,6 +22,12 @@ const formatDistance = (m) => {
   return `${Number(m).toFixed(2)} m`;
 };
 
+const trafficInsightText = (count, level) => {
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  const safeLevel = String(level || "LOW").toLowerCase();
+  return `${safeCount} vehicles detected — traffic appears ${safeLevel} in this area.`;
+};
+
 function playBeep(freq = 520, duration = 0.22, vol = 0.4) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -438,8 +444,32 @@ export default function Road_sign_UploadPage() {
                       <div className="rs-det-body">
                         <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
                         <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: statusColor(videoInfo.status), gridColumn: "1 / -1" }}
+                        >
+                          Sign Condition: {videoInfo.status || "Unknown"}
+                        </div>
                         <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
-                          {formatDistance(videoInfo.estimated_distance_m)}
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>Sign Distance: {formatDistance(videoInfo.estimated_distance_m)}</strong>
+                        </div>
+                        <div className="rs-det-status">
+                          Vehicles: {videoInfo.vehicle_count ?? 0}
+                        </div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          Avg Vehicles (10f): {Number(videoInfo.avg_vehicle_count ?? 0).toFixed(2)}
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}
+                        >
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>Traffic Congestion: {videoInfo.traffic_congestion || "LOW"}</strong>
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}
+                        >
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{trafficInsightText(videoInfo.vehicle_count, videoInfo.traffic_congestion)}</strong>
                         </div>
                         <div
                           className="rs-det-status"
@@ -449,25 +479,31 @@ export default function Road_sign_UploadPage() {
                         </div>
                         <div
                           className="rs-det-status"
-                          style={{ color: statusColor(videoInfo.status), gridColumn: "1 / -1" }}
-                        >
-                          {videoInfo.status}
-                        </div>
-                        <div
-                          className="rs-det-status"
                           style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}
                         >
-                          High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}</strong>
                         </div>
                       </div>
                     ) : videoInfo ? (
                       <div className="rs-det-body">
-                        <div className="rs-det-name">No road sign detected</div>
+                        <div className="rs-det-name">No road sign detected in this frame</div>
+                        <div className="rs-det-status">
+                          Vehicles: {videoInfo.vehicle_count ?? 0}
+                        </div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          Avg Vehicles (10f): {Number(videoInfo.avg_vehicle_count ?? 0).toFixed(2)}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          Traffic Congestion: {videoInfo.traffic_congestion || "LOW"}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}>
+                          {trafficInsightText(videoInfo.vehicle_count, videoInfo.traffic_congestion)}
+                        </div>
                         <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
                           Collision Risk: {videoInfo.vehicle_collision_risk || "LOW"}
                         </div>
                         <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}>
-                          High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}</strong>
                         </div>
                       </div>
                     ) : (

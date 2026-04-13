@@ -53,6 +53,12 @@ const formatDistance = (m) => {
   return `${Number(m).toFixed(2)} m`;
 };
 
+const trafficInsightText = (count, level) => {
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  const safeLevel = String(level || "LOW").toLowerCase();
+  return `${safeCount} vehicles detected — traffic appears ${safeLevel} in this area.`;
+};
+
 // ── Icons ──────────────────────────────────────────────────────────────────────
 const IcoCapture  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M20 7h-2.5l-1-2h-9l-1 2H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/></svg>;
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
@@ -423,19 +429,28 @@ export default function Road_sign_LivePage() {
                       {[
                         ["Status",       info.status,                              statusColor(info.status)],
                         ["Sign Class",   info.class_name.replace(/_/g, " "),       null],
-                        ["Distance",     formatDistance(info.estimated_distance_m),  "#0ea5e9"],
+                        ["Sign Distance", formatDistance(info.estimated_distance_m), "#0ea5e9"],
+                        ["Vehicle Count", info.vehicle_count ?? 0, null],
+                        ["Avg Vehicle Count", Number(info.avg_vehicle_count ?? 0).toFixed(2), "#0ea5e9"],
+                        ["Traffic Congestion", info.traffic_congestion || "LOW", (info.traffic_congestion === "HIGH" ? "#ef4444" : info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e")],
                         ["Collision Risk", info.vehicle_collision_risk || "LOW", (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
                         ["High Risk Distance", formatDistance(info.nearest_vehicle_distance_m), (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
                         ["Audio Alert",  audioEnabled ? "Enabled ✓" : "Muted",    audioEnabled ? "#22c55e" : "#64748b"],
                         ["Log Entries",  log.length,                               null],
-                      ].map(([lbl, val, clr]) => (
-                        <div className="rsl-metric-row" key={lbl}>
-                          <span className="rsl-metric-lbl">{lbl}</span>
-                          <span className="rsl-metric-val" style={clr ? { color: clr } : {}}>
-                            {val}
-                          </span>
-                        </div>
-                      ))}
+                        ].map(([lbl, val, clr]) => {
+                          const H = { fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" };
+                          const isHighlight = lbl === "Sign Distance" || lbl === "High Risk Distance" || lbl === "Traffic Congestion";
+                          const display = isHighlight ? (<strong style={H}>{val}</strong>) : val;
+                          const labelDisplay = isHighlight ? (<strong style={H}>{lbl}</strong>) : lbl;
+                          return (
+                            <div className="rsl-metric-row" key={lbl}>
+                              <span className="rsl-metric-lbl">{labelDisplay}</span>
+                              <span className="rsl-metric-val" style={clr ? { color: clr } : {}}>
+                                {display}
+                              </span>
+                            </div>
+                          );
+                        })}
                     </div>
 
                     {/* Driver instruction panel */}
@@ -448,15 +463,37 @@ export default function Road_sign_LivePage() {
                     <div className="rsl-det-name">No road sign detected</div>
                     <div className="rsl-det-metrics" style={{ marginTop: "0.6rem" }}>
                       <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Vehicle Count</span>
+                        <span className="rsl-metric-val">{info.vehicle_count ?? 0}</span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Avg Vehicle Count</span>
+                        <span className="rsl-metric-val" style={{ color: "#0ea5e9" }}>
+                          {Number(info.avg_vehicle_count ?? 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Traffic Congestion</span>
+                        <span className="rsl-metric-val" style={{ color: info.traffic_congestion === "HIGH" ? "#ef4444" : (info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{info.traffic_congestion || "LOW"}</strong>
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Traffic Insight</span>
+                        <span className="rsl-metric-val" style={{ color: info.traffic_congestion === "HIGH" ? "#ef4444" : (info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{trafficInsightText(info.vehicle_count, info.traffic_congestion)}</strong>
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
                         <span className="rsl-metric-lbl">Collision Risk</span>
                         <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
                           {info.vehicle_collision_risk || "LOW"}
                         </span>
                       </div>
                       <div className="rsl-metric-row">
-                        <span className="rsl-metric-lbl">High Risk Distance</span>
+                        <span className="rsl-metric-lbl"><strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance</strong></span>
                         <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
-                          {formatDistance(info.nearest_vehicle_distance_m)}
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{formatDistance(info.nearest_vehicle_distance_m)}</strong>
                         </span>
                       </div>
                     </div>
