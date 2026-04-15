@@ -193,6 +193,7 @@ export default function ActiveShiftPage() {
   const endTown   = scheduleInfo.end_town   || "Kandy";
   const busId     = scheduleInfo.bus         || "BUS-001";
   const routeName = scheduleInfo.route_name  || "Route";
+  const scheduleId = scheduleInfo.schedule_id || scheduleInfo.id || "";
 
   // ── Shift state ─────────────────────────────────────────────────────────
   const [shiftActive, setShiftActive] = useState(false);
@@ -437,7 +438,12 @@ export default function ActiveShiftPage() {
       return;
     }
     // Generate fresh stream URL each time shift starts (demo video)
-    rsSignStreamSrc.current = `/video_feed_demo?t=${Date.now()}`;
+    const rsQ = new URLSearchParams({
+      t: String(Date.now()),
+      driver_id: String(driverId || ""),
+      schedule_id: String(scheduleId || ""),
+    });
+    rsSignStreamSrc.current = `/video_feed_demo?${rsQ.toString()}`;
     setRsSignStreamErr(false);
 
     rsSignPollRef.current = setInterval(() => {
@@ -463,7 +469,7 @@ export default function ActiveShiftPage() {
       clearInterval(rsSignPollRef.current);
       fetch("/stop_demo_video").catch(() => {});
     };
-  }, [shiftActive]);
+  }, [shiftActive, driverId, scheduleId]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── HAZARD — Auto-analyze route on shift start ─────────────────────────
@@ -640,7 +646,20 @@ export default function ActiveShiftPage() {
   // ── START / STOP SHIFT ─────────────────────────────────────────────────
   async function handleStartShift() {
     try {
-      await fetch(`${API}/api/driver/shift/start`,{method:"POST",headers:{Authorization:`Bearer ${token}`}});
+      await fetch(`${API}/api/driver/shift/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          schedule_id: scheduleId,
+          shift_time: scheduleInfo.shift_time || "",
+          date: scheduleInfo.date || "",
+          start_town: startTown,
+          end_town: endTown,
+          bus: busId,
+          route_name: routeName,
+          route: `${startTown} → ${endTown}`,
+        }),
+      });
     } catch {}
     setShiftActive(true);
     setShiftStart(Date.now());
@@ -664,7 +683,7 @@ export default function ActiveShiftPage() {
     const damagedSigns = signLog.filter(s => s.status !== "Normal").length;
 
     const metrics = {
-      schedule_id: scheduleInfo.schedule_id || "",
+      schedule_id: scheduleId,
       shift_time: scheduleInfo.shift_time || "",
       date: scheduleInfo.date || "",
       start_town: startTown,

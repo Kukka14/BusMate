@@ -925,6 +925,7 @@ _rs_mongo_client = None
 _rs_mongo_db = None
 _rs_webcam_session_active = False
 _rs_webcam_session_id: Optional[str] = None
+_rs_active_shift_ctx: Dict[str, Optional[str]] = {"driver_id": None, "schedule_id": None}
 
 
 def _rs_get_db():
@@ -946,6 +947,49 @@ def _rs_get_db():
     return _rs_mongo_db
 
 
+def _rs_set_active_shift_ctx(driver_id: Optional[str] = None, schedule_id: Optional[str] = None):
+    """Track current road-sign stream shift context for shift_scores road_sign $push updates."""
+    global _rs_active_shift_ctx
+    _rs_active_shift_ctx = {
+        "driver_id": str(driver_id) if driver_id else None,
+        "schedule_id": str(schedule_id) if schedule_id else None,
+    }
+
+
+def _rs_append_sign_to_active_shift_score(
+    road_sign_obj: dict,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
+):
+    """Append one road-sign object into the current active shift_scores document using $push."""
+    try:
+        from user_management.database import get_db
+
+        db = get_db()
+        sid = str(schedule_id) if schedule_id else (_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None)
+        did = str(driver_id) if driver_id else (_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None)
+
+        active_filter = {"status": "Active"}
+        if sid:
+            active_filter["schedule_id"] = sid
+        elif did:
+            active_filter["driver_id"] = did
+
+        active_doc = db.shift_scores.find_one(active_filter, sort=[("scored_at", -1), ("start_time", -1)])
+        if not active_doc:
+            return
+
+        db.shift_scores.update_one(
+            {"_id": active_doc["_id"]},
+            {
+                "$push": {"road_sign": road_sign_obj},
+                "$set": {"updated_at": datetime.utcnow().isoformat()},
+            },
+        )
+    except Exception as _e:
+        app.logger.warning(f"Shift road_sign append failed: {_e}")
+
+
 def _rs_save_event(
     class_name: str,
     confidence: float,
@@ -958,6 +1002,8 @@ def _rs_save_event(
     traffic_congestion: Optional[str] = None,
     video_session_id: Optional[str] = None,
     webcam_session_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
 ):
     """Persist one road-sign detection event to MongoDB (best-effort)."""
     # Save only confident detections (> 45%).
@@ -979,6 +1025,7 @@ def _rs_save_event(
                     clean_bbox[k] = v
 
         doc = {
+            "id": uuid.uuid4().hex,
             "class_name": str(class_name),
             "confidence": float(confidence),
             "status": str(status),
@@ -988,14 +1035,14 @@ def _rs_save_event(
             "vehicle_count": int(vehicle_count) if vehicle_count is not None else 0,
             "avg_vehicle_count": float(avg_vehicle_count) if avg_vehicle_count is not None else 0.0,
             "traffic_congestion": str(traffic_congestion) if traffic_congestion is not None else "LOW",
+            "video_session_id": str(video_session_id) if video_session_id else None,
             "timestamp": datetime.utcnow(),
         }
-        if video_session_id:
-            doc["video_session_id"] = str(video_session_id)
         if webcam_session_id:
             doc["webcam_session_id"] = str(webcam_session_id)
 
         db.road_sign.insert_one(doc)
+        _rs_append_sign_to_active_shift_score(doc, driver_id=driver_id, schedule_id=schedule_id)
     except Exception as _e:
         app.logger.warning(f"Road-sign event save failed: {_e}")
 
@@ -1007,12 +1054,14 @@ def _rs_save_event_throttled(
     estimated_distance_m: Optional[float],
     source: str,
     bbox: Optional[dict] = None,
-    min_gap_sec: float = 10.0,
+    min_gap_sec: float = 35.0,
     vehicle_count: Optional[int] = None,
     avg_vehicle_count: Optional[float] = None,
     traffic_congestion: Optional[str] = None,
     video_session_id: Optional[str] = None,
     webcam_session_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
 ):
     # Keep DB only for confident signs (> 45%).
     if confidence is None or float(confidence) <= 0.45:
@@ -1036,6 +1085,8 @@ def _rs_save_event_throttled(
         traffic_congestion=traffic_congestion,
         video_session_id=video_session_id,
         webcam_session_id=webcam_session_id,
+        driver_id=driver_id,
+        schedule_id=schedule_id,
     )
 
 
@@ -1131,6 +1182,8 @@ def _rs_cam_worker():
                         avg_vehicle_count=avg_vehicle_count,
                         traffic_congestion=traffic_congestion,
                         webcam_session_id=_rs_webcam_session_id,
+                        driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                        schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
                     )
             else:
                 _rs_latest_info = {
@@ -1292,9 +1345,18 @@ def rs_get_detection_info():
 @app.route("/start_webcam_session", methods=["POST"])
 def rs_start_webcam_session():
     global _rs_webcam_session_active, _rs_webcam_session_id
+    body = request.get_json(silent=True) or {}
+    driver_id = body.get("driver_id") or request.args.get("driver_id")
+    schedule_id = body.get("schedule_id") or request.args.get("schedule_id")
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
     _rs_webcam_session_id = uuid.uuid4().hex
     _rs_webcam_session_active = True
-    return jsonify({"started": True, "webcam_session_id": _rs_webcam_session_id})
+    return jsonify({
+        "started": True,
+        "webcam_session_id": _rs_webcam_session_id,
+        "driver_id": _rs_active_shift_ctx.get("driver_id"),
+        "schedule_id": _rs_active_shift_ctx.get("schedule_id"),
+    })
 
 
 @app.route("/stop_webcam_session", methods=["POST"])
@@ -1302,6 +1364,7 @@ def rs_stop_webcam_session():
     global _rs_webcam_session_active, _rs_webcam_session_id
     _rs_webcam_session_active = False
     _rs_webcam_session_id = None
+    _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
 
@@ -1319,6 +1382,8 @@ def rs_capture_webcam():
         status=result["status"],
         estimated_distance_m=result.get("estimated_distance_m"),
         source="webcam_capture",
+        driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+        schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
     )
     result["input_type"] = "webcam"
     return jsonify(result)
@@ -1330,6 +1395,7 @@ def rs_stop_camera_route():
     _rs_stop_camera()
     _rs_webcam_session_active = False
     _rs_webcam_session_id = None
+    _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
 
@@ -1484,6 +1550,8 @@ def _rs_video_worker():
                     avg_vehicle_count=avg_vehicle_count,
                     traffic_congestion=traffic_congestion,
                     video_session_id=_rs_video_session_id,
+                    driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                    schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
                 )
 
             if info_list:
@@ -1540,6 +1608,9 @@ def rs_upload_video_stream():
     if not _rs_ready:
         return jsonify({"error": "Road-sign models not loaded"}), 503
     file = request.files.get("file")
+    driver_id = request.form.get("driver_id") or request.args.get("driver_id")
+    schedule_id = request.form.get("schedule_id") or request.args.get("schedule_id")
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
     if not file:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -1577,7 +1648,12 @@ def rs_upload_video_stream():
     _rs_video_running = True
     threading.Thread(target=_rs_video_worker, daemon=True).start()
     time.sleep(0.3)
-    return jsonify({"started": True, "video_session_id": _rs_video_session_id})
+    return jsonify({
+        "started": True,
+        "video_session_id": _rs_video_session_id,
+        "driver_id": _rs_active_shift_ctx.get("driver_id"),
+        "schedule_id": _rs_active_shift_ctx.get("schedule_id"),
+    })
 
 
 @app.route("/video_stream_feed")
@@ -1618,6 +1694,7 @@ def rs_stop_video_stream():
     _rs_video_latest_ann = None
     _rs_video_latest_info = {}
     _rs_video_vehicle_count_hist.clear()
+    _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
 
@@ -1662,6 +1739,8 @@ def _rs_demo_worker():
                     "Damaged"          if conf <  _RS_DMG_THR  else
                     "Possibly unclear"
                 )
+                _rs_log_bbox(x1, y1, x2, y2, source="road_sign/demo_video")
+                estimated_distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
                 color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
                 cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
                 lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
@@ -1669,7 +1748,24 @@ def _rs_demo_worker():
                 cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
                 cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-                _rs_demo_latest_info = {"class_name": cls, "confidence": conf, "status": status}
+                _rs_demo_latest_info = {
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                }
+                _rs_save_event_throttled(
+                    class_name=cls,
+                    confidence=conf,
+                    status=status,
+                    estimated_distance_m=estimated_distance_m,
+                    source="demo_video_stream",
+                    bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
+                    min_gap_sec=35.0,
+                    driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                    schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                )
             else:
                 _rs_demo_latest_info = {}
         _rs_demo_latest_ann = ann
@@ -1692,6 +1788,9 @@ def _rs_demo_gen_mjpeg():
 @app.route("/video_feed_demo")
 def rs_video_feed_demo():
     global _rs_demo_running
+    driver_id = request.args.get("driver_id", type=str)
+    schedule_id = request.args.get("schedule_id", type=str)
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
     if not _rs_ready:
         return jsonify({"error": "Road-sign models not loaded"}), 503
     if not _DEMO_VIDEO_PATH.exists():
@@ -1719,6 +1818,7 @@ def rs_stop_demo_video():
     time.sleep(0.15)
     _rs_demo_latest_ann = None
     _rs_demo_latest_info = {}
+    _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
 

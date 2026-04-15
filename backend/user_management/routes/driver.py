@@ -379,11 +379,58 @@ def start_shift_get(current_user):
     return jsonify({"message": "use POST"}), 405
 
 
+def _create_shift_with_empty_road_sign(current_user, payload):
+    """Create/find an active shift_scores document initialized with empty road_sign array."""
+    from ..database import get_db
+    db = get_db()
+
+    uid = str(current_user.id)
+    schedule_id = str(payload.get("schedule_id", "") or "")
+
+    active_filter = {"driver_id": uid, "status": "Active"}
+    if schedule_id:
+        active_filter["schedule_id"] = schedule_id
+
+    existing = db.shift_scores.find_one(active_filter, {"_id": 1, "schedule_id": 1, "status": 1})
+    if existing:
+        return str(existing.get("_id")), False
+
+    now_iso = datetime.utcnow().isoformat()
+    doc = {
+        "driver_id": uid,
+        "driver_name": current_user.username,
+        "scored_at": now_iso,
+        "start_time": now_iso,
+        "schedule_id": schedule_id,
+        "date": payload.get("date", ""),
+        "shift_time": payload.get("shift_time", ""),
+        "start_town": payload.get("start_town", ""),
+        "end_town": payload.get("end_town", ""),
+        "bus": payload.get("bus", ""),
+        "route_name": payload.get("route_name", ""),
+        "route": payload.get("route", ""),
+        "duration_sec": payload.get("duration_sec", 0),
+        "metrics": {},
+        "score": {},
+        "status": "Active",
+        "road_sign": [],
+    }
+    result = db.shift_scores.insert_one(doc)
+    return str(result.inserted_id), True
+
+
 @driver_bp.post("/shift/start")
 @token_required
 def start_shift(current_user):
-    return jsonify({"message": "Shift started", "shift_active": True,
-                    "start_time": datetime.utcnow().isoformat()}), 200
+    payload = request.get_json(silent=True) or {}
+    shift_id, created = _create_shift_with_empty_road_sign(current_user, payload)
+    return jsonify({
+        "message": "Shift started" if created else "Shift already active",
+        "shift_active": True,
+        "start_time": datetime.utcnow().isoformat(),
+        "shift_score_id": shift_id,
+        "schedule_id": payload.get("schedule_id", ""),
+    }), 200
 
 
 @driver_bp.post("/shift/stop")
@@ -516,8 +563,7 @@ def save_shift_score(current_user):
     from ..database import get_db
     db = get_db()
 
-    # Full shift document with schedule details + score
-    doc = {
+    completed_fields = {
         "driver_id":    uid,
         "driver_name":  current_user.username,
         "scored_at":    datetime.utcnow().isoformat(),
@@ -534,7 +580,17 @@ def save_shift_score(current_user):
         "score":        score_result,
         "status":       "Completed",
     }
-    db.shift_scores.insert_one(doc)
+
+    # Prefer updating the active shift document so accumulated road_sign array is preserved.
+    active_filter = {"driver_id": uid, "status": "Active"}
+    if data.get("schedule_id"):
+        active_filter["schedule_id"] = data.get("schedule_id")
+
+    upd = db.shift_scores.update_one(active_filter, {"$set": completed_fields})
+    if upd.matched_count == 0:
+        # Fallback: keep previous behavior and insert a completed doc, initialized with empty road_sign.
+        completed_fields["road_sign"] = []
+        db.shift_scores.insert_one(completed_fields)
 
     return jsonify(score_result), 200
 
@@ -611,7 +667,7 @@ def get_schedules(current_user):
     db = get_db()
     completed = list(
         db.shift_scores.find(
-            {"driver_id": uid},
+            {"driver_id": uid, "status": "Completed"},
             {"_id": 0, "schedule_id": 1, "score": 1, "duration_sec": 1, "scored_at": 1}
         ).sort("scored_at", -1)
     )
