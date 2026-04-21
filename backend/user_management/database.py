@@ -22,6 +22,8 @@ def _ensure_indexes(db):
     db.users.create_index([("email", ASCENDING)], unique=True)
     db.users.create_index([("username", ASCENDING)], unique=True)
     db.driving_sessions.create_index([("driver_id", ASCENDING), ("started_at", ASCENDING)])
+    # One profile per driver — enforce uniqueness on user_id
+    db.driver_profiles.create_index([("user_id", ASCENDING)], unique=True)
 
 
 def ping():

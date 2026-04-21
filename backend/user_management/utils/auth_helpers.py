@@ -23,8 +23,7 @@ def token_required(f):
     def decorated(*args, **kwargs):
         # Let CORS preflight through without auth check
         if request.method == "OPTIONS":
-            from flask import current_app
-            return current_app.make_default_options_response()
+            return jsonify({}), 200
 
         from ..database import get_db
         from ..models.user import User

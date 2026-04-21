@@ -2,8 +2,10 @@ import os
 import json
 import tempfile
 import base64
+import uuid
 from collections import defaultdict, deque, Counter
 from typing import Dict, Optional, Any
+from datetime import datetime, timezone
 
 import cv2
 import numpy as np
@@ -29,7 +31,18 @@ from drowsiness_engine import DrowsinessEngine
 
 app = Flask(__name__)
 app.config.from_object(Config)
-CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"])
+CORS(
+    app,
+    origins=[
+        "http://localhost:5173", "http://localhost:5174",
+        "http://localhost:5175", "http://localhost:5176",
+        "http://127.0.0.1:5173", "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175", "http://127.0.0.1:5176",
+    ],
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Register user management blueprints (MongoDB — no table creation needed)
@@ -279,6 +292,11 @@ def compute_bvi_for_session(session_id):
 # (Vite proxy strips the /road-sign prefix so the paths arrive here as-is)
 # =============================================================================
 
+
+from sahi import AutoDetectionModel
+from sahi.predict import get_sliced_prediction
+
+
 _RS_W            = Path(__file__).resolve().parent / "Road_sign_detection" / "Weight"
 _RS_IMG_SIZE     = 224
 _RS_MARGIN       = 0.15
@@ -289,21 +307,95 @@ _RS_MAX_DET      = 20
 
 _rs_ready      = False
 _rs_detector   = None
+_rs_vehicle_detector = None
 _rs_mobilenet  = None
 _rs_custom_mdl = None
 _rs_yolo_clf   = None
+_rs_sahi_model = None
+_rs_dist_model = None
+_rs_dist_input_rank = 2
 _rs_idx2class: dict = {}
+_RS_VEHICLE_LABELS = {"car", "bus", "truck", "motorcycle"}
+_rs_last_collision_beep_at = 0.0
+_rs_webcam_vehicle_count_hist = deque(maxlen=10)
+_rs_video_vehicle_count_hist = deque(maxlen=10)
+
+
+def _rs_get_collision_risk(distance_m: Optional[float]) -> str:
+    """Collision risk based on estimated vehicle distance (meters)."""
+    if distance_m is None:
+        return "LOW"
+    try:
+        d = float(distance_m)
+    except Exception:
+        return "LOW"
+    if not np.isfinite(d):
+        return "LOW"
+    if d < 2:
+        return "HIGH"
+    elif d <= 15:
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+
+def _rs_maybe_collision_beep(should_beep: bool, min_gap_sec: float = 1.2):
+    """Emit a simple server-side beep (best effort) when high collision risk is present."""
+    # intentionally left as a no-op to disable server-side collision beeps
+    return
+    try:
+        print("\a", end="", flush=True)
+    except Exception:
+        pass
+
+
+def _rs_get_traffic_congestion(avg_vehicle_count: float) -> str:
+    """Classify traffic congestion from smoothed vehicle count."""
+    try:
+        c = float(avg_vehicle_count)
+    except Exception:
+        c = 0.0
+    if c > 10:
+        return "HIGH"
+    elif c > 5:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _rs_update_traffic_congestion(count_hist: deque, vehicle_count: int):
+    """Update rolling vehicle-count window and return (avg_count, congestion_level)."""
+    try:
+        vc = int(vehicle_count)
+    except Exception:
+        vc = 0
+    count_hist.append(vc)
+    avg_count = float(np.mean(count_hist)) if len(count_hist) else 0.0
+    return round(avg_count, 2), _rs_get_traffic_congestion(avg_count)
+
+
+def _rs_build_distance_fallback_model():
+    """Fallback architecture for legacy distance model weights (input: 4 bbox values)."""
+    return _keras.Sequential([
+        _layers.Input(shape=(4,)),
+        _layers.Dense(6, activation="relu", name="dense_1"),
+        _layers.Dense(5, activation="relu", name="dense_2"),
+        _layers.Dense(2, activation="relu", name="dense_3"),
+        _layers.Dense(1, activation="linear", name="dense_4"),
+    ])
 
 
 def _rs_init():
     """Load all road-sign models once at startup; no-op if weights are missing."""
-    global _rs_ready, _rs_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class
+    global _rs_ready, _rs_detector, _rs_vehicle_detector, _rs_mobilenet, _rs_custom_mdl, _rs_yolo_clf, _rs_idx2class, _rs_dist_model, _rs_dist_input_rank
 
-    det_pt   = _RS_W / "Detect_Model/RoadSignDetector_v22/weights/best.pt"
+    det_pt   = _RS_W / "Detect_Model/Yolo/best.pt"
     mob_h5   = _RS_W / "mobilenet_weights/Mobilenetv2_Retrain_weight/phase2_epoch_015.weights.h5"
     cst_h5   = _RS_W / "Custom_model2_weights/epoch_026.weights.h5"
     clf_pt   = _RS_W / "YOLO8/YOLOv8_Classifier/weights/best.pt"
     map_json = _RS_W / "Custom_model2_weights/class_mapping.json"
+    dist_json = _RS_W / "Distance_Estimate_model/model@1535477330.json"
+    dist_h5   = _RS_W / "Distance_Estimate_model/model@1535477330.h5"
+    vehicle_pt = Path(__file__).resolve().parent / "yolov8n.pt"
 
     if not all(p.exists() for p in [det_pt, mob_h5, cst_h5, clf_pt, map_json]):
         print("\u26a0  Road-sign weights not found \u2014 /upload and related routes disabled.")
@@ -311,6 +403,20 @@ def _rs_init():
 
     try:
         _rs_detector = YOLO(str(det_pt))
+        if vehicle_pt.exists():
+            _rs_vehicle_detector = YOLO(str(vehicle_pt))
+            print("✅ Vehicle detector loaded (yolov8n.pt).")
+        else:
+            _rs_vehicle_detector = None
+            print("⚠  Vehicle detector weights not found (yolov8n.pt) — vehicle overlay disabled.")
+
+        # SAHI wrapper for small object detection
+        global _rs_sahi_model
+        _rs_sahi_model = AutoDetectionModel.from_pretrained(
+            model_type="yolov8",
+            model_path=str(det_pt),
+            confidence_threshold=0.25,
+        )
 
         with open(map_json) as _f:
             _ci = json.load(_f)
@@ -368,6 +474,45 @@ def _rs_init():
 
         _rs_yolo_clf = YOLO(str(clf_pt))
 
+        # Optional distance-estimation model (input: [xmin, ymin, xmax, ymax])
+        _rs_dist_model = None
+        if dist_json.exists() and dist_h5.exists():
+            try:
+                with open(dist_json, "r", encoding="utf-8") as _f:
+                    _rs_dist_model = _keras.models.model_from_json(
+                        _f.read(),
+                        custom_objects={
+                            "Sequential": _keras.Sequential,
+                            "Dense": _layers.Dense,
+                        },
+                    )
+                _rs_dist_model.load_weights(str(dist_h5))
+                _rs_dist_input_rank = (
+                    len(_rs_dist_model.input_shape)
+                    if isinstance(_rs_dist_model.input_shape, tuple)
+                    else 2
+                )
+                print("✅ Road-sign distance model loaded.")
+            except Exception as _dist_e:
+                # Keras 2.x JSON models may fail to deserialize on newer TF/Keras.
+                try:
+                    _rs_dist_model = _rs_build_distance_fallback_model()
+                    _rs_dist_model.load_weights(str(dist_h5))
+                    _rs_dist_input_rank = (
+                        len(_rs_dist_model.input_shape)
+                        if isinstance(_rs_dist_model.input_shape, tuple)
+                        else 2
+                    )
+                    print("✅ Road-sign distance model loaded (fallback architecture).")
+                except Exception as _dist_fallback_e:
+                    _rs_dist_model = None
+                    _rs_dist_input_rank = 2
+                    print(f"⚠  Distance model load failed — distance output disabled: {_dist_e}")
+                    print(f"⚠  Distance fallback load failed: {_dist_fallback_e}")
+        else:
+            _rs_dist_input_rank = 2
+            print("⚠  Road-sign distance model not found — distance output disabled.")
+
         _rs_ready = True
         print("\u2705 Road-sign detection models loaded.")
 
@@ -395,6 +540,160 @@ def _rs_clahe(img: np.ndarray) -> np.ndarray:
     l, a, b_ch = cv2.split(lab)
     cl = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
     return cv2.cvtColor(cv2.merge((cl, a, b_ch)), cv2.COLOR_LAB2BGR)
+
+
+def _rs_log_bbox(xmin: int, ymin: int, xmax: int, ymax: int, source: str = "road_sign"):
+    """Print road-sign bounding box coordinates to terminal."""
+    print(f"[{source}] xmin: {xmin}")
+    print(f"[{source}] ymin: {ymin}")
+    print(f"[{source}] xmax: {xmax}")
+    print(f"[{source}] ymax: {ymax}")
+
+
+def _rs_draw_vehicle_detections(frame: np.ndarray, ann: np.ndarray):
+    """Draw vehicle-only detections; return per-vehicle risk summary."""
+    if _rs_vehicle_detector is None:
+        return [], "LOW", None, False
+    try:
+        veh_res = _rs_vehicle_detector(frame, conf=0.25, verbose=False)
+        boxes = veh_res[0].boxes
+        names = getattr(_rs_vehicle_detector, "names", {}) or {}
+        vehicles = []
+        nearest_distance = None
+        highest_risk_rank = 0
+
+        def _risk_rank(level: str) -> int:
+            return {"LOW": 0, "MEDIUM": 1, "HIGH": 2}.get(level, 0)
+
+        for box in boxes:
+            cls_idx = int(box.cls[0])
+            label = str(names.get(cls_idx, cls_idx)).lower()
+            if label not in _RS_VEHICLE_LABELS:
+                continue
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = float(box.conf[0])
+            distance_m = _rs_estimate_vehicle_distance(x1, y1, x2, y2, frame.shape)
+            risk_level = _rs_get_collision_risk(distance_m)
+            highest_risk_rank = max(highest_risk_rank, _risk_rank(risk_level))
+            if distance_m is not None and (nearest_distance is None or distance_m < nearest_distance):
+                nearest_distance = distance_m
+
+            color = (0, 165, 255)
+            if risk_level == "HIGH":
+                color = (0, 0, 255)
+            elif risk_level == "MEDIUM":
+                color = (0, 140, 255)
+
+            cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
+            lbl_top = f"{label} {conf * 100:.0f}%"
+            dist_text = f"{distance_m:.1f}m" if distance_m is not None else "--m"
+            lbl_bottom = f"{dist_text} | {risk_level} RISK"
+            tw = max(len(lbl_top), len(lbl_bottom)) * 9
+            top_y = max(0, y1 - 44)
+            mid_y = max(0, y1 - 22)
+            cv2.rectangle(ann, (x1, top_y), (x1 + tw, y1), (0, 0, 0), -1)
+            cv2.putText(ann, lbl_top, (x1 + 3, max(14, mid_y - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
+            cv2.putText(ann, lbl_bottom, (x1 + 3, max(14, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+            vehicles.append({
+                "class_name": label,
+                "confidence": conf,
+                "estimated_distance_m": distance_m,
+                "risk_level": risk_level,
+                "bbox": {"xmin": int(x1), "ymin": int(y1), "xmax": int(x2), "ymax": int(y2)},
+            })
+
+        risk_summary = "LOW"
+        if highest_risk_rank == 2:
+            risk_summary = "HIGH"
+        elif highest_risk_rank == 1:
+            risk_summary = "MEDIUM"
+
+        high_risk = risk_summary == "HIGH"
+        _rs_maybe_collision_beep(high_risk)
+        return vehicles, risk_summary, nearest_distance, high_risk
+    except Exception:
+        # Keep stream alive even if vehicle inference fails for a frame.
+        return [], "LOW", None, False
+
+
+def _rs_estimate_distance(
+    xmin: int,
+    ymin: int,
+    xmax: int,
+    ymax: int,
+    frame_shape: Optional[tuple] = None,
+) -> Optional[float]:
+    """Estimate distance (meters) from a road-sign bounding box."""
+    # Match test_distance.py logic exactly (legacy scaler behavior + input rank handling).
+    if _rs_dist_model is None:
+        return None
+
+    try:
+        input_box = np.array([[xmin, ymin, xmax, ymax]], dtype="float32")
+
+        # StandardScaler fitted on [[0,0,0,0], [1000,1000,1000,1000]]
+        # => mean=500, std=500 for each feature
+        input_scaled = (input_box - 500.0) / 500.0
+
+        if _rs_dist_input_rank == 3:
+            model_input = input_scaled.reshape((1, 1, 4))
+        else:
+            model_input = input_scaled
+
+        pred_scaled = _rs_dist_model.predict(model_input, verbose=0)
+        pred_scaled_2d = np.array(pred_scaled, dtype="float32").reshape(-1, 1)
+
+        # StandardScaler fitted on [[0], [100]] => mean=50, std=50
+        distance = (pred_scaled_2d * 50.0) + 50.0
+        dist_m = float(distance[0][0])
+
+        if not np.isfinite(dist_m):
+            return None
+        dist_m = dist_m - 10.0
+        return round(dist_m, 2)
+    except Exception:
+        return None
+
+
+def _rs_estimate_vehicle_distance(
+    xmin: int,
+    ymin: int,
+    xmax: int,
+    ymax: int,
+    frame_shape: Optional[tuple] = None,
+) -> Optional[float]:
+    """Estimate distance (meters) from a vehicle bounding box for collision-risk logic."""
+    # Keep road-sign estimator unchanged; vehicle path uses a different offset.
+    if _rs_dist_model is None:
+        return None
+
+    try:
+        input_box = np.array([[xmin, ymin, xmax, ymax]], dtype="float32")
+
+        # StandardScaler fitted on [[0,0,0,0], [1000,1000,1000,1000]]
+        # => mean=500, std=500 for each feature
+        input_scaled = (input_box - 500.0) / 500.0
+
+        if _rs_dist_input_rank == 3:
+            model_input = input_scaled.reshape((1, 1, 4))
+        else:
+            model_input = input_scaled
+
+        pred_scaled = _rs_dist_model.predict(model_input, verbose=0)
+        pred_scaled_2d = np.array(pred_scaled, dtype="float32").reshape(-1, 1)
+
+        # StandardScaler fitted on [[0], [100]] => mean=50, std=50
+        distance = (pred_scaled_2d * 50.0) + 50.0
+        dist_m = float(distance[0][0])
+
+        if not np.isfinite(dist_m):
+            return None
+        dist_m = dist_m + 2.0
+        return round(dist_m, 2)
+    except Exception:
+        return None
 
 
 # ── Road-sign prediction helpers ───────────────────────────────────────────────
@@ -427,21 +726,147 @@ def rs_process_frame(frame: np.ndarray):
     if not _rs_ready:
         return None
     orig    = frame.copy()
-    res_det = _rs_detector(frame, conf=0.25, verbose=False)
-    boxes   = res_det[0].boxes
-    if len(boxes) == 0:
+    # Run normal YOLO on full frame (catches big signs)
+    full_result = _rs_detector(frame, conf=0.25, verbose=False)
+    full_boxes = full_result[0].boxes
+
+    # Run SAHI on sliced frame (catches small/distant signs)
+    sahi_result = get_sliced_prediction(
+        frame,
+        _rs_sahi_model,
+        slice_height=320,
+        slice_width=320,
+        overlap_height_ratio=0.2,
+        overlap_width_ratio=0.2,
+    )
+    sahi_boxes = sahi_result.object_prediction_list
+
+    # Build combined candidate list
+    all_candidates = []
+
+    # Add full-frame YOLO detections
+    for box in full_boxes:
+        coords = box.xyxy[0].cpu().numpy().astype(int)
+        all_candidates.append({
+            "x1": coords[0], "y1": coords[1],
+            "x2": coords[2], "y2": coords[3],
+            "conf": float(box.conf[0])
+        })
+
+    # Add SAHI detections
+    for box in sahi_boxes:
+        all_candidates.append({
+            "x1": int(box.bbox.minx), "y1": int(box.bbox.miny),
+            "x2": int(box.bbox.maxx), "y2": int(box.bbox.maxy),
+            "conf": float(box.score.value)
+        })
+
+    if len(all_candidates) == 0:
         return None
 
-    best = max(boxes, key=lambda b: float(b.conf[0]))
-    x1, y1, x2, y2 = best.xyxy[0].cpu().numpy().astype(int)
-    w, h   = x2 - x1, y2 - y1
-    mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
-    x1, y1 = max(0, x1 - mx), max(0, y1 - my)
-    x2, y2 = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
-    crop    = frame[y1:y2, x1:x2]
+    # ── Deduplicate overlapping boxes (IoU > 0.5 = same sign) ──
+    def _iou(a, b):
+        ix1 = max(a["x1"], b["x1"])
+        iy1 = max(a["y1"], b["y1"])
+        ix2 = min(a["x2"], b["x2"])
+        iy2 = min(a["y2"], b["y2"])
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        if inter == 0:
+            return 0.0
+        area_a = (a["x2"]-a["x1"]) * (a["y2"]-a["y1"])
+        area_b = (b["x2"]-b["x1"]) * (b["y2"]-b["y1"])
+        return inter / (area_a + area_b - inter)
 
-    candidates = [(c, *_rs_ensemble(c)) for c in [crop, _rs_sharpen(crop), _rs_clahe(crop)]]
-    best_crop, class_name, confidence = max(candidates, key=lambda v: v[2])
+    # Sort by confidence descending
+    all_candidates.sort(key=lambda b: b["conf"], reverse=True)
+
+    # Keep boxes that dont overlap with already kept boxes
+    kept = []
+    for cand in all_candidates:
+        if all(_iou(cand, k) < 0.5 for k in kept):
+            kept.append(cand)
+
+    # ── Process EACH unique detected sign ──
+    sign_results = []
+
+    for det in kept:
+        x1, y1 = det["x1"], det["y1"]
+        x2, y2 = det["x2"], det["y2"]
+
+        w, h   = x2 - x1, y2 - y1
+        mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
+        x1, y1 = max(0, x1 - mx), max(0, y1 - my)
+        x2, y2 = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
+        crop   = frame[y1:y2, x1:x2]
+
+        if crop.size == 0:
+            continue
+
+        # Multi-version + ensemble on each sign
+        versions = [
+            ("Original", crop),
+            ("Sharpen",  _rs_sharpen(crop)),
+            ("CLAHE",    _rs_clahe(crop)),
+        ]
+
+        best_conf  = -1.0
+        best_class = None
+        best_crop  = None
+
+        for ver_name, ver_img in versions:
+            cls, conf = _rs_ensemble(ver_img)
+            if conf > best_conf:
+                best_conf  = conf
+                best_class = cls
+                best_crop  = ver_img
+
+        sign_results.append({
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "class_name": best_class,
+            "confidence": best_conf,
+            "estimated_distance_m": _rs_estimate_distance(x1, y1, x2, y2, frame.shape),
+            "crop":       best_crop,
+        })
+
+    if not sign_results:
+        return None
+
+    # ── For output use the highest confidence sign as primary ──
+    primary = max(sign_results, key=lambda s: s["confidence"])
+    class_name = primary["class_name"]
+    confidence = primary["confidence"]
+    estimated_distance_m = primary.get("estimated_distance_m")
+    best_crop  = primary["crop"]
+    x1 = primary["x1"]
+    y1 = primary["y1"]
+    x2 = primary["x2"]
+    y2 = primary["y2"]
+    # # Multi-version enhancement
+    # versions = [
+    #     ("Original", crop),
+    #     ("Sharpen",  _rs_sharpen(crop)),
+    #     ("CLAHE",    _rs_clahe(crop)),
+    # ]
+
+    # # Run ensemble on each version, pick best
+    # best_version_name = None
+    # best_crop         = None
+    # best_class        = None
+    # best_conf         = -1.0
+
+    # for ver_name, ver_img in versions:
+    #     cls, conf = _rs_ensemble(ver_img)
+    #     if conf > best_conf:
+    #         best_conf         = conf
+    #         best_class        = cls
+    #         best_crop         = ver_img
+    #         best_version_name = ver_name
+
+    # class_name = best_class
+    # confidence = best_conf
+
+    # candidates = [(c, *_rs_ensemble(c)) for c in [crop, _rs_sharpen(crop), _rs_clahe(crop)]]
+    # best_crop, class_name, confidence = max(candidates, key=lambda v: v[2])
 
     status = (
         "Normal"           if confidence >= _RS_NORM_THR else
@@ -451,9 +876,23 @@ def rs_process_frame(frame: np.ndarray):
     color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
 
     det = orig.copy()
-    cv2.rectangle(det, (x1, y1), (x2, y2), color, 3)
-    cv2.putText(det, f"{class_name.replace('_', ' ')} ({confidence:.2f})",
-                (x1, max(14, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+
+    # Draw ALL detected signs on the frame
+    for sign in sign_results:
+        _rs_log_bbox(sign["x1"], sign["y1"], sign["x2"], sign["y2"], source="road_sign/image_or_video")
+        s_color = (0, 255, 0) if sign["confidence"] >= _RS_NORM_THR else (0, 0, 255)
+        cv2.rectangle(det,
+                    (sign["x1"], sign["y1"]),
+                    (sign["x2"], sign["y2"]),
+                    s_color, 3)
+        cv2.putText(det,
+                    f"{sign['class_name'].replace('_',' ')} ({sign['confidence']:.2f})",
+                    (sign["x1"], max(14, sign["y1"] - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, s_color, 2)
+
+
+
+
 
     crop_disp = best_crop.copy()
     cv2.putText(crop_disp, class_name.replace("_", " "),
@@ -467,6 +906,8 @@ def rs_process_frame(frame: np.ndarray):
         "class_name":     class_name,
         "confidence":     f"{confidence * 100:.1f}%",
         "status":         status,
+        "estimated_distance_m": estimated_distance_m,
+        "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
     }
 
 
@@ -478,10 +919,180 @@ _rs_cam_running = False
 _rs_latest_raw  = None
 _rs_latest_ann  = None
 _rs_latest_info: dict = {}
+_rs_last_saved_at: dict = {}
+_rs_last_saved_meta: dict = {}
+_rs_mongo_client = None
+_rs_mongo_db = None
+_rs_webcam_session_active = False
+_rs_webcam_session_id: Optional[str] = None
+_rs_active_shift_ctx: Dict[str, Optional[str]] = {"driver_id": None, "schedule_id": None}
+
+
+def _rs_get_db():
+    """Road-sign specific MongoDB accessor (independent from user-management indexes)."""
+    global _rs_mongo_client, _rs_mongo_db
+    if _rs_mongo_db is not None:
+        return _rs_mongo_db
+
+    from pymongo import MongoClient
+
+    uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/driveguard")
+    _rs_mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+    db_name = uri.rsplit("/", 1)[-1].split("?")[0] or "driveguard"
+    _rs_mongo_db = _rs_mongo_client[db_name]
+
+    # Ensure collection and useful indexes exist for analytics queries
+    _rs_mongo_db.road_sign.create_index([("class_name", 1), ("timestamp", -1)])
+    _rs_mongo_db.road_sign.create_index([("source", 1), ("timestamp", -1)])
+    return _rs_mongo_db
+
+
+def _rs_set_active_shift_ctx(driver_id: Optional[str] = None, schedule_id: Optional[str] = None):
+    """Track current road-sign stream shift context for shift_scores road_sign $push updates."""
+    global _rs_active_shift_ctx
+    _rs_active_shift_ctx = {
+        "driver_id": str(driver_id) if driver_id else None,
+        "schedule_id": str(schedule_id) if schedule_id else None,
+    }
+
+
+def _rs_append_sign_to_active_shift_score(
+    road_sign_obj: dict,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
+):
+    """Append one road-sign object into the current active shift_scores document using $push."""
+    try:
+        from user_management.database import get_db
+
+        db = get_db()
+        sid = str(schedule_id) if schedule_id else (_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None)
+        did = str(driver_id) if driver_id else (_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None)
+
+        active_filter = {"status": "Active"}
+        if sid:
+            active_filter["schedule_id"] = sid
+        elif did:
+            active_filter["driver_id"] = did
+
+        active_doc = db.shift_scores.find_one(active_filter, sort=[("scored_at", -1), ("start_time", -1)])
+        if not active_doc:
+            return
+
+        db.shift_scores.update_one(
+            {"_id": active_doc["_id"]},
+            {
+                "$push": {"road_sign": road_sign_obj},
+                "$set": {"updated_at": datetime.utcnow().isoformat()},
+            },
+        )
+    except Exception as _e:
+        app.logger.warning(f"Shift road_sign append failed: {_e}")
+
+
+def _rs_save_event(
+    class_name: str,
+    confidence: float,
+    status: str,
+    estimated_distance_m: Optional[float],
+    source: str,
+    bbox: Optional[dict] = None,
+    vehicle_count: Optional[int] = None,
+    avg_vehicle_count: Optional[float] = None,
+    traffic_congestion: Optional[str] = None,
+    video_session_id: Optional[str] = None,
+    webcam_session_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
+):
+    """Persist one road-sign detection event to MongoDB (best-effort)."""
+    # Save only confident detections (> 45%).
+    # Only persist detections where confidence is strictly greater than 45%.
+    if confidence is None or float(confidence) <= 0.45:
+        return
+
+    try:
+        db = _rs_get_db()
+
+        clean_bbox = {}
+        if isinstance(bbox, dict):
+            for k, v in bbox.items():
+                if isinstance(v, np.integer):
+                    clean_bbox[k] = int(v)
+                elif isinstance(v, np.floating):
+                    clean_bbox[k] = float(v)
+                else:
+                    clean_bbox[k] = v
+
+        doc = {
+            "id": uuid.uuid4().hex,
+            "class_name": str(class_name),
+            "confidence": float(confidence),
+            "status": str(status),
+            "estimated_distance_m": float(estimated_distance_m) if estimated_distance_m is not None else None,
+            "source": str(source),
+            "bbox": clean_bbox,
+            "vehicle_count": int(vehicle_count) if vehicle_count is not None else 0,
+            "avg_vehicle_count": float(avg_vehicle_count) if avg_vehicle_count is not None else 0.0,
+            "traffic_congestion": str(traffic_congestion) if traffic_congestion is not None else "LOW",
+            "video_session_id": str(video_session_id) if video_session_id else None,
+            "timestamp": datetime.utcnow(),
+        }
+        if webcam_session_id:
+            doc["webcam_session_id"] = str(webcam_session_id)
+
+        db.road_sign.insert_one(doc)
+        _rs_append_sign_to_active_shift_score(doc, driver_id=driver_id, schedule_id=schedule_id)
+    except Exception as _e:
+        app.logger.warning(f"Road-sign event save failed: {_e}")
+
+
+def _rs_save_event_throttled(
+    class_name: str,
+    confidence: float,
+    status: str,
+    estimated_distance_m: Optional[float],
+    source: str,
+    bbox: Optional[dict] = None,
+    min_gap_sec: float = 35.0,
+    vehicle_count: Optional[int] = None,
+    avg_vehicle_count: Optional[float] = None,
+    traffic_congestion: Optional[str] = None,
+    video_session_id: Optional[str] = None,
+    webcam_session_id: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
+):
+    # Keep DB only for confident signs (> 45%).
+    if confidence is None or float(confidence) <= 0.45:
+        return
+
+    key = str(class_name)
+    now = time.time()
+    last = _rs_last_saved_at.get(key, 0.0)
+    if (now - last) < min_gap_sec:
+        return
+    _rs_last_saved_at[key] = now
+    _rs_save_event(
+        class_name,
+        confidence,
+        status,
+        estimated_distance_m,
+        source,
+        bbox,
+        vehicle_count=vehicle_count,
+        avg_vehicle_count=avg_vehicle_count,
+        traffic_congestion=traffic_congestion,
+        video_session_id=video_session_id,
+        webcam_session_id=webcam_session_id,
+        driver_id=driver_id,
+        schedule_id=schedule_id,
+    )
 
 
 def _rs_cam_worker():
     global _rs_latest_raw, _rs_latest_ann, _rs_latest_info, _rs_cam_running
+    global _rs_webcam_session_active, _rs_webcam_session_id
     while _rs_cam_running:
         with _rs_cam_lock:
             if _rs_cap is None:
@@ -492,7 +1103,30 @@ def _rs_cam_worker():
             continue
         _rs_latest_raw = frame.copy()
         ann = frame.copy()
+        vehicle_items = []
+        vehicle_risk = "LOW"
+        nearest_vehicle_distance_m = None
+        collision_high_risk = False
+        vehicle_count = 0
+        avg_vehicle_count = 0.0
+        traffic_congestion = "LOW"
         if _rs_ready:
+            vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
+            vehicle_count = len(vehicle_items)
+            avg_vehicle_count, traffic_congestion = _rs_update_traffic_congestion(
+                _rs_webcam_vehicle_count_hist, vehicle_count
+            )
+            congestion_color = (34, 197, 94) if traffic_congestion == "LOW" else ((0, 165, 255) if traffic_congestion == "MEDIUM" else (0, 0, 255))
+            cv2.putText(
+                ann,
+                f"Traffic: {traffic_congestion} ({vehicle_count} veh, avg {avg_vehicle_count:.1f})",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                congestion_color,
+                2,
+            )
+        if _rs_ready and _rs_webcam_session_active:
             res_det = _rs_detector(frame, conf=0.25, verbose=False)
             boxes   = res_det[0].boxes
             if len(boxes) > 0:
@@ -512,6 +1146,8 @@ def _rs_cam_worker():
                     "Damaged"          if conf <  _RS_DMG_THR  else
                     "Possibly unclear"
                 )
+                _rs_log_bbox(x1, y1, x2, y2, source="road_sign/webcam_live")
+                estimated_distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
                 color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
                 cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
                 lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
@@ -519,9 +1155,56 @@ def _rs_cam_worker():
                 cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
                 cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-                _rs_latest_info = {"class_name": cls, "confidence": conf, "status": status}
+                _rs_latest_info = {
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
+                if _rs_webcam_session_active and _rs_webcam_session_id:
+                    _rs_save_event_throttled(
+                        class_name=cls,
+                        confidence=conf,
+                        status=status,
+                        estimated_distance_m=estimated_distance_m,
+                        source="webcam_live",
+                        bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
+                        min_gap_sec=35.0,
+                        vehicle_count=vehicle_count,
+                        avg_vehicle_count=avg_vehicle_count,
+                        traffic_congestion=traffic_congestion,
+                        webcam_session_id=_rs_webcam_session_id,
+                        driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                        schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                    )
             else:
-                _rs_latest_info = {}
+                _rs_latest_info = {
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
+        else:
+            _rs_latest_info = {
+                "vehicle_detections": vehicle_items,
+                "vehicle_count": vehicle_count,
+                "avg_vehicle_count": avg_vehicle_count,
+                "traffic_congestion": traffic_congestion,
+                "vehicle_collision_risk": vehicle_risk,
+                "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                "collision_high_risk": collision_high_risk,
+            }
         _rs_latest_ann = ann
         time.sleep(0.01)
 
@@ -537,6 +1220,7 @@ def _rs_start_camera() -> bool:
         return False
     with _rs_cam_lock:
         _rs_cap = cap
+    _rs_webcam_vehicle_count_hist.clear()
     _rs_cam_running = True
     threading.Thread(target=_rs_cam_worker, daemon=True).start()
     return True
@@ -554,6 +1238,7 @@ def _rs_stop_camera():
     _rs_latest_ann  = None
     _rs_latest_raw  = None
     _rs_latest_info = {}
+    _rs_webcam_vehicle_count_hist.clear()
 
 
 def _rs_gen_mjpeg():
@@ -591,6 +1276,13 @@ def rs_upload():
         result = rs_process_frame(img)
         if not result:
             return jsonify({"detected": False, "message": "No road sign detected."})
+        _rs_save_event(
+            class_name=result["class_name"],
+            confidence=float(str(result["confidence"]).replace("%", "")) / 100.0,
+            status=result["status"],
+            estimated_distance_m=result.get("estimated_distance_m"),
+            source="image_upload",
+        )
         result["input_type"] = "image"
         return jsonify(result)
 
@@ -609,6 +1301,13 @@ def rs_upload():
                 if fi % _RS_SAMPLE_EVERY == 0:
                     r = rs_process_frame(frame)
                     if r:
+                        _rs_save_event(
+                            class_name=r["class_name"],
+                            confidence=float(str(r["confidence"]).replace("%", "")) / 100.0,
+                            status=r["status"],
+                            estimated_distance_m=r.get("estimated_distance_m"),
+                            source="video_upload",
+                        )
                         r["frame"] = fi
                         results_list.append(r)
                 fi += 1
@@ -643,6 +1342,32 @@ def rs_get_detection_info():
     return jsonify(_rs_latest_info)
 
 
+@app.route("/start_webcam_session", methods=["POST"])
+def rs_start_webcam_session():
+    global _rs_webcam_session_active, _rs_webcam_session_id
+    body = request.get_json(silent=True) or {}
+    driver_id = body.get("driver_id") or request.args.get("driver_id")
+    schedule_id = body.get("schedule_id") or request.args.get("schedule_id")
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
+    _rs_webcam_session_id = uuid.uuid4().hex
+    _rs_webcam_session_active = True
+    return jsonify({
+        "started": True,
+        "webcam_session_id": _rs_webcam_session_id,
+        "driver_id": _rs_active_shift_ctx.get("driver_id"),
+        "schedule_id": _rs_active_shift_ctx.get("schedule_id"),
+    })
+
+
+@app.route("/stop_webcam_session", methods=["POST"])
+def rs_stop_webcam_session():
+    global _rs_webcam_session_active, _rs_webcam_session_id
+    _rs_webcam_session_active = False
+    _rs_webcam_session_id = None
+    _rs_set_active_shift_ctx(None, None)
+    return jsonify({"stopped": True})
+
+
 @app.route("/capture_webcam", methods=["POST"])
 def rs_capture_webcam():
     frame = _rs_latest_raw
@@ -651,14 +1376,486 @@ def rs_capture_webcam():
     result = rs_process_frame(frame)
     if not result:
         return jsonify({"detected": False, "message": "No road sign in current frame."})
+    _rs_save_event(
+        class_name=result["class_name"],
+        confidence=float(str(result["confidence"]).replace("%", "")) / 100.0,
+        status=result["status"],
+        estimated_distance_m=result.get("estimated_distance_m"),
+        source="webcam_capture",
+        driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+        schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+    )
     result["input_type"] = "webcam"
     return jsonify(result)
 
 
 @app.route("/stop_camera")
 def rs_stop_camera_route():
+    global _rs_webcam_session_active, _rs_webcam_session_id
     _rs_stop_camera()
+    _rs_webcam_session_active = False
+    _rs_webcam_session_id = None
+    _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
+
+
+@app.route("/road_sign_analytics", methods=["GET"])
+def rs_analytics():
+    """Road-sign analytics: frequency per sign with latest timestamp."""
+    try:
+        db = _rs_get_db()
+
+        source = request.args.get("source", type=str)
+        video_session_id = request.args.get("video_session_id", type=str)
+        webcam_session_id = request.args.get("webcam_session_id", type=str)
+
+        match_stage = {}
+        if source:
+            match_stage["source"] = source
+        if video_session_id:
+            match_stage["video_session_id"] = video_session_id
+        if webcam_session_id:
+            match_stage["webcam_session_id"] = webcam_session_id
+
+        pipeline = [
+            *([{"$match": match_stage}] if match_stage else []),
+            {
+                "$group": {
+                    "_id": "$class_name",
+                    "frequency": {"$sum": 1},
+                    "last_seen": {"$max": "$timestamp"},
+                }
+            },
+            {"$sort": {"frequency": -1}},
+            {"$limit": 50},
+        ]
+
+        rows = list(db.road_sign.aggregate(pipeline))
+        items = []
+        for r in rows:
+            ts = r.get("last_seen")
+            ts_str = None
+            if isinstance(ts, datetime):
+                ts_str = ts.replace(tzinfo=timezone.utc).isoformat() if ts.tzinfo is None else ts.astimezone(timezone.utc).isoformat()
+            items.append({
+                "sign_name": r.get("_id") or "Unknown",
+                "frequency": int(r.get("frequency", 0)),
+                "last_seen": ts_str,
+            })
+
+        return jsonify({"items": items, "total_sign_types": len(items)})
+    except Exception as _e:
+        return jsonify({"error": str(_e), "items": [], "total_sign_types": 0}), 500
+
+
+# ── Road-sign video-file streaming ───────────────────────────────────────────
+_rs_video_lock        = threading.Lock()
+_rs_video_cap         = None
+_rs_video_path        = None
+_rs_video_running     = False
+_rs_video_latest_ann  = None
+_rs_video_latest_info: dict = {}
+_rs_video_session_id: Optional[str] = None
+
+
+def _rs_video_worker():
+    global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
+    global _rs_video_cap, _rs_video_session_id
+    if _rs_video_cap is None:
+        _rs_video_running = False
+        return
+    fps = _rs_video_cap.get(cv2.CAP_PROP_FPS) or 30.0
+    delay = max(0.01, 1.0 / fps)
+    while _rs_video_running:
+        with _rs_video_lock:
+            cap = _rs_video_cap
+        if cap is None:
+            break
+        ret, frame = cap.read()
+        if not ret:
+            # End-of-video: stop the stream instead of looping.
+            _rs_video_running = False
+            break
+        ann = frame.copy()
+        vehicle_items = []
+        vehicle_risk = "LOW"
+        nearest_vehicle_distance_m = None
+        collision_high_risk = False
+        vehicle_count = 0
+        avg_vehicle_count = 0.0
+        traffic_congestion = "LOW"
+        if _rs_ready:
+            vehicle_items, vehicle_risk, nearest_vehicle_distance_m, collision_high_risk = _rs_draw_vehicle_detections(frame, ann)
+            vehicle_count = len(vehicle_items)
+            avg_vehicle_count, traffic_congestion = _rs_update_traffic_congestion(
+                _rs_video_vehicle_count_hist, vehicle_count
+            )
+            congestion_color = (34, 197, 94) if traffic_congestion == "LOW" else ((0, 165, 255) if traffic_congestion == "MEDIUM" else (0, 0, 255))
+            cv2.putText(
+                ann,
+                f"Traffic: {traffic_congestion} ({vehicle_count} veh, avg {avg_vehicle_count:.1f})",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                congestion_color,
+                2,
+            )
+        if _rs_ready:
+            res_det = _rs_detector(frame, conf=0.25, verbose=False)
+            boxes = res_det[0].boxes
+            info_list = []
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                w, h = x2 - x1, y2 - y1
+                mx, my = int(w * _RS_MARGIN), int(h * _RS_MARGIN)
+                x1m, y1m = max(0, x1 - mx), max(0, y1 - my)
+                x2m, y2m = min(frame.shape[1], x2 + mx), min(frame.shape[0], y2 + my)
+                crop = frame[y1m:y2m, x1m:x2m]
+                if crop.size == 0:
+                    continue
+                try:
+                    cls, conf = _rs_ensemble(crop)
+                except Exception:
+                    cls, conf = "Road Sign", float(box.conf[0])
+                status = (
+                    "Normal"           if conf >= _RS_NORM_THR else
+                    "Damaged"          if conf <  _RS_DMG_THR  else
+                    "Possibly unclear"
+                )
+                _rs_log_bbox(x1m, y1m, x2m, y2m, source="road_sign/video_stream")
+                estimated_distance_m = _rs_estimate_distance(x1m, y1m, x2m, y2m, frame.shape)
+                color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
+                cv2.rectangle(ann, (x1m, y1m), (x2m, y2m), color, 2)
+                lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
+                tw  = len(lbl) * 9
+                cv2.rectangle(ann, (x1m, max(0, y1m - 24)), (x1m + tw, y1m), (0, 0, 0), -1)
+                cv2.putText(ann, lbl, (x1m + 3, max(14, y1m - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                info_list.append({
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                })
+                _rs_save_event_throttled(
+                    class_name=cls,
+                    confidence=conf,
+                    status=status,
+                    estimated_distance_m=estimated_distance_m,
+                    source="video_stream",
+                    bbox={"xmin": x1m, "ymin": y1m, "xmax": x2m, "ymax": y2m},
+                    min_gap_sec=35.0,
+                    vehicle_count=vehicle_count,
+                    avg_vehicle_count=avg_vehicle_count,
+                    traffic_congestion=traffic_congestion,
+                    video_session_id=_rs_video_session_id,
+                    driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                    schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                )
+
+            if info_list:
+                best_walk = max(info_list, key=lambda i: i["confidence"])
+                _rs_video_latest_info = {
+                    "class_name": best_walk["class_name"],
+                    "confidence": best_walk["confidence"],
+                    "status":     best_walk["status"],
+                    "estimated_distance_m": best_walk.get("estimated_distance_m"),
+                    "estimated_distance_text": best_walk.get("estimated_distance_text"),
+                    "detections": info_list,
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
+            else:
+                _rs_video_latest_info = {
+                    "vehicle_detections": vehicle_items,
+                    "vehicle_count": vehicle_count,
+                    "avg_vehicle_count": avg_vehicle_count,
+                    "traffic_congestion": traffic_congestion,
+                    "vehicle_collision_risk": vehicle_risk,
+                    "nearest_vehicle_distance_m": nearest_vehicle_distance_m,
+                    "collision_high_risk": collision_high_risk,
+                }
+        _rs_video_latest_ann = ann
+        time.sleep(delay)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+    _rs_video_latest_ann = None
+
+
+def _rs_video_gen_mjpeg():
+    while _rs_video_running:
+        frame = _rs_video_latest_ann
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+               + buf.tobytes() + b"\r\n")
+        time.sleep(0.033)
+
+
+@app.route("/upload_video_stream", methods=["POST"])
+def rs_upload_video_stream():
+    global _rs_video_running, _rs_video_cap, _rs_video_path, _rs_video_session_id
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    file = request.files.get("file")
+    driver_id = request.form.get("driver_id") or request.args.get("driver_id")
+    schedule_id = request.form.get("schedule_id") or request.args.get("schedule_id")
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
+    if not file:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    # Stop any existing stream
+    if _rs_video_running:
+        _rs_video_running = False
+        time.sleep(0.15)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+    if _rs_video_path and os.path.exists(_rs_video_path):
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+        file.save(tmp.name)
+        _rs_video_path = tmp.name
+
+    cap = cv2.VideoCapture(_rs_video_path)
+    if not cap.isOpened():
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+        _rs_video_path = None
+        return jsonify({"error": "Could not open video"}), 400
+
+    with _rs_video_lock:
+        _rs_video_cap = cap
+    _rs_video_vehicle_count_hist.clear()
+    _rs_video_session_id = uuid.uuid4().hex
+    _rs_video_running = True
+    threading.Thread(target=_rs_video_worker, daemon=True).start()
+    time.sleep(0.3)
+    return jsonify({
+        "started": True,
+        "video_session_id": _rs_video_session_id,
+        "driver_id": _rs_active_shift_ctx.get("driver_id"),
+        "schedule_id": _rs_active_shift_ctx.get("schedule_id"),
+    })
+
+
+@app.route("/video_stream_feed")
+def rs_video_stream_feed():
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    if not _rs_video_running:
+        return jsonify({"error": "Video stream not active"}), 400
+    resp = Response(_rs_video_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"]     = "no-cache, no-store, must-revalidate"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/get_video_detection_info")
+def rs_get_video_detection_info():
+    return jsonify(_rs_video_latest_info)
+
+
+@app.route("/stop_video_stream")
+def rs_stop_video_stream():
+    global _rs_video_running, _rs_video_latest_ann, _rs_video_latest_info
+    global _rs_video_cap, _rs_video_path, _rs_video_session_id
+    _rs_video_running = False
+    time.sleep(0.15)
+    with _rs_video_lock:
+        if _rs_video_cap:
+            _rs_video_cap.release()
+            _rs_video_cap = None
+    if _rs_video_path and os.path.exists(_rs_video_path):
+        try:
+            os.unlink(_rs_video_path)
+        except OSError:
+            pass
+    _rs_video_path = None
+    _rs_video_session_id = None
+    _rs_video_latest_ann = None
+    _rs_video_latest_info = {}
+    _rs_video_vehicle_count_hist.clear()
+    _rs_set_active_shift_ctx(None, None)
+    return jsonify({"stopped": True})
+
+
+# ── Demo-video road-sign feed ─────────────────────────────────────────────────
+_DEMO_VIDEO_PATH = Path(__file__).resolve().parent / "Video" / "Demo.mp4"
+_rs_demo_running = False
+_rs_demo_latest_ann  = None
+_rs_demo_latest_info: dict = {}
+
+
+def _rs_demo_worker():
+    global _rs_demo_running, _rs_demo_latest_ann, _rs_demo_latest_info
+    cap = cv2.VideoCapture(str(_DEMO_VIDEO_PATH))
+    if not cap.isOpened():
+        _rs_demo_running = False
+        return
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    delay = max(0.01, 1.0 / fps)
+    while _rs_demo_running:
+        ret, frame = cap.read()
+        if not ret:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
+            continue
+        ann = frame.copy()
+        if _rs_ready:
+            res_det = _rs_detector(frame, conf=0.25, verbose=False)
+            boxes = res_det[0].boxes
+            if len(boxes) > 0:
+                best = max(boxes, key=lambda b: float(b.conf[0]))
+                x1, y1, x2, y2 = best.xyxy[0].cpu().numpy().astype(int)
+                crop = frame[y1:y2, x1:x2]
+                try:
+                    r = _rs_yolo_clf.predict(
+                        cv2.resize(crop, (_RS_IMG_SIZE, _RS_IMG_SIZE)), verbose=False)
+                    probs = r[0].probs.data.cpu().numpy()
+                    cls   = _rs_idx2class[int(np.argmax(probs))]
+                    conf  = float(np.max(probs))
+                except Exception:
+                    cls, conf = "Road Sign", float(best.conf[0])
+                status = (
+                    "Normal"           if conf >= _RS_NORM_THR else
+                    "Damaged"          if conf <  _RS_DMG_THR  else
+                    "Possibly unclear"
+                )
+                _rs_log_bbox(x1, y1, x2, y2, source="road_sign/demo_video")
+                estimated_distance_m = _rs_estimate_distance(x1, y1, x2, y2, frame.shape)
+                color = (0, 255, 0) if status == "Normal" else (0, 0, 255)
+                cv2.rectangle(ann, (x1, y1), (x2, y2), color, 2)
+                lbl = f"{cls.replace('_', ' ')} {conf * 100:.0f}%"
+                tw  = len(lbl) * 9
+                cv2.rectangle(ann, (x1, max(0, y1 - 24)), (x1 + tw, y1), (0, 0, 0), -1)
+                cv2.putText(ann, lbl, (x1 + 3, max(14, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                _rs_demo_latest_info = {
+                    "class_name": cls,
+                    "confidence": conf,
+                    "status": status,
+                    "estimated_distance_m": estimated_distance_m,
+                    "estimated_distance_text": f"{estimated_distance_m:.2f} m" if estimated_distance_m is not None else None,
+                }
+                _rs_save_event_throttled(
+                    class_name=cls,
+                    confidence=conf,
+                    status=status,
+                    estimated_distance_m=estimated_distance_m,
+                    source="demo_video_stream",
+                    bbox={"xmin": x1, "ymin": y1, "xmax": x2, "ymax": y2},
+                    min_gap_sec=35.0,
+                    driver_id=_rs_active_shift_ctx.get("driver_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                    schedule_id=_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None,
+                )
+            else:
+                _rs_demo_latest_info = {}
+        _rs_demo_latest_ann = ann
+        time.sleep(delay)
+    cap.release()
+
+
+def _rs_demo_gen_mjpeg():
+    while _rs_demo_running:
+        frame = _rs_demo_latest_ann
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+               + buf.tobytes() + b"\r\n")
+        time.sleep(0.033)
+
+
+@app.route("/video_feed_demo")
+def rs_video_feed_demo():
+    global _rs_demo_running
+    driver_id = request.args.get("driver_id", type=str)
+    schedule_id = request.args.get("schedule_id", type=str)
+    _rs_set_active_shift_ctx(driver_id=driver_id, schedule_id=schedule_id)
+    if not _rs_ready:
+        return jsonify({"error": "Road-sign models not loaded"}), 503
+    if not _DEMO_VIDEO_PATH.exists():
+        return jsonify({"error": "Demo video not found"}), 404
+    if not _rs_demo_running:
+        _rs_demo_running = True
+        threading.Thread(target=_rs_demo_worker, daemon=True).start()
+        time.sleep(0.3)  # let first frames populate
+    resp = Response(_rs_demo_gen_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+@app.route("/get_demo_detection_info")
+def rs_get_demo_detection_info():
+    return jsonify(_rs_demo_latest_info)
+
+
+@app.route("/stop_demo_video")
+def rs_stop_demo_video():
+    global _rs_demo_running, _rs_demo_latest_ann, _rs_demo_latest_info
+    _rs_demo_running = False
+    time.sleep(0.15)
+    _rs_demo_latest_ann = None
+    _rs_demo_latest_info = {}
+    _rs_set_active_shift_ctx(None, None)
+    return jsonify({"stopped": True})
+
+
+# ── Demo-video road-scene analysis ────────────────────────────────────────────
+@app.route("/rsa/analyse-demo", methods=["POST"])
+def rsa_analyse_demo():
+    if not _rsa_ready:
+        return jsonify({"error": "RSA model not loaded."}), 503
+    if not _DEMO_VIDEO_PATH.exists():
+        return jsonify({"error": "Demo video not found"}), 404
+
+    _RSA_SAMPLE_EVERY = 30
+    _RSA_MAX_FRAMES   = 25
+
+    results = []
+    cap = cv2.VideoCapture(str(_DEMO_VIDEO_PATH))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_idx = 0
+    try:
+        while cap.isOpened() and len(results) < _RSA_MAX_FRAMES:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % _RSA_SAMPLE_EVERY == 0:
+                try:
+                    r = _rsa_run(frame)
+                    r["frame"] = frame_idx
+                    r["timestamp"] = round(frame_idx / fps, 2)
+                    results.append(r)
+                except Exception:
+                    pass
+            frame_idx += 1
+    finally:
+        cap.release()
+    if not results:
+        return jsonify({"error": "No frames could be processed from demo video."}), 400
+    return jsonify({"frames": results, "total": len(results)})
 
 
 @app.route("/", methods=["GET"])

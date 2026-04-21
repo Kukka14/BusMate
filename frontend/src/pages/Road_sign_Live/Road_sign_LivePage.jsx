@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import RoadSignInstructionPanel from "../../components/common/RoadSignInstruction";
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_LivePage.css";
+
+// ── Inline SVG icons ──────────────────────────────────────────────────────────
+const IcoRoadSign = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+  </svg>
+);
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
 function playBeep(freq = 880, duration = 0.2, vol = 0.35) {
@@ -40,6 +48,17 @@ const statusColor = (s) => {
   return "#f59e0b";
 };
 
+const formatDistance = (m) => {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+};
+
+const trafficInsightText = (count, level) => {
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  const safeLevel = String(level || "LOW").toLowerCase();
+  return `${safeCount} vehicles detected — traffic appears ${safeLevel} in this area.`;
+};
+
 // ── Icons ──────────────────────────────────────────────────────────────────────
 const IcoCapture  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M20 7h-2.5l-1-2h-9l-1 2H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/></svg>;
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
@@ -56,17 +75,23 @@ export default function Road_sign_LivePage() {
   const [log,          setLog]          = useState([]);     // detection history
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [streamError,  setStreamError]  = useState(false);
+  const [analytics,    setAnalytics]    = useState([]);
+  const [webcamSessionId, setWebcamSessionId] = useState("");
+  const [sessionStarting, setSessionStarting] = useState(false);
   // Unique URL per mount forces the browser to make a fresh HTTP request
   // instead of reusing the cached last-frame from a previous MJPEG session.
   const [streamSrc] = useState(() => `/road-sign/video_feed?t=${Date.now()}`);
 
   // Refs to avoid stale closures inside the polling interval
   const audioEnabledRef = useRef(true);
+  const sessionActiveRef = useRef(false);
   const lastSpokenRef   = useRef(null);
+  const lastCollisionBeepAtRef = useRef(0);
   const pollRef         = useRef(null);
 
   // Keep audioEnabledRef in sync with state
   useEffect(() => { audioEnabledRef.current = audioEnabled; }, [audioEnabled]);
+  useEffect(() => { sessionActiveRef.current = Boolean(webcamSessionId); }, [webcamSessionId]);
 
   // Auth guard
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
@@ -83,8 +108,19 @@ export default function Road_sign_LivePage() {
       fetch("/road-sign/get_detection_info")
         .then(r => r.json())
         .then(data => {
+          if (!sessionActiveRef.current) {
+            setInfo(null);
+            lastSpokenRef.current = null;
+            return;
+          }
+
+          // Collision beeps disabled: only road-sign alerts remain active.
+
           const hasSign = data?.class_name;
-          setInfo(hasSign ? data : null);
+          const hasVehicleMeta =
+            data?.nearest_vehicle_distance_m !== undefined ||
+            data?.vehicle_collision_risk !== undefined;
+          setInfo(hasSign || hasVehicleMeta ? data : null);
 
           if (hasSign && data.status === "Normal") {
             // Only trigger alert when the sign name changes
@@ -104,6 +140,7 @@ export default function Road_sign_LivePage() {
                   class_name: data.class_name,
                   confidence: data.confidence,
                   status:     data.status,
+                  estimated_distance_m: data.estimated_distance_m,
                   time:       new Date().toLocaleTimeString(),
                 },
                 ...prev.slice(0, 29), // keep last 30 entries
@@ -121,8 +158,61 @@ export default function Road_sign_LivePage() {
       clearInterval(pollRef.current);
       // Stop server-side camera on page leave
       fetch("/road-sign/stop_camera").catch(() => {});
+      fetch("/road-sign/stop_webcam_session", { method: "POST" }).catch(() => {});
     };
   }, []); // intentionally empty — runs once on mount/unmount
+
+  useEffect(() => {
+    if (!webcamSessionId) {
+      setAnalytics([]);
+      return;
+    }
+    const loadAnalytics = () => {
+      const qp = new URLSearchParams({
+        source: "webcam_live",
+        webcam_session_id: webcamSessionId,
+      }).toString();
+      fetch(`/road-sign/road_sign_analytics?${qp}`)
+        .then((r) => r.json())
+        .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
+        .catch(() => setAnalytics([]));
+    };
+    loadAnalytics();
+    const id = setInterval(loadAnalytics, 5000);
+    return () => clearInterval(id);
+  }, [webcamSessionId]);
+
+  const handleStartSession = async () => {
+    setSessionStarting(true);
+    try {
+      const res = await fetch("/road-sign/start_webcam_session", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data?.webcam_session_id) {
+        setWebcamSessionId(data.webcam_session_id);
+        setInfo(null);
+        setLog([]);
+        lastSpokenRef.current = null;
+        setAnalytics([]);
+      }
+    } catch (_) {
+      // keep existing UI behavior silent on session start failure
+    } finally {
+      setSessionStarting(false);
+    }
+  };
+
+  const handleStopSession = async () => {
+    try {
+      await fetch("/road-sign/stop_webcam_session", { method: "POST" });
+    } catch (_) {
+      // silent
+    }
+    setWebcamSessionId("");
+    setInfo(null);
+    setLog([]);
+    lastSpokenRef.current = null;
+    setAnalytics([]);
+  };
 
   // ── Capture & full-ensemble analysis ──────────────────────────────────────
   const handleCapture = async () => {
@@ -145,6 +235,14 @@ export default function Road_sign_LivePage() {
       setCapturing(false);
     }
   };
+
+  const liveTrendData = [...log]
+    .reverse()
+    .map((entry, idx) => ({
+      time: entry.time,
+      confidence: Number((entry.confidence * 100).toFixed(1)),
+      detections: idx + 1,
+    }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -170,9 +268,27 @@ export default function Road_sign_LivePage() {
               {audioEnabled ? "🔊 Audio ON" : "🔇 Audio OFF"}
             </button>
 
-            <div className={`rsl-status-pill ${info ? "active" : ""}`}>
+            <button
+              className="rsl-audio-toggle on"
+              onClick={handleStartSession}
+              disabled={sessionStarting || Boolean(webcamSessionId)}
+              title="Start webcam analytics session"
+            >
+              {sessionStarting ? "Starting..." : (webcamSessionId ? "✅ Session Active" : "▶ Start Session")}
+            </button>
+
+            <button
+              className="rsl-audio-toggle off"
+              onClick={handleStopSession}
+              disabled={!webcamSessionId}
+              title="Stop webcam analytics session"
+            >
+              ⏹ Stop Session
+            </button>
+
+            <div className={`rsl-status-pill ${info?.class_name ? "active" : ""}`}>
               <span className="rsl-status-dot" />
-              {info ? "DETECTING" : "SCANNING…"}
+              {info?.class_name ? "DETECTING" : "SCANNING…"}
             </div>
           </div>
         </header>
@@ -186,6 +302,7 @@ export default function Road_sign_LivePage() {
               <strong>ROAD SIGN DETECTED:</strong>&nbsp;
               {info.class_name.replace(/_/g, " ")}&nbsp;
               <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
+              <span className="rsl-conf-chip">Distance: {formatDistance(info.estimated_distance_m)}</span>
               <span className="rsl-audio-hint">🔊 Audio alert triggered</span>
             </div>
           )}
@@ -197,6 +314,7 @@ export default function Road_sign_LivePage() {
               <strong>{info.status.toUpperCase()}:</strong>&nbsp;
               {info.class_name.replace(/_/g, " ")}&nbsp;
               <span className="rsl-conf-chip">{(info.confidence * 100).toFixed(1)}%</span>
+              <span className="rsl-conf-chip">Distance: {formatDistance(info.estimated_distance_m)}</span>
             </div>
           )}
 
@@ -243,6 +361,8 @@ export default function Road_sign_LivePage() {
                     <span className="rsl-overlay-conf">{(info.confidence * 100).toFixed(1)}%</span>
                     <span className="rsl-overlay-sep">·</span>
                     <span className="rsl-overlay-status">{info.status}</span>
+                    <span className="rsl-overlay-sep">·</span>
+                    <span className="rsl-overlay-status">{formatDistance(info.estimated_distance_m)}</span>
                   </div>
                 )}
               </div>
@@ -309,21 +429,73 @@ export default function Road_sign_LivePage() {
                       {[
                         ["Status",       info.status,                              statusColor(info.status)],
                         ["Sign Class",   info.class_name.replace(/_/g, " "),       null],
+                        ["Sign Distance", formatDistance(info.estimated_distance_m), "#0ea5e9"],
+                        ["Vehicle Count", info.vehicle_count ?? 0, null],
+                        ["Avg Vehicle Count", Number(info.avg_vehicle_count ?? 0).toFixed(2), "#0ea5e9"],
+                        ["Traffic Congestion", info.traffic_congestion || "LOW", (info.traffic_congestion === "HIGH" ? "#ef4444" : info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e")],
+                        ["Collision Risk", info.vehicle_collision_risk || "LOW", (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
+                        ["High Risk Distance", formatDistance(info.nearest_vehicle_distance_m), (info.vehicle_collision_risk === "HIGH" ? "#ef4444" : info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e")],
                         ["Audio Alert",  audioEnabled ? "Enabled ✓" : "Muted",    audioEnabled ? "#22c55e" : "#64748b"],
                         ["Log Entries",  log.length,                               null],
-                      ].map(([lbl, val, clr]) => (
-                        <div className="rsl-metric-row" key={lbl}>
-                          <span className="rsl-metric-lbl">{lbl}</span>
-                          <span className="rsl-metric-val" style={clr ? { color: clr } : {}}>
-                            {val}
-                          </span>
-                        </div>
-                      ))}
+                        ].map(([lbl, val, clr]) => {
+                          const H = { fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" };
+                          const isHighlight = lbl === "Sign Distance" || lbl === "High Risk Distance" || lbl === "Traffic Congestion";
+                          const display = isHighlight ? (<strong style={H}>{val}</strong>) : val;
+                          const labelDisplay = isHighlight ? (<strong style={H}>{lbl}</strong>) : lbl;
+                          return (
+                            <div className="rsl-metric-row" key={lbl}>
+                              <span className="rsl-metric-lbl">{labelDisplay}</span>
+                              <span className="rsl-metric-val" style={clr ? { color: clr } : {}}>
+                                {display}
+                              </span>
+                            </div>
+                          );
+                        })}
                     </div>
 
                     {/* Driver instruction panel */}
                     <div className="rsl-live-instruction">
                       <RoadSignInstructionPanel className={info.class_name} compact />
+                    </div>
+                  </div>
+                ) : info ? (
+                  <div className="rsl-det-body">
+                    <div className="rsl-det-name">No road sign detected</div>
+                    <div className="rsl-det-metrics" style={{ marginTop: "0.6rem" }}>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Vehicle Count</span>
+                        <span className="rsl-metric-val">{info.vehicle_count ?? 0}</span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Avg Vehicle Count</span>
+                        <span className="rsl-metric-val" style={{ color: "#0ea5e9" }}>
+                          {Number(info.avg_vehicle_count ?? 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Traffic Congestion</span>
+                        <span className="rsl-metric-val" style={{ color: info.traffic_congestion === "HIGH" ? "#ef4444" : (info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{info.traffic_congestion || "LOW"}</strong>
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Traffic Insight</span>
+                        <span className="rsl-metric-val" style={{ color: info.traffic_congestion === "HIGH" ? "#ef4444" : (info.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{trafficInsightText(info.vehicle_count, info.traffic_congestion)}</strong>
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl">Collision Risk</span>
+                        <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          {info.vehicle_collision_risk || "LOW"}
+                        </span>
+                      </div>
+                      <div className="rsl-metric-row">
+                        <span className="rsl-metric-lbl"><strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance</strong></span>
+                        <span className="rsl-metric-val" style={{ color: info.vehicle_collision_risk === "HIGH" ? "#ef4444" : (info.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{formatDistance(info.nearest_vehicle_distance_m)}</strong>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -352,6 +524,7 @@ export default function Road_sign_LivePage() {
                         <span className="rsl-log-time">{entry.time}</span>
                         <span className="rsl-log-name">{entry.class_name.replace(/_/g, " ")}</span>
                         <span className="rsl-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                        <span className="rsl-log-conf">{formatDistance(entry.estimated_distance_m)}</span>
                         <span
                           className="rsl-log-status"
                           style={{ color: statusColor(entry.status) }}
@@ -363,6 +536,75 @@ export default function Road_sign_LivePage() {
                   </div>
                 ) : (
                   <p className="rsl-no-data">No detections yet — waiting for road signs…</p>
+                )}
+              </div>
+
+              <div className="rsl-card rsl-log-card" style={{ marginTop: "0.8rem" }}>
+                <div className="rsl-card-head">
+                  <div>
+                    <span className="rsl-card-title">Sign Frequency Analytics</span>
+                    <span className="rsl-card-hint">Road sign name · frequency · latest timestamp</span>
+                  </div>
+                </div>
+                {analytics.length > 0 ? (
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={analytics} margin={{ top: 10, right: 10, left: 0, bottom: 45 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="sign_name" angle={-20} textAnchor="end" interval={0} height={70} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip
+                          formatter={(value) => [value, "Frequency"]}
+                          labelFormatter={(label, payload) => {
+                            const last = payload?.[0]?.payload?.last_seen;
+                            return `${label}${last ? ` | Last seen: ${new Date(last).toLocaleString()}` : ""}`;
+                          }}
+                        />
+                        <Bar dataKey="frequency" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="rsl-no-data">No analytics data yet.</p>
+                )}
+              </div>
+
+              <div className="rsl-card rsl-log-card" style={{ marginTop: "0.8rem" }}>
+                <div className="rsl-card-head">
+                  <div>
+                    <span className="rsl-card-title">Detection Trend Over Time</span>
+                    <span className="rsl-card-hint">Current live session timeline</span>
+                  </div>
+                </div>
+                {liveTrendData.length > 0 ? (
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <LineChart data={liveTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="time" interval="preserveStartEnd" minTickGap={20} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="detections"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={false}
+                          name="Detections"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="confidence"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          dot={false}
+                          name="Confidence %"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="rsl-no-data">No trend data yet.</p>
                 )}
               </div>
 

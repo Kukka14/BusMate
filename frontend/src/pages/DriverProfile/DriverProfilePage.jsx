@@ -528,12 +528,113 @@ function ProgressBar({ label, value, max, suffix = "%" }) {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Shift Score History Card ──────────────────────────────────────────────────
+const TIER_COLORS = {
+  Excellent:          "#22c55e",
+  Good:               "#38bdf8",
+  Average:            "#f59e0b",
+  "Needs Improvement":"#f97316",
+  Poor:               "#ef4444",
+};
+
+function ShiftScoreHistoryCard({ scores }) {
+  const [expanded, setExpanded] = useState(null);
+
+  if (!scores || scores.length === 0) {
+    return (
+      <div className="dp-card dp-shift-scores-card">
+        <span className="dp-card-title">Shift Score History</span>
+        <p className="dp-dss-empty">No shift scores recorded yet — complete a shift to see your scores here.</p>
+      </div>
+    );
+  }
+
+  const avgScore = Math.round(scores.reduce((a, s) => a + (s.score?.total_score || 0), 0) / scores.length);
+  const bestScore = Math.max(...scores.map(s => s.score?.total_score || 0));
+  const latestTier = scores[0]?.score?.tier || "—";
+
+  return (
+    <div className="dp-card dp-shift-scores-card">
+      <div className="dp-ss-head">
+        <div>
+          <span className="dp-card-title">Shift Score History</span>
+          <span className="dp-card-hint">&nbsp;— {scores.length} completed shift{scores.length !== 1 ? "s" : ""}</span>
+        </div>
+        <div className="dp-ss-summary">
+          <div className="dp-ss-sum-item">
+            <span className="dp-ss-sum-val" style={{ color: TIER_COLORS[latestTier] || "#64748b" }}>{scores[0]?.score?.total_score ?? "—"}</span>
+            <span className="dp-ss-sum-lbl">Latest</span>
+          </div>
+          <div className="dp-ss-sum-divider" />
+          <div className="dp-ss-sum-item">
+            <span className="dp-ss-sum-val">{avgScore}</span>
+            <span className="dp-ss-sum-lbl">Average</span>
+          </div>
+          <div className="dp-ss-sum-divider" />
+          <div className="dp-ss-sum-item">
+            <span className="dp-ss-sum-val" style={{ color: "#22c55e" }}>{bestScore}</span>
+            <span className="dp-ss-sum-lbl">Best</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="dp-ss-list">
+        {scores.map((s, idx) => {
+          const sc = s.score || {};
+          const tierColor = TIER_COLORS[sc.tier] || "#64748b";
+          const isOpen = expanded === idx;
+          const comps = sc.components || {};
+
+          return (
+            <div key={idx} className={`dp-ss-row ${isOpen ? "open" : ""}`}>
+              <div className="dp-ss-row-main" onClick={() => setExpanded(isOpen ? null : idx)}>
+                <div className="dp-ss-route-info">
+                  <span className="dp-ss-route">{s.start_town || "—"} → {s.end_town || "—"}</span>
+                  <span className="dp-ss-meta">{s.date || "—"} · {s.shift_time || "—"} · {s.bus || ""}</span>
+                </div>
+                <div className="dp-ss-score-pill" style={{ background: tierColor + "18", borderColor: tierColor + "55", color: tierColor }}>
+                  <span className="dp-ss-score-num">{sc.total_score ?? "—"}</span>
+                  <span className="dp-ss-score-tier">{sc.tier || "—"}</span>
+                </div>
+                <span className={`dp-ss-chevron ${isOpen ? "open" : ""}`}><IcoChevron /></span>
+              </div>
+
+              {isOpen && (
+                <div className="dp-ss-detail">
+                  <div className="dp-ss-bars">
+                    {Object.entries(comps).map(([key, c]) => {
+                      const pct = (c.score / c.max) * 100;
+                      const barColor = pct >= 80 ? "#22c55e" : pct >= 50 ? "#38bdf8" : pct >= 30 ? "#f59e0b" : "#ef4444";
+                      return (
+                        <div key={key} className="dp-ss-bar-row">
+                          <span className="dp-ss-bar-label">{c.label}</span>
+                          <div className="dp-ss-bar-track">
+                            <div className="dp-ss-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+                          </div>
+                          <span className="dp-ss-bar-val">{c.score}/{c.max}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {s.route_name && <span className="dp-ss-route-name">Route: {s.route_name}</span>}
+                  {s.duration_sec > 0 && <span className="dp-ss-duration">Duration: {Math.round(s.duration_sec / 60)} min</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DriverProfilePage() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
   const [rank,    setRank]    = useState(null);
+  const [shiftScores, setShiftScores] = useState([]);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   useEffect(() => {
@@ -541,10 +642,11 @@ export default function DriverProfilePage() {
     if (!token) { navigate("/login"); return; }
 
     Promise.allSettled([
-      fetch(`${API}/api/driver/profile`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-      fetch(`${API}/api/driver/rank`,    { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`${API}/api/driver/profile`,      { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`${API}/api/driver/rank`,          { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`${API}/api/driver/shift/scores`,  { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
     ])
-      .then(([profileResult, rankResult]) => {
+      .then(([profileResult, rankResult, scoresResult]) => {
         if (profileResult.status === "fulfilled") {
           if (profileResult.value.error) setError(profileResult.value.error);
           else setProfile(profileResult.value);
@@ -553,6 +655,9 @@ export default function DriverProfilePage() {
         }
         if (rankResult.status === "fulfilled" && !rankResult.value?.error) {
           setRank(rankResult.value);
+        }
+        if (scoresResult.status === "fulfilled" && scoresResult.value?.scores) {
+          setShiftScores(scoresResult.value.scores);
         }
       })
       .finally(() => setLoading(false));
@@ -651,6 +756,9 @@ export default function DriverProfilePage() {
           {rank && (
             <DSSRankCard rank={rank} />
           )}
+
+          {/* ── Shift Score History ─────────────────────────────────── */}
+          <ShiftScoreHistoryCard scores={shiftScores} />
 
           {/* ── BVI Analytics Card (full-width, matches dashboard) ──────── */}
           <ProfileBVICard initialHistory={bvi.history || []} currentBVI={bvi}/>

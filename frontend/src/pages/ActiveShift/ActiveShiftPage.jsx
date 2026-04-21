@@ -4,6 +4,7 @@ import { io } from "socket.io-client";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Sidebar from "../../components/common/Sidebar";
+import { getSignInstruction, PRIORITY_COLORS } from "../../utils/roadSignInstructions";
 import "./ActiveShiftPage.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -22,7 +23,6 @@ function hazardColor(l) { return l==="High"?"#ef4444":l==="Medium"?"#f59e0b":"#2
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const IcoStop  = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>;
 const IcoAlert = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IcoUpload = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
 
 const CHEATING_LABELS = new Set(["cell phone","laptop","phone","hand raise","extra person"]);
 const CONSECUTIVE_THRESHOLD = 5;
@@ -193,12 +193,14 @@ export default function ActiveShiftPage() {
   const endTown   = scheduleInfo.end_town   || "Kandy";
   const busId     = scheduleInfo.bus         || "BUS-001";
   const routeName = scheduleInfo.route_name  || "Route";
+  const scheduleId = scheduleInfo.schedule_id || scheduleInfo.id || "";
 
   // ── Shift state ─────────────────────────────────────────────────────────
   const [shiftActive, setShiftActive] = useState(false);
   const [shiftStart, setShiftStart]   = useState(null);
   const [elapsed, setElapsed]         = useState("00:00");
   const [activePanel, setActivePanel] = useState("all"); // "all"|"emotion"|"drowsiness"|"roadscene"|"hazard"
+  const [drivingMode, setDrivingMode] = useState(false);
 
   // ── Shared webcam ───────────────────────────────────────────────────────
   const videoRef   = useRef(null);
@@ -229,13 +231,18 @@ export default function ActiveShiftPage() {
   const [dwAlerts, setDwAlerts]       = useState(0);
   const [dwDrowsyFrames, setDwDrowsyFrames] = useState(0);
 
+  // ── Shift scoring accumulators ───────────────────────────────────────────
+  const bviSumRef    = useRef(0);
+  const bviCountRef  = useRef(0);
+  const cheatCountRef = useRef(0);
+  const [shiftScore, setShiftScore]     = useState(null); // score result to show in modal
+
   // ── Road Scene state ────────────────────────────────────────────────────
-  const [rsFile, setRsFile]           = useState(null);
-  const [rsVideoUrl, setRsVideoUrl]   = useState(null);
   const [rsResult, setRsResult]       = useState(null);
   const [rsLoading, setRsLoading]     = useState(false);
   const [rsActiveIdx, setRsActiveIdx] = useState(0);
-  const rsVideoRef = useRef(null);
+  const [rsPlaying, setRsPlaying]     = useState(true);
+  const rsPlayRef = useRef(null);
 
   // ── Hazard state ────────────────────────────────────────────────────────
   const [hzAnalysis, setHzAnalysis]   = useState(null);
@@ -245,14 +252,77 @@ export default function ActiveShiftPage() {
   const hzMapInstance = useRef(null);
   const hzMarkerRef   = useRef(null);
   const hzAnimRef     = useRef(null);
+  const hudMapRef     = useRef(null);
+  const hudMapInst    = useRef(null);
+  const hudMarkerRef  = useRef(null);
   const [hzIdx, setHzIdx]             = useState(0);
   const [hzPoint, setHzPoint]         = useState(null);
   const [hzPlaying, setHzPlaying]     = useState(false);
   const [hzFinished, setHzFinished]   = useState(false);
 
+  // ── Road Sign state ─────────────────────────────────────────────────────
+  const [rsSignInfo, setRsSignInfo]         = useState(null); // {class_name, confidence, status}
+  const [rsSignStreamErr, setRsSignStreamErr] = useState(false);
+  const rsSignPollRef = useRef(null);
+  const rsSignLastRef = useRef(null);
+  const [rsSignLog, setRsSignLog]           = useState([]);
+  const rsSignStreamSrc = useRef(`/road-sign/video_feed?t=${Date.now()}`);
+
 
   // ── Auth guard ──────────────────────────────────────────────────────────
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
+
+  // ── ESC exits driving mode ────────────────────────────────────────────
+  useEffect(() => {
+    const handler = e => { if (e.key === "Escape" && drivingMode) setDrivingMode(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [drivingMode]);
+
+  // ── HUD map — init + sync with hazard data ─────────────────────────────
+  useEffect(() => {
+    if (!drivingMode || !hudMapRef.current) return;
+    if (hudMapInst.current) { hudMapInst.current.invalidateSize(); return; }
+    const map = L.map(hudMapRef.current).setView([7.0, 80.0], 8);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap" }).addTo(map);
+    hudMapInst.current = map;
+    setTimeout(() => map.invalidateSize(), 100);
+    setTimeout(() => map.invalidateSize(), 500);
+
+    // Draw route if hazard data is available
+    const pd = hzAnalysis?.path_data;
+    if (pd?.length) {
+      const coords = pd.map(p => [p.lat, p.lon]);
+      for (let i = 0; i < coords.length - 1; i++) {
+        L.polyline([coords[i], coords[i + 1]], { color: pd[i].color || "green", weight: 4, opacity: 0.8 }).addTo(map);
+      }
+      L.circleMarker(coords[0], { radius: 8, color: "#0b5fff", fillColor: "#0b5fff", opacity: 0.9 }).addTo(map);
+      L.circleMarker(coords[coords.length - 1], { radius: 8, color: "red", fillColor: "red", opacity: 0.8 }).addTo(map);
+      hudMarkerRef.current = L.marker(coords[0], {
+        icon: L.divIcon({
+          className: "as-vehicle-icon",
+          html: '<div class="as-bus-marker"><svg viewBox="0 0 24 24" width="22" height="22" fill="white"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18" stroke="#0b5fff" stroke-width="1" fill="none"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2" stroke="white" stroke-width="1" fill="none"/></svg></div>',
+          iconSize: [36, 36], iconAnchor: [18, 18]
+        })
+      }).addTo(map);
+      map.fitBounds(L.latLngBounds(coords), { padding: [30, 30] });
+    }
+    return () => { map.remove(); hudMapInst.current = null; hudMarkerRef.current = null; };
+  }, [drivingMode, hzAnalysis]);
+
+  // ── HUD map — follow bus position ──────────────────────────────────────
+  useEffect(() => {
+    if (!drivingMode || !hudMapInst.current || !hzPoint) return;
+    if (hudMarkerRef.current) {
+      hudMarkerRef.current.setLatLng([hzPoint.lat, hzPoint.lon]);
+      const el = hudMarkerRef.current.getElement();
+      if (el) {
+        const m = el.querySelector(".as-bus-marker");
+        if (m) m.className = hzPoint.risk_label === "Critical Risk" ? "as-bus-marker danger-critical" : hzPoint.risk_label === "High Risk" ? "as-bus-marker danger-high" : "as-bus-marker";
+      }
+    }
+    hudMapInst.current.panTo([hzPoint.lat, hzPoint.lon], { animate: true, duration: 0.3 });
+  }, [drivingMode, hzPoint]);
 
   // ── Elapsed timer ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -301,6 +371,15 @@ export default function ActiveShiftPage() {
       if (payload?.ok===false) return;
       setEmResult(payload);
       setEmFrames(c=>c+1);
+      // Accumulate BVI for scoring
+      if (payload?.bvi?.bvi_score != null) {
+        bviSumRef.current += payload.bvi.bvi_score;
+        bviCountRef.current += 1;
+      }
+      // Count cheating/distraction frames
+      if (payload?.objects?.cheating) {
+        cheatCountRef.current += 1;
+      }
     });
     return () => { if(emSendIvRef.current) clearInterval(emSendIvRef.current); socket.disconnect(); };
   }, []);
@@ -350,6 +429,47 @@ export default function ActiveShiftPage() {
     }, 200);
     return () => { clearInterval(dwSendIvRef.current); dwInFlight.current=false; };
   }, [shiftActive, dwSessionId]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ── ROAD SIGN — Poll detection info when shift active ──────────────────
+  useEffect(() => {
+    if (!shiftActive) {
+      if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
+      return;
+    }
+    // Generate fresh stream URL each time shift starts (demo video)
+    const rsQ = new URLSearchParams({
+      t: String(Date.now()),
+      driver_id: String(driverId || ""),
+      schedule_id: String(scheduleId || ""),
+    });
+    rsSignStreamSrc.current = `/video_feed_demo?${rsQ.toString()}`;
+    setRsSignStreamErr(false);
+
+    rsSignPollRef.current = setInterval(() => {
+      fetch("/get_demo_detection_info")
+        .then(r => r.json())
+        .then(data => {
+          const hasSign = data?.class_name;
+          setRsSignInfo(hasSign ? data : null);
+          if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
+            rsSignLastRef.current = data.class_name;
+            setRsSignLog(prev => [
+              { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() },
+              ...prev.slice(0, 19),
+            ]);
+          } else if (!hasSign) {
+            rsSignLastRef.current = null;
+          }
+        })
+        .catch(() => {});
+    }, 400);
+
+    return () => {
+      clearInterval(rsSignPollRef.current);
+      fetch("/stop_demo_video").catch(() => {});
+    };
+  }, [shiftActive, driverId, scheduleId]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── HAZARD — Auto-analyze route on shift start ─────────────────────────
@@ -495,51 +615,118 @@ export default function ActiveShiftPage() {
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── Road Scene upload & analysis ───────────────────────────────────────
-  function handleRsFile(e) {
-    const f=e.target.files[0]; if(!f) return;
-    setRsFile(f); setRsVideoUrl(URL.createObjectURL(f)); setRsResult(null); setRsActiveIdx(0);
-  }
+  // ═══════════════════════════════════════════════════════════════════════
+  // ── Road Scene — auto-advance frames ───────────────────────────────────
+  useEffect(() => {
+    if (!rsResult?.frames?.length || !rsPlaying) {
+      clearInterval(rsPlayRef.current);
+      return;
+    }
+    rsPlayRef.current = setInterval(() => {
+      setRsActiveIdx(prev => {
+        const next = prev + 1;
+        return next >= rsResult.frames.length ? 0 : next;  // loop
+      });
+    }, 2000);
+    return () => clearInterval(rsPlayRef.current);
+  }, [rsResult, rsPlaying]);
 
+  // ── Road Scene — analyze demo video ────────────────────────────────────
   async function analyzeRsVideo() {
-    if(!rsFile) return;
     setRsLoading(true); setRsResult(null);
     try {
-      const fd=new FormData(); fd.append("file",rsFile);
-      const res=await fetch(`${API}/rsa/analyse-video`,{method:"POST",body:fd});
+      const res=await fetch(`${API}/rsa/analyse-demo`,{method:"POST"});
       const data=await res.json();
       if(!res.ok||data.error) return;
       setRsResult(data);
     } catch {} finally { setRsLoading(false); }
   }
 
-  function handleRsTimeUpdate() {
-    if(!rsVideoRef.current||!rsResult?.frames?.length) return;
-    const t=rsVideoRef.current.currentTime;
-    let best=0,bestD=Infinity;
-    rsResult.frames.forEach((f,i) => { const d=Math.abs(f.timestamp-t); if(d<bestD){bestD=d;best=i;} });
-    if(best!==rsActiveIdx) setRsActiveIdx(best);
-  }
-
   // ═══════════════════════════════════════════════════════════════════════
   // ── START / STOP SHIFT ─────────────────────────────────────────────────
   async function handleStartShift() {
     try {
-      await fetch(`${API}/api/driver/shift/start`,{method:"POST",headers:{Authorization:`Bearer ${token}`}});
+      await fetch(`${API}/api/driver/shift/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          schedule_id: scheduleId,
+          shift_time: scheduleInfo.shift_time || "",
+          date: scheduleInfo.date || "",
+          start_town: startTown,
+          end_town: endTown,
+          bus: busId,
+          route_name: routeName,
+          route: `${startTown} → ${endTown}`,
+        }),
+      });
     } catch {}
     setShiftActive(true);
     setShiftStart(Date.now());
     setEmFrames(0); setDwFrames(0); setDwAlerts(0); setDwDrowsyFrames(0);
-    // Auto-start hazard analysis
+    bviSumRef.current = 0; bviCountRef.current = 0; cheatCountRef.current = 0;
+    setShiftScore(null);
+    // Auto-start hazard analysis + road scene demo analysis
     analyzeRoute();
+    analyzeRsVideo();
   }
 
   async function handleEndShift() {
+    // Compute & send score before navigating away
+    const durationSec = shiftStart ? Math.round((Date.now() - shiftStart) / 1000) : 0;
+    const avgBvi = bviCountRef.current > 0 ? bviSumRef.current / bviCountRef.current : null;
+    const avgSceneHazard = rsResult?.frames?.length
+      ? rsResult.frames.reduce((s, f) => s + (f.hazard?.score || 0), 0) / rsResult.frames.length
+      : null;
+    const signLog = rsSignLog || [];
+    const normalSigns = signLog.filter(s => s.status === "Normal").length;
+    const damagedSigns = signLog.filter(s => s.status !== "Normal").length;
+
+    const metrics = {
+      schedule_id: scheduleId,
+      shift_time: scheduleInfo.shift_time || "",
+      date: scheduleInfo.date || "",
+      start_town: startTown,
+      end_town: endTown,
+      bus: busId,
+      route_name: routeName,
+      route: `${startTown} → ${endTown}`,
+      duration_sec: durationSec,
+      em_frames: emFrames,
+      avg_bvi: avgBvi != null ? Math.round(avgBvi * 1000) / 1000 : null,
+      cheat_frames: cheatCountRef.current,
+      dw_frames: dwFrames,
+      dw_drowsy_frames: dwDrowsyFrames,
+      dw_alerts: dwAlerts,
+      signs_detected: normalSigns,
+      damaged_signs: damagedSigns,
+      avg_scene_hazard: avgSceneHazard != null ? Math.round(avgSceneHazard * 100) / 100 : null,
+    };
+
     try {
-      await fetch(`${API}/api/driver/shift/stop`,{method:"POST",headers:{Authorization:`Bearer ${token}`}});
+      const res = await fetch(`${API}/api/driver/shift/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(metrics),
+      });
+      const scoreData = await res.json();
+      if (res.ok) setShiftScore(scoreData);
     } catch {}
+
+    try {
+      await fetch(`${API}/api/driver/shift/stop`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    } catch {}
+    // Stop demo video
+    fetch("/stop_demo_video").catch(() => {});
     setShiftActive(false); setShiftStart(null);
     setEmResult(null); setDwResult(null);
+    setRsSignInfo(null); setRsSignLog([]);
     setHzPlaying(false);
+    // Don't navigate yet — modal will show
+  }
+
+  function handleScoreClose() {
+    setShiftScore(null);
     navigate("/driver/schedule");
   }
 
@@ -616,6 +803,7 @@ export default function ActiveShiftPage() {
               </span>
             </div>
             <button className="as-end-btn" onClick={handleEndShift}><IcoStop/> END SHIFT</button>
+            <button className="as-drive-mode-btn" onClick={()=>setDrivingMode(true)}>🚗 Driving Mode</button>
           </div>
         )}
 
@@ -626,6 +814,7 @@ export default function ActiveShiftPage() {
               {key:"all",label:"All Panels"},
               {key:"emotion",label:"Emotion"},
               {key:"drowsiness",label:"Drowsiness"},
+              {key:"roadsign",label:"Road Sign"},
               {key:"roadscene",label:"Road Scene"},
               {key:"hazard",label:"Hazard"},
             ].map(t=>(
@@ -745,6 +934,90 @@ export default function ActiveShiftPage() {
               </div>
             )}
 
+            {/* ── ROAD SIGN PANEL ───────────────────────────────── */}
+            {(activePanel==="all"||activePanel==="roadsign") && (
+              <div className={`as-panel as-rsign-panel ${activePanel!=="all"?"wide":""}`}>
+                <div className="as-panel-head">
+                  <span className="as-panel-title">🚦 Road Sign Detection</span>
+                  {rsSignInfo && (
+                    <span className="as-badge" style={{
+                      color: rsSignInfo.status==="Normal"?"#22c55e":"#f59e0b",
+                      borderColor: rsSignInfo.status==="Normal"?"#22c55e":"#f59e0b"
+                    }}>
+                      {rsSignInfo.status}
+                    </span>
+                  )}
+                </div>
+
+                <div className="as-rsign-body">
+                  {/* MJPEG webcam stream */}
+                  <div className="as-rsign-stream-wrap">
+                    {!rsSignStreamErr ? (
+                      <img
+                        src={rsSignStreamSrc.current}
+                        alt="Road sign live feed"
+                        className="as-rsign-stream"
+                        onError={() => setRsSignStreamErr(true)}
+                      />
+                    ) : (
+                      <div className="as-rsign-no-stream">
+                        <p>📷 Camera stream unavailable</p>
+                        <p style={{fontSize:"0.7rem",color:"#475569"}}>Make sure the backend is running</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Detection info */}
+                  {rsSignInfo ? (() => {
+                    const instr = getSignInstruction(rsSignInfo.class_name);
+                    const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                    return (
+                      <div className="as-rsign-detection" style={pc ? {background:pc.bg, borderColor:pc.border} : {}}>
+                        <div className="as-rsign-det-head">
+                          <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
+                          <div>
+                            <div className="as-rsign-det-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                            <div className="as-rsign-det-conf">
+                              {(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}
+                            </div>
+                          </div>
+                          {instr && (
+                            <span className="as-rsign-priority" style={{background:pc?.badge}}>
+                              {instr.priorityLabel}
+                            </span>
+                          )}
+                        </div>
+                        {instr?.instructions && (
+                          <ul className="as-rsign-instructions">
+                            {instr.instructions.map((ins,i) => <li key={i}>{ins}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <div className="as-rsign-no-detect">
+                      <span style={{fontSize:"1.5rem"}}>👁</span>
+                      <p>Scanning for road signs…</p>
+                    </div>
+                  )}
+
+                  {/* Recent detection log */}
+                  {rsSignLog.length > 0 && (
+                    <div className="as-rsign-log">
+                      <div className="as-rsign-log-title">Recent Detections</div>
+                      {rsSignLog.slice(0,5).map((entry,i) => (
+                        <div key={i} className="as-rsign-log-row">
+                          <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
+                          <span className="as-rsign-log-conf">{(entry.confidence*100).toFixed(0)}%</span>
+                          <span className="as-rsign-log-time">{entry.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* ── ROAD SCENE PANEL ──────────────────────────────── */}
             {(activePanel==="all"||activePanel==="roadscene") && (
               <div className={`as-panel as-rs-panel ${activePanel!=="all"?"wide":""}`}>
@@ -758,57 +1031,46 @@ export default function ActiveShiftPage() {
                 </div>
 
                 <div className="as-rs-body">
-                  {/* Upload area */}
-                  {!rsResult && (
+                  {/* Auto-analyzing demo video */}
+                  {!rsResult && !rsLoading && (
                     <div className="as-rs-upload">
-                      <label className="as-rs-upload-label">
-                        <IcoUpload/> {rsFile ? rsFile.name : "Select a video file"}
-                        <input type="file" accept="video/*" onChange={handleRsFile} style={{display:"none"}}/>
-                      </label>
-                      {rsFile && (
-                        <button className="as-rs-analyze-btn" onClick={analyzeRsVideo} disabled={rsLoading}>
-                          {rsLoading ? "Analyzing…" : "Analyze Video"}
-                        </button>
-                      )}
+                      <p style={{color:"#94a3b8",textAlign:"center"}}>Demo video analysis will start automatically when shift begins.</p>
+                      <button className="as-rs-analyze-btn" onClick={analyzeRsVideo}>Analyze Demo Video</button>
                     </div>
                   )}
 
-                  {/* Video player + results */}
-                  {rsVideoUrl && rsResult && (
-                    <div className="as-rs-results">
-                      <video ref={rsVideoRef} src={rsVideoUrl} controls className="as-rs-video"
-                        onTimeUpdate={handleRsTimeUpdate}/>
-
-                      {rsFrame && (
-                        <div className="as-rs-detail">
-                          {/* Overlay image */}
-                          {rsFrame.overlay && (
-                            <img src={`data:image/jpeg;base64,${rsFrame.overlay}`} alt="overlay" className="as-rs-overlay"/>
-                          )}
-                          {/* Hazard info */}
-                          <div className="as-rs-hazard">
-                            <div className="as-rs-hazard-score" style={{color:hazardColor(rsFrame.hazard?.level)}}>
-                              {rsFrame.hazard?.score?.toFixed(1)} <small>hazard</small>
-                            </div>
-                            <div className="as-rs-hazard-level" style={{color:hazardColor(rsFrame.hazard?.level)}}>
-                              {rsFrame.hazard?.level}
-                            </div>
-                          </div>
-                          {/* Segment breakdown */}
-                          <div className="as-rs-segs">
-                            {rsFrame.segments?.slice(0,5).map(seg=>(
-                              <div key={seg.id} className="as-rs-seg-row">
-                                <span className="as-rs-seg-dot" style={{background:seg.color}}/>
-                                <span className="as-rs-seg-label">{seg.label}</span>
-                                <span className="as-rs-seg-pct">{seg.pixel_pct?.toFixed(1)}%</span>
-                              </div>
-                            ))}
-                          </div>
+                  {/* Results — auto-advancing frame-by-frame */}
+                  {rsResult && rsFrame && (
+                    <div className="as-rs-results as-rs-live">
+                      {/* Large overlay image */}
+                      <div className="as-rs-live-img-wrap">
+                        <img src={rsFrame.overlay} alt="Scene analysis" className="as-rs-overlay"/>
+                        <div className="as-rs-live-badge">
+                          <span className="as-rs-live-dot"/>
+                          Frame {rsActiveIdx+1} / {rsResult.frames.length}
                         </div>
-                      )}
-                      <button className="as-rs-reset-btn" onClick={()=>{setRsFile(null);setRsVideoUrl(null);setRsResult(null);}}>
-                        Upload New Video
-                      </button>
+                        <div className="as-rs-live-hazard" style={{color:hazardColor(rsFrame.hazard?.level), borderColor:hazardColor(rsFrame.hazard?.level)}}>
+                          {rsFrame.hazard?.score?.toFixed(1)} — {rsFrame.hazard?.level}
+                        </div>
+                      </div>
+
+                      {/* Segment breakdown bar */}
+                      <div className="as-rs-segs">
+                        {rsFrame.segments?.slice(0,6).map(seg=>(
+                          <div key={seg.id} className="as-rs-seg-row">
+                            <span className="as-rs-seg-dot" style={{background:seg.color}}/>
+                            <span className="as-rs-seg-label">{seg.label}</span>
+                            <span className="as-rs-seg-pct">{seg.pixel_pct?.toFixed(1)}%</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Playback controls */}
+                      <div className="as-rs-frame-nav">
+                        <button onClick={()=>{setRsPlaying(false);setRsActiveIdx(i=>Math.max(0,i-1));}}>◀</button>
+                        <button onClick={()=>setRsPlaying(p=>!p)}>{rsPlaying ? "⏸ Pause" : "▶ Play"}</button>
+                        <button onClick={()=>{setRsPlaying(false);setRsActiveIdx(i=>Math.min(rsResult.frames.length-1,i+1));}}>▶</button>
+                      </div>
                     </div>
                   )}
 
@@ -866,6 +1128,154 @@ export default function ActiveShiftPage() {
 
 
       </main>
+
+      {/* ── SHIFT SCORE MODAL ─────────────────────────────────────── */}
+      {shiftScore && (
+        <div className="as-score-overlay" onClick={handleScoreClose}>
+          <div className="as-score-modal" onClick={e => e.stopPropagation()}>
+            <h2 className="as-score-title">Shift Complete</h2>
+
+            <div className={`as-score-ring ${shiftScore.tier?.replace(/\s+/g, "-").toLowerCase()}`}>
+              <span className="as-score-number">{shiftScore.total_score}</span>
+              <span className="as-score-max">/ 100</span>
+            </div>
+            <div className="as-score-tier">{shiftScore.tier}</div>
+
+            <div className="as-score-bars">
+              {shiftScore.components && Object.entries(shiftScore.components).map(([key, comp]) => (
+                <div key={key} className="as-score-bar-row">
+                  <span className="as-score-bar-label">{comp.label}</span>
+                  <div className="as-score-bar-track">
+                    <div
+                      className="as-score-bar-fill"
+                      style={{ width: `${(comp.score / comp.max) * 100}%` }}
+                    />
+                  </div>
+                  <span className="as-score-bar-val">{comp.score}/{comp.max}</span>
+                </div>
+              ))}
+            </div>
+
+            <button className="as-score-close-btn" onClick={handleScoreClose}>
+              Done — Back to Schedule
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── DRIVING MODE HUD ──────────────────────────────────────── */}
+      {drivingMode && shiftActive && (
+        <div className="hud-overlay">
+          {/* HUD Top Bar */}
+          <div className="hud-topbar">
+            <div className="hud-topbar-left">
+              <span className="hud-live-dot"/>
+              <span className="hud-route">{startTown} → {endTown}</span>
+              <span className="hud-meta">{routeName} · {busId}</span>
+            </div>
+            <div className="hud-topbar-center">
+              <span className="hud-elapsed">⏱ {elapsed}</span>
+            </div>
+            <div className="hud-topbar-right">
+              <button className="hud-exit-btn" onClick={()=>setDrivingMode(false)}>✕ Exit Driving Mode</button>
+            </div>
+          </div>
+
+          {/* HUD Main Area */}
+          <div className="hud-body">
+            {/* Large Map */}
+            <div className="hud-map-area">
+              <div ref={hudMapRef} className="hud-map"/>
+              {/* Hazard dashboard cards overlay on map */}
+              <div className="hud-hz-cards">
+                <HazardDashPanel currentPoint={hzPoint} nextPoints={pd?.slice(hzIdx)} isFinished={hzFinished} totalDistance={pd?.length ? pd[pd.length-1].distance : 0}/>
+              </div>
+            </div>
+
+            {/* Right sidebar — camera + alerts */}
+            <div className="hud-sidebar">
+              {/* PIP Camera */}
+              <div className="hud-cam">
+                <video ref={el => { if (el && streamRef.current) el.srcObject = streamRef.current; }} autoPlay playsInline muted className="hud-cam-video" style={{transform:"scaleX(-1)"}}/>
+              </div>
+
+              {/* Alert banners */}
+              {cheating && (
+                <div className="hud-alert red">
+                  <IcoAlert/> DISTRACTION: {emResult?.objects?.labels?.join(", ")}
+                </div>
+              )}
+              {dwResult?.alert && (
+                <div className="hud-alert red">
+                  <IcoAlert/> DROWSINESS — Pull over!
+                </div>
+              )}
+
+              {/* Drowsiness quick status */}
+              <div className="hud-status-card">
+                <div className="hud-status-head">😴 Drowsiness</div>
+                <div className="hud-status-row">
+                  <span>Status</span>
+                  <span style={{color: verdictColor(dwVerdict), fontWeight: 700}}>{dwVerdict || "Waiting"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>Confidence</span>
+                  <span>{dwConf != null ? `${(dwConf*100).toFixed(0)}%` : "—"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>Alert Streak</span>
+                  <span style={{color: dwStreak >= CONSECUTIVE_THRESHOLD ? "#ef4444" : "#94a3b8"}}>{dwStreak}/{CONSECUTIVE_THRESHOLD}</span>
+                </div>
+              </div>
+
+              {/* Emotion quick status */}
+              <div className="hud-status-card">
+                <div className="hud-status-head">😊 Emotion</div>
+                <div className="hud-status-row">
+                  <span>Current</span>
+                  <span style={{color: emoColor, fontWeight: 700}}>{emotion ? emotion.toUpperCase() : "—"}</span>
+                </div>
+                <div className="hud-status-row">
+                  <span>BVI</span>
+                  <span style={{color: bviColor(bviScore)}}>{bviScore?.toFixed(3) ?? "—"}</span>
+                </div>
+              </div>
+
+              {/* Road sign detection */}
+              {rsSignInfo && (() => {
+                const instr = getSignInstruction(rsSignInfo.class_name);
+                const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                return (
+                  <div className="hud-sign-card" style={pc ? {borderColor: pc.border, background: pc.bg} : {}}>
+                    <div className="hud-sign-head">
+                      <span className="hud-sign-icon">{instr?.icon || "🔍"}</span>
+                      <div>
+                        <div className="hud-sign-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                        <div className="hud-sign-conf">{(rsSignInfo.confidence*100).toFixed(0)}%</div>
+                      </div>
+                      {instr && <span className="hud-sign-priority" style={{background: pc?.badge}}>{instr.priorityLabel}</span>}
+                    </div>
+                    {instr?.instructions && (
+                      <ul className="hud-sign-instructions">
+                        {instr.instructions.slice(0,2).map((ins,i) => <li key={i}>{ins}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
+              {!rsSignInfo && (
+                <div className="hud-status-card" style={{textAlign:"center", color:"#475569"}}>
+                  <div className="hud-status-head">🚦 Road Signs</div>
+                  <p style={{margin:"0.3rem 0 0",fontSize:"0.72rem"}}>Scanning…</p>
+                </div>
+              )}
+
+              {/* ESC hint */}
+              <div className="hud-esc-hint">Press <kbd>ESC</kbd> to exit</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .as-vehicle-icon {
