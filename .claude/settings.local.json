@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E '\\\\.\\(py|json|yaml|yml|env\\)$')",
+      "Bash(xargs ls:*)",
+      "Bash(xargs wc:*)",
+      "Bash(\\\\.h5)",
+      "Bash(\\\\.keras)",
+      "Bash(\\\\.csv\")",
+      "Bash(ls -lh \"D:\\\\Research Project\\\\Drownsiness\"/*.ipynb \"D:\\\\Research Project\\\\Drownsiness\"/*.py)",
+      "Bash(ls -lh \"D:\\\\Research Project\\\\Drownsiness\"/outputs*/*.pth \"D:\\\\Research Project\\\\Drownsiness\"/outputs*/*.json)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(find \"D:\\\\Research Project\\\\Drownsiness/outputs\"* -type f -name \"*.pth\" -o -name \"*.json\")",
+      "Bash(find outputs* -type f)"
+    ]
+  }
+}
