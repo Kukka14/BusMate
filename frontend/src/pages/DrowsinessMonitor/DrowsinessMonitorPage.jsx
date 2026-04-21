@@ -467,7 +467,7 @@ export default function DrowsinessMonitorPage() {
                   <>
                     <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
                     <div className="dw-session-meta">
-                      LSTM (60%) + RGB CNN (25%) + IR CNN (15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter
+                      M1(10%) + M2 LSTM(35%) + M3 Fusion(25%) + M4 Transformer(15%) + M5 TCN(15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter
                     </div>
                   </>
                 )}
@@ -575,7 +575,7 @@ export default function DrowsinessMonitorPage() {
                     <div>
                       <span className="dw-card-title">Drowsiness Confidence</span>
                       <span className="dw-card-hint">
-                        Local ensemble · LSTM (60%) + RGB CNN (25%) + IR CNN (15%)
+                        Local ensemble · M1(10%) + M2(35%) + M3(25%) + M4(15%) + M5(15%)
                       </span>
                     </div>
                     {verdict && (
@@ -607,19 +607,25 @@ export default function DrowsinessMonitorPage() {
                   <div className="dw-card-head">
                     <div>
                       <span className="dw-card-title">Model Predictions</span>
-                      <span className="dw-card-hint">Three models fused by accuracy weight</span>
+                      <span className="dw-card-hint">Five PyTorch models fused by accuracy weight</span>
                     </div>
                   </div>
                   <div className="dw-models">
-                    <ModelBar name="LSTM (Temporal · 30 frames)" weight="0.60"
-                      drowsyProb={models.lstm?.drowsy_prob}
-                      available={models.lstm?.available ?? false}/>
-                    <ModelBar name="RGB CNN (Color · MobileNetV3)" weight="0.25"
-                      drowsyProb={models.rgb?.drowsy_prob}
-                      available={models.rgb?.available ?? false}/>
-                    <ModelBar name="IR CNN (Grayscale · Eye state)" weight="0.15"
-                      drowsyProb={models.ir?.drowsy_prob}
-                      available={models.ir?.available ?? false}/>
+                    <ModelBar name="M1 EfficientNet (Single frame)" weight="0.10"
+                      drowsyProb={models.m1?.drowsy_prob}
+                      available={models.m1?.available ?? false}/>
+                    <ModelBar name="M2 CNN+LSTM (Temporal · 16 frames)" weight="0.35"
+                      drowsyProb={models.m2?.drowsy_prob}
+                      available={models.m2?.available ?? false}/>
+                    <ModelBar name="M3 Fusion+Eye (Reliability-aware)" weight="0.25"
+                      drowsyProb={models.m3?.drowsy_prob}
+                      available={models.m3?.available ?? false}/>
+                    <ModelBar name="M4 Transformer (Self-attention)" weight="0.15"
+                      drowsyProb={models.m4?.drowsy_prob}
+                      available={models.m4?.available ?? false}/>
+                    <ModelBar name="M5 MS-TCN (Dilated temporal)" weight="0.15"
+                      drowsyProb={models.m5?.drowsy_prob}
+                      available={models.m5?.available ?? false}/>
                   </div>
                   {!result && <p className="dw-no-data">Predictions appear after first frame arrives…</p>}
                 </div>
@@ -629,7 +635,7 @@ export default function DrowsinessMonitorPage() {
                   <div className="dw-card-head">
                     <div>
                       <span className="dw-card-title">Facial Features</span>
-                      <span className="dw-card-hint">MediaPipe 478-landmark extraction · LSTM input</span>
+                      <span className="dw-card-hint">Raw pixel input · No landmark extraction required</span>
                     </div>
                     {faceOk != null && (
                       <span className={`dw-card-badge ${faceOk ? "green" : "red"}`}>
@@ -839,7 +845,7 @@ export default function DrowsinessMonitorPage() {
                   <div>
                     <span className="dw-card-title">Video Drowsiness Analysis</span>
                     <span className="dw-card-hint">
-                      Upload a driving video · Every 3rd frame processed · First 30 frames excluded (LSTM warm-up)
+                      Upload a driving video · Every 3rd frame processed · First 16 frames excluded (model warm-up)
                     </span>
                   </div>
                 </div>
@@ -859,7 +865,7 @@ export default function DrowsinessMonitorPage() {
                   </button>
                 </div>
                 {videoLoading && (
-                  <p className="dw-upload-hint">Processing frames — LSTM warms up after 30 frames, results then become reliable…</p>
+                  <p className="dw-upload-hint">Processing frames — models warm up after 16 frames, results then become reliable…</p>
                 )}
                 {videoError && <p className="dw-upload-error">{videoError}</p>}
               </div>
@@ -1083,21 +1089,31 @@ export default function DrowsinessMonitorPage() {
                                 </div>
 
                                 {/* Model scores row */}
-                                {(f.models?.lstm?.available || f.models?.rgb?.available) && (
+                                {(f.models?.m1?.available || f.models?.m2?.available || f.models?.m3?.available || f.models?.m4?.available || f.models?.m5?.available) && (
                                   <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
-                                    {f.models.lstm?.available && (
+                                    {f.models.m1?.available && (
                                       <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        LSTM {Math.round((f.models.lstm.drowsy_prob ?? 0) * 100)}%
+                                        M1 {Math.round((f.models.m1.drowsy_prob ?? 0) * 100)}%
                                       </span>
                                     )}
-                                    {f.models.rgb?.available && (
+                                    {f.models.m2?.available && (
                                       <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · RGB {Math.round((f.models.rgb.drowsy_prob ?? 0) * 100)}%
+                                        · M2 {Math.round((f.models.m2.drowsy_prob ?? 0) * 100)}%
                                       </span>
                                     )}
-                                    {f.models.ir?.available && (
+                                    {f.models.m3?.available && (
                                       <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · IR {Math.round((f.models.ir.drowsy_prob ?? 0) * 100)}%
+                                        · M3 {Math.round((f.models.m3.drowsy_prob ?? 0) * 100)}%
+                                      </span>
+                                    )}
+                                    {f.models.m4?.available && (
+                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
+                                        · M4 {Math.round((f.models.m4.drowsy_prob ?? 0) * 100)}%
+                                      </span>
+                                    )}
+                                    {f.models.m5?.available && (
+                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
+                                        · M5 {Math.round((f.models.m5.drowsy_prob ?? 0) * 100)}%
                                       </span>
                                     )}
                                   </div>
