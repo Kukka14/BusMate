@@ -4,6 +4,7 @@ from pymongo.errors import DuplicateKeyError
 
 from ..database import get_db
 from ..models.user import User
+from ..models.driver_profile import DriverProfile
 from ..utils.password import hash_password, check_password
 from ..utils.auth_helpers import generate_token
 
@@ -27,6 +28,11 @@ class UserService:
         try:
             result = db.users.insert_one(doc)
             doc["_id"] = result.inserted_id
+            user_id = str(result.inserted_id)
+            # Auto-create an empty driver profile when a driver account is created
+            if role == "driver":
+                profile_doc = DriverProfile.new_doc(user_id)
+                db.driver_profiles.insert_one(profile_doc)
             return {"message": "User registered", "user": User(doc).to_dict()}, 201
         except DuplicateKeyError as e:
             field = "Email" if "email" in str(e) else "Username"

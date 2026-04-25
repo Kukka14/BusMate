@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import random, math
 from flask import Blueprint, jsonify, request
 from ..utils.auth_helpers import token_required
+from ..models.driver_profile import DriverProfile
 
 driver_bp = Blueprint("driver", __name__)
 
@@ -209,12 +210,12 @@ def get_profile(current_user):
     latest    = history30[-1]
     bvi_score = latest["bvi_score"]
 
-    # ── pull real sessions from MongoDB if available ──────────────────────
+    # ── pull real sessions + driver profile from MongoDB ─────────────────
     total_sessions = 0
     recent_events  = []
+    from ..database import get_db
+    db = get_db()
     try:
-        from ..database import get_db
-        db = get_db()
         sessions = list(
             db.driving_sessions.find(
                 {"driver_id": uid, "status": "completed"},
@@ -270,6 +271,14 @@ def get_profile(current_user):
     else:
         risk_level, risk_label = "High",   "RISK ZONE"
 
+    # ── load driver-specific profile from driver_profiles collection ──────
+    dp_doc = db.driver_profiles.find_one({"user_id": uid})
+    if not dp_doc:
+        # Back-fill: create a blank profile for pre-existing driver accounts
+        dp_doc = DriverProfile.new_doc(uid)
+        db.driver_profiles.insert_one(dp_doc)
+    dp = DriverProfile(dp_doc)
+
     return jsonify({
         # identity
         "id":            uid,
@@ -279,9 +288,16 @@ def get_profile(current_user):
         "company":       current_user.company,
         "role":          current_user.role,
         "status":        "ONLINE",
-        "vehicle":       "Volvo BSR #402",
-        "route":         "Route 42 – Downtown Loop",
-        "shift":         "08:00 – 16:00",
+        # profile fields from driver_profiles collection (editable by driver)
+        "vehicle":       dp.vehicle  or "Volvo BSR #402",
+        "route":         dp.route    or "Route 42 – Downtown Loop",
+        "shift":         dp.shift    or "08:00 – 16:00",
+        "phone":         dp.phone,
+        "license_number":  dp.license_number,
+        "license_expiry":  dp.license_expiry,
+        "emergency_contact": dp.emergency_contact,
+        "photo_url":     dp.photo_url,
+        "experience_years": dp.experience_years,
 
         # stat cards
         "stats": {
@@ -330,6 +346,32 @@ def get_profile(current_user):
     }), 200
 
 
+# ── Update driver profile ─────────────────────────────────────────────────────
+@driver_bp.put("/profile")
+@token_required
+def update_profile(current_user):
+    """Allow a driver to update their own extended profile fields."""
+    uid  = str(current_user.id)
+    body = request.get_json(force=True, silent=True) or {}
+    from ..database import get_db
+    db = get_db()
+
+    allowed = {"vehicle", "route", "shift", "phone", "license_number",
+               "license_expiry", "emergency_contact", "photo_url", "experience_years"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        return jsonify({"error": "No valid fields provided"}), 400
+
+    update["updated_at"] = datetime.utcnow()
+    result = db.driver_profiles.update_one(
+        {"user_id": uid},
+        {"$set": update},
+        upsert=True,   # handles pre-existing accounts that have no profile doc yet
+    )
+    doc = db.driver_profiles.find_one({"user_id": uid})
+    return jsonify({"message": "Profile updated", "profile": DriverProfile(doc).to_dict()}), 200
+
+
 # ── Start / stop shift ────────────────────────────────────────────────────────
 @driver_bp.get("/shift/start")
 @token_required
@@ -337,11 +379,58 @@ def start_shift_get(current_user):
     return jsonify({"message": "use POST"}), 405
 
 
+def _create_shift_with_empty_road_sign(current_user, payload):
+    """Create/find an active shift_scores document initialized with empty road_sign array."""
+    from ..database import get_db
+    db = get_db()
+
+    uid = str(current_user.id)
+    schedule_id = str(payload.get("schedule_id", "") or "")
+
+    active_filter = {"driver_id": uid, "status": "Active"}
+    if schedule_id:
+        active_filter["schedule_id"] = schedule_id
+
+    existing = db.shift_scores.find_one(active_filter, {"_id": 1, "schedule_id": 1, "status": 1})
+    if existing:
+        return str(existing.get("_id")), False
+
+    now_iso = datetime.utcnow().isoformat()
+    doc = {
+        "driver_id": uid,
+        "driver_name": current_user.username,
+        "scored_at": now_iso,
+        "start_time": now_iso,
+        "schedule_id": schedule_id,
+        "date": payload.get("date", ""),
+        "shift_time": payload.get("shift_time", ""),
+        "start_town": payload.get("start_town", ""),
+        "end_town": payload.get("end_town", ""),
+        "bus": payload.get("bus", ""),
+        "route_name": payload.get("route_name", ""),
+        "route": payload.get("route", ""),
+        "duration_sec": payload.get("duration_sec", 0),
+        "metrics": {},
+        "score": {},
+        "status": "Active",
+        "road_sign": [],
+    }
+    result = db.shift_scores.insert_one(doc)
+    return str(result.inserted_id), True
+
+
 @driver_bp.post("/shift/start")
 @token_required
 def start_shift(current_user):
-    return jsonify({"message": "Shift started", "shift_active": True,
-                    "start_time": datetime.utcnow().isoformat()}), 200
+    payload = request.get_json(silent=True) or {}
+    shift_id, created = _create_shift_with_empty_road_sign(current_user, payload)
+    return jsonify({
+        "message": "Shift started" if created else "Shift already active",
+        "shift_active": True,
+        "start_time": datetime.utcnow().isoformat(),
+        "shift_score_id": shift_id,
+        "schedule_id": payload.get("schedule_id", ""),
+    }), 200
 
 
 @driver_bp.post("/shift/stop")
@@ -349,6 +438,253 @@ def start_shift(current_user):
 def stop_shift(current_user):
     return jsonify({"message": "Shift ended", "shift_active": False,
                     "end_time": datetime.utcnow().isoformat()}), 200
+
+
+# ── Shift score ───────────────────────────────────────────────────────────────
+
+def _compute_shift_score(data):
+    """
+    Compute a 0-100 shift safety score from 5 components (20 pts each).
+    Returns dict with total score, tier, and per-component breakdown.
+    """
+    # ── 1. Emotion component (20 pts) ──
+    avg_bvi = data.get("avg_bvi")
+    if avg_bvi is None:
+        emo_pts = 10  # no data
+    elif avg_bvi < 0.30:
+        emo_pts = 20
+    elif avg_bvi < 0.45:
+        emo_pts = 16
+    elif avg_bvi < 0.60:
+        emo_pts = 10
+    else:
+        emo_pts = max(0, round(5 * (1.0 - avg_bvi) / 0.4))
+
+    # ── 2. Drowsiness component (20 pts) ──
+    dw_total = data.get("dw_frames", 0)
+    dw_drowsy = data.get("dw_drowsy_frames", 0)
+    dw_alerts = data.get("dw_alerts", 0)
+    if dw_total == 0:
+        drow_pts = 10  # no data
+    else:
+        drowsy_pct = (dw_drowsy / dw_total) * 100
+        if drowsy_pct == 0:
+            drow_pts = 20
+        elif drowsy_pct < 5:
+            drow_pts = 16
+        elif drowsy_pct < 15:
+            drow_pts = 10
+        elif drowsy_pct < 30:
+            drow_pts = 5
+        else:
+            drow_pts = 0
+        # Penalty for high alert count
+        if dw_alerts > 10:
+            drow_pts = max(0, drow_pts - 4)
+        elif dw_alerts > 5:
+            drow_pts = max(0, drow_pts - 2)
+
+    # ── 3. Distraction component (20 pts) ──
+    em_total = data.get("em_frames", 0)
+    cheat_frames = data.get("cheat_frames", 0)
+    if em_total == 0:
+        dist_pts = 10  # no data
+    else:
+        cheat_pct = (cheat_frames / em_total) * 100
+        if cheat_pct == 0:
+            dist_pts = 20
+        elif cheat_pct < 3:
+            dist_pts = 15
+        elif cheat_pct < 10:
+            dist_pts = 8
+        else:
+            dist_pts = 0
+
+    # ── 4. Road sign awareness (20 pts) ──
+    signs_detected = data.get("signs_detected", 0)
+    damaged_signs = data.get("damaged_signs", 0)
+    if signs_detected == 0:
+        sign_pts = 10  # no data / no signs on route
+    else:
+        # More signs detected = good awareness; damaged signs deduct
+        sign_pts = min(20, 10 + signs_detected)
+        if damaged_signs > 0:
+            sign_pts = max(5, sign_pts - damaged_signs * 2)
+
+    # ── 5. Road scene hazard (20 pts) ──
+    avg_hazard = data.get("avg_scene_hazard")
+    if avg_hazard is None:
+        scene_pts = 10  # no data
+    elif avg_hazard < 5:
+        scene_pts = 20
+    elif avg_hazard < 15:
+        scene_pts = 15
+    elif avg_hazard < 35:
+        scene_pts = 10
+    else:
+        scene_pts = max(0, round(5 * (1.0 - avg_hazard / 100)))
+
+    total = emo_pts + drow_pts + dist_pts + sign_pts + scene_pts
+
+    if total >= 90:
+        tier = "Excellent"
+    elif total >= 75:
+        tier = "Good"
+    elif total >= 60:
+        tier = "Average"
+    elif total >= 40:
+        tier = "Needs Improvement"
+    else:
+        tier = "Poor"
+
+    return {
+        "total_score": total,
+        "tier": tier,
+        "components": {
+            "emotion":    {"score": emo_pts,   "max": 20, "label": "Emotional Stability"},
+            "drowsiness": {"score": drow_pts,  "max": 20, "label": "Alertness"},
+            "distraction":{"score": dist_pts,  "max": 20, "label": "Focus & Attention"},
+            "road_signs": {"score": sign_pts,  "max": 20, "label": "Sign Awareness"},
+            "road_scene": {"score": scene_pts, "max": 20, "label": "Road Scene Safety"},
+        },
+    }
+
+
+@driver_bp.post("/shift/score")
+@token_required
+def save_shift_score(current_user):
+    """Receive shift metrics from frontend, compute score, store in DB."""
+    data = request.get_json(silent=True) or {}
+    uid = str(current_user.id)
+
+    score_result = _compute_shift_score(data)
+
+    # Store in MongoDB
+    from ..database import get_db
+    db = get_db()
+
+    completed_fields = {
+        "driver_id":    uid,
+        "driver_name":  current_user.username,
+        "scored_at":    datetime.utcnow().isoformat(),
+        "schedule_id":  data.get("schedule_id", ""),
+        "date":         data.get("date", ""),
+        "shift_time":   data.get("shift_time", ""),
+        "start_town":   data.get("start_town", ""),
+        "end_town":     data.get("end_town", ""),
+        "bus":          data.get("bus", ""),
+        "route_name":   data.get("route_name", ""),
+        "route":        data.get("route", ""),
+        "duration_sec": data.get("duration_sec", 0),
+        "metrics":      data,
+        "score":        score_result,
+        "status":       "Completed",
+    }
+
+    # Prefer updating the active shift document so accumulated road_sign array is preserved.
+    active_filter = {"driver_id": uid, "status": "Active"}
+    if data.get("schedule_id"):
+        active_filter["schedule_id"] = data.get("schedule_id")
+
+    upd = db.shift_scores.update_one(active_filter, {"$set": completed_fields})
+    if upd.matched_count == 0:
+        # Fallback: keep previous behavior and insert a completed doc, initialized with empty road_sign.
+        completed_fields["road_sign"] = []
+        db.shift_scores.insert_one(completed_fields)
+
+    return jsonify(score_result), 200
+
+
+@driver_bp.get("/shift/scores")
+@token_required
+def get_shift_scores(current_user):
+    """Return all stored shift scores for this driver."""
+    uid = str(current_user.id)
+    from ..database import get_db
+    db = get_db()
+    docs = list(
+        db.shift_scores.find({"driver_id": uid}, {"_id": 0})
+        .sort("scored_at", -1)
+        .limit(50)
+    )
+    return jsonify({"scores": docs}), 200
+
+
+# ── Schedule endpoints ────────────────────────────────────────────────────────
+
+def _generate_schedules(user_id):
+    """Generate deterministic demo schedules for a driver."""
+    from datetime import timezone
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    routes = [
+        {"start_town": "Colombo",    "end_town": "Kandy",        "bus": "BUS-204", "route_name": "101 Express"},
+        {"start_town": "Galle",      "end_town": "Matara",       "bus": "BUS-117", "route_name": "202 Southern"},
+        {"start_town": "Kurunegala", "end_town": "Anuradhapura", "bus": "BUS-088", "route_name": "303 North Central"},
+        {"start_town": "Negombo",    "end_town": "Colombo",      "bus": "BUS-155", "route_name": "404 Coastal"},
+        {"start_town": "Kandy",      "end_town": "Nuwara Eliya", "bus": "BUS-301", "route_name": "505 Hill Country"},
+        {"start_town": "Colombo",    "end_town": "Galle",        "bus": "BUS-204", "route_name": "606 Southern Exp"},
+    ]
+
+    # Fixed layout: 3 past (completed) + today + 4 upcoming
+    layout = [
+        (-3, "Completed", "06:00 – 14:00"),
+        (-2, "Completed", "10:00 – 18:00"),
+        (-1, "Completed", "14:00 – 22:00"),
+        ( 0, "Today",     "06:00 – 14:00"),
+        ( 1, "Upcoming",  "10:00 – 18:00"),
+        ( 2, "Upcoming",  "06:00 – 14:00"),
+        ( 3, "Upcoming",  "14:00 – 22:00"),
+        ( 4, "Upcoming",  "06:00 – 14:00"),
+    ]
+
+    schedules = []
+    for idx, (offset, status, shift_time) in enumerate(layout):
+        day = today + timedelta(days=offset)
+        r = routes[idx % len(routes)]
+        schedules.append({
+            "id": f"SCH-{abs(hash(str(user_id) + str(offset))) % 99999:05d}",
+            "date": day.strftime("%a, %b %d"),
+            "date_iso": day.isoformat(),
+            "shift_time": shift_time,
+            "start_town": r["start_town"],
+            "end_town": r["end_town"],
+            "bus": r["bus"],
+            "route_name": r["route_name"],
+            "status": status,
+        })
+    return schedules
+
+
+@driver_bp.get("/schedules")
+@token_required
+def get_schedules(current_user):
+    uid = str(current_user.id)
+    schedules = _generate_schedules(uid)
+
+    # Merge completed shifts from DB — override status & attach score
+    from ..database import get_db
+    db = get_db()
+    completed = list(
+        db.shift_scores.find(
+            {"driver_id": uid, "status": "Completed"},
+            {"_id": 0, "schedule_id": 1, "score": 1, "duration_sec": 1, "scored_at": 1}
+        ).sort("scored_at", -1)
+    )
+    completed_map = {}
+    for c in completed:
+        sid = c.get("schedule_id")
+        if sid and sid not in completed_map:
+            completed_map[sid] = c
+
+    for s in schedules:
+        if s["id"] in completed_map:
+            s["status"] = "Completed"
+            s["score"]  = completed_map[s["id"]].get("score", {})
+            s["duration_sec"] = completed_map[s["id"]].get("duration_sec", 0)
+            s["scored_at"] = completed_map[s["id"]].get("scored_at", "")
+
+    return jsonify({"schedules": schedules}), 200
 
 
 # ── Driving Session endpoints ─────────────────────────────────────────────────
@@ -424,6 +760,15 @@ def session_stop(current_user):
     frames = session.get("frames", [])
     now    = datetime.utcnow().isoformat()
 
+    # Accept client-computed scores for sessions without persisted frames
+    # (e.g. Drowsiness Monitor which doesn't POST /session/frame)
+    client_dss           = body.get("dss_score")
+    client_tier          = body.get("dss_tier")
+    client_drowsy_frames = body.get("drowsy_frames")
+    client_drowsy_pct    = body.get("drowsy_pct")
+    client_duration      = body.get("duration_sec")
+    client_total_alerts  = body.get("total_alerts")
+
     # Compute aggregate summary
     bvi_scores = [f["bvi_score"] for f in frames if f.get("bvi_score") is not None]
     emotions   = [f["emotion"]   for f in frames if f.get("emotion")]
@@ -437,23 +782,41 @@ def session_stop(current_user):
         from collections import Counter
         dominant = Counter(emotions).most_common(1)[0][0]
 
-    dss, tier = _compute_dss(avg_bvi, frames)
+    # Use client-supplied DSS when no frames stored (Drowsiness Monitor sessions)
+    if not frames and client_dss is not None:
+        dss  = int(client_dss)
+        tier = str(client_tier) if client_tier else _compute_dss(None, [])[1]
+    else:
+        dss, tier = _compute_dss(avg_bvi, frames)
+
+    summary_doc = {
+        "total_frames":     len(frames) if frames else (client_total_alerts is not None and int(body.get("total_frames", 0))),
+        "avg_bvi":          avg_bvi,
+        "peak_bvi":         peak_bvi,
+        "dominant_emotion": dominant,
+        "erratic_count":    erratic,
+        "safety_alerts":    session["summary"].get("safety_alerts", []),
+        "dss_score":        dss,
+        "dss_tier":         tier,
+    }
+    # Persist extra drowsiness fields when supplied by client
+    if client_drowsy_frames is not None:
+        summary_doc["drowsy_frames"] = int(client_drowsy_frames)
+    if client_drowsy_pct is not None:
+        summary_doc["drowsy_pct"]    = float(client_drowsy_pct)
+    if client_duration is not None:
+        summary_doc["duration_sec"]  = int(client_duration)
+    if client_total_alerts is not None:
+        summary_doc["total_alerts"]  = int(client_total_alerts)
+    if not frames and client_dss is not None:
+        summary_doc["total_frames"]  = int(body.get("total_frames", 0))
 
     db.driving_sessions.update_one(
         {"_id": ObjectId(sid)},
         {"$set": {
             "status":   "completed",
             "ended_at": now,
-            "summary": {
-                "total_frames":     len(frames),
-                "avg_bvi":          avg_bvi,
-                "peak_bvi":         peak_bvi,
-                "dominant_emotion": dominant,
-                "erratic_count":    erratic,
-                "safety_alerts":    session["summary"].get("safety_alerts", []),
-                "dss_score":        dss,
-                "dss_tier":         tier,
-            },
+            "summary":  summary_doc,
         }}
     )
 
@@ -461,13 +824,17 @@ def session_stop(current_user):
         "session_id": sid,
         "ended_at":   now,
         "summary": {
-            "total_frames": len(frames),
-            "avg_bvi":      avg_bvi,
-            "peak_bvi":     peak_bvi,
+            "total_frames":     summary_doc["total_frames"],
+            "avg_bvi":          avg_bvi,
+            "peak_bvi":         peak_bvi,
             "dominant_emotion": dominant,
             "erratic_count":    erratic,
             "dss_score":        dss,
             "dss_tier":         tier,
+            "drowsy_frames":    summary_doc.get("drowsy_frames"),
+            "drowsy_pct":       summary_doc.get("drowsy_pct"),
+            "duration_sec":     summary_doc.get("duration_sec"),
+            "total_alerts":     summary_doc.get("total_alerts"),
         }
     }), 200
 

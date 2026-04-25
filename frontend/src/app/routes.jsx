@@ -20,6 +20,11 @@ import { RoadSceneResultsPage } from "../pages/Road_scene_Results";
 import { RoadSceneVideoResultsPage } from "../pages/Road_scene_VideoResults";
 import HazardAnalyserPage from "../pages/HazardAnalyser";
 import DriverStatsPage from "../pages/DriverStats/DriverStatsPage";
+import DrowsinessMonitorPage from "../pages/DrowsinessMonitor/DrowsinessMonitorPage";
+import SchedulePage from "../pages/Schedule/SchedulePage";
+import ActiveShiftPage from "../pages/ActiveShift/ActiveShiftPage";
+import AdminDriversPage from "../pages/AdminDrivers/AdminDriversPage";
+import AdminSchedulePage from "../pages/AdminSchedule/AdminSchedulePage";
 
 export const router = createBrowserRouter([
   // Standalone full-page routes (own layout)
@@ -27,11 +32,16 @@ export const router = createBrowserRouter([
   { path: "/login",             element: <LoginPage />          },
   { path: "/signup",            element: <SignUpPage />         },
   { path: "/admin/dashboard",   element: <AdminDashboard />     },
+  { path: "/admin/drivers",     element: <AdminDriversPage />   },
+  { path: "/admin/schedules",   element: <AdminSchedulePage />  },
   { path: "/driver/dashboard",        element: <DriverDashboard />    },
   { path: "/driver/monitor",           element: <MonitorHubPage />     },
   { path: "/driver/monitor/emotion",   element: <DrivingMonitorPage /> },
   { path: "/driver/profile",    element: <DriverProfilePage />  },
+  { path: "/driver/drowsiness", element: <DrowsinessMonitorPage /> },
   { path: "/driver/stats",      element: <DriverStatsPage />    },
+  { path: "/driver/schedule",   element: <SchedulePage />       },
+  { path: "/driver/active-shift", element: <ActiveShiftPage />  },
 
   // Road Sign Detection pages
   { path: "/road-sign",                element: <Road_sign_UploadPage />       },
