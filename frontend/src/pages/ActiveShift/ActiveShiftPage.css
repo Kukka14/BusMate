@@ -2,15 +2,24 @@
 .as-main {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column;
-  background: #0a0e1a; color: #e2e8f0;
+  background:
+    radial-gradient(circle at top left, rgba(34,197,94,0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(56,189,248,0.08), transparent 24%),
+    linear-gradient(180deg, #09101d 0%, #070b14 100%);
+  color: #e2e8f0;
   overflow-y: auto;
 }
 
 /* ── Top bar ── */
 .as-topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.65rem 1.5rem;
-  border-bottom: 1px solid #1e293b; background: #0f1623;
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid rgba(30,41,59,0.75);
+  background: rgba(10,15,26,0.78);
+  backdrop-filter: blur(18px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
   flex-shrink: 0;
 }
 .as-topbar-left   { display: flex; align-items: center; gap: 0.75rem; }
@@ -27,9 +36,9 @@
 .as-topbar-title { font-size: 1rem; font-weight: 600; color: #f1f5f9; }
 .as-route-badge  {
   font-size: 0.85rem; font-weight: 700; color: #f1f5f9;
-  background: linear-gradient(135deg, #22c55e22, #38bdf822);
-  padding: 0.2rem 0.8rem; border-radius: 6px;
-  border: 1px solid #22c55e44;
+  background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(56,189,248,0.14));
+  padding: 0.28rem 0.85rem; border-radius: 999px;
+  border: 1px solid rgba(34,197,94,0.25);
 }
 .as-route-meta { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
 .as-elapsed    { font-size: 0.82rem; font-weight: 600; color: #f59e0b; }
@@ -57,9 +66,10 @@
 /* ── Start banner ── */
 .as-start-banner {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 1.5rem 2rem; margin: 1rem 1.5rem;
-  background: linear-gradient(135deg, #0f1623, #1e293b);
-  border: 1px solid #22c55e33; border-radius: 12px;
+  padding: 1.5rem 1.75rem; margin: 1rem 1.5rem;
+  background: linear-gradient(135deg, rgba(15,22,35,0.96), rgba(17,24,39,0.94));
+  border: 1px solid rgba(34,197,94,0.16); border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.25);
 }
 .as-start-info h2 { font-size: 1.2rem; font-weight: 700; color: #f1f5f9; margin: 0 0 0.3rem; }
 .as-start-info p  { font-size: 0.82rem; color: #94a3b8; margin: 0; }
@@ -78,9 +88,10 @@
 /* ── Active banner ── */
 .as-active-banner {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.75rem 1.5rem; margin: 0.5rem 1.5rem;
-  background: linear-gradient(135deg, #22c55e15, #16a34a08);
-  border: 1px solid #22c55e33; border-radius: 8px;
+  padding: 0.9rem 1.5rem; margin: 0.5rem 1.5rem 0.2rem;
+  background: linear-gradient(135deg, rgba(34,197,94,0.08), rgba(15,118,110,0.06));
+  border: 1px solid rgba(34,197,94,0.16); border-radius: 18px;
+  box-shadow: 0 12px 35px rgba(0,0,0,0.18);
 }
 .as-active-left { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .as-active-left span { font-size: 0.82rem; color: #94a3b8; }
@@ -99,35 +110,46 @@
 
 /* ── Panel tabs ── */
 .as-panel-tabs {
-  display: flex; gap: 0.35rem; padding: 0.5rem 1.5rem;
-  border-bottom: 1px solid #1e293b; flex-shrink: 0;
+  display: flex; gap: 0.45rem; padding: 0.65rem 1.5rem 0.5rem;
+  border-bottom: 1px solid rgba(30,41,59,0.75);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: rgba(7,11,20,0.42);
+  backdrop-filter: blur(10px);
 }
 .as-panel-tab {
-  padding: 0.4rem 0.9rem; border-radius: 6px;
+  padding: 0.48rem 1rem; border-radius: 999px;
   font-size: 0.75rem; font-weight: 600; cursor: pointer;
-  background: transparent; color: #64748b; border: 1px solid transparent;
+  background: rgba(15,22,35,0.55); color: #94a3b8; border: 1px solid rgba(51,65,85,0.8);
   transition: all 0.2s;
 }
-.as-panel-tab.active { background: #1e293b; color: #f1f5f9; border-color: #334155; }
+.as-panel-tab.active {
+  background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(56,189,248,0.12));
+  color: #f8fafc; border-color: rgba(34,197,94,0.22);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.18);
+}
 
 /* ── Panels layout ── */
 .as-panels {
-  padding: 0.75rem 1.5rem 2rem;
+  padding: 0.9rem 1.5rem 2rem;
 }
 .as-panels.grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
 }
 .as-panels.single {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 /* ── Panel base ── */
 .as-panel {
-  background: #111827; border: 1px solid #1e293b; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(17,24,39,0.96), rgba(10,15,26,0.96));
+  border: 1px solid rgba(30,41,59,0.9);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.22);
   overflow: hidden; display: flex; flex-direction: column;
 }
 .as-panel.wide { max-width: 100%; }
@@ -135,9 +157,10 @@
 .as-panel-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.6rem 0.85rem;
-  border-bottom: 1px solid #1e293b; background: #0f162388;
+  border-bottom: 1px solid rgba(30,41,59,0.8);
+  background: rgba(15,22,35,0.72);
 }
-.as-panel-title { font-size: 0.82rem; font-weight: 600; color: #f1f5f9; }
+.as-panel-title { font-size: 0.82rem; font-weight: 600; color: #f8fafc; letter-spacing: 0.01em; }
 .as-panel-badges { display: flex; gap: 0.35rem; }
 .as-badge {
   padding: 2px 8px; border-radius: 10px;
@@ -148,10 +171,67 @@
 .as-badge.blue  { color: #38bdf8; border-color: #38bdf855; }
 
 /* ── Camera panel ── */
-.as-cam-panel { grid-column: 1; grid-row: 1; }
-.as-cam-wrap { position: relative; background: #0a0e1a; }
-.as-cam-video { width: 100%; height: auto; display: block; max-height: 260px; object-fit: cover; }
-.as-cam-error { padding: 0.5rem 0.85rem; color: #f87171; font-size: 0.75rem; background: #ef444412; }
+.as-camera-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0 1.5rem 1rem;
+}
+.as-camera-panel {
+  min-height: 0;
+  padding: 0.85rem !important;
+}
+.as-camera-panel .as-panel-head {
+  padding: 0 0 0.7rem;
+  border-bottom: 1px solid rgba(30,41,59,0.45);
+  background: transparent;
+}
+.as-camera-panel .as-panel-title { font-size: 0.92rem; }
+.as-cam-wrap {
+  position: relative;
+  background: #060913;
+  border: 1px solid rgba(30,41,59,0.85);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.as-cam-video {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  display: block;
+  object-fit: cover;
+  background: #04070d;
+}
+.as-cam-error {
+  margin-bottom: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  color: #fca5a5;
+  font-size: 0.74rem;
+  background: rgba(239,68,68,0.09);
+  border: 1px solid rgba(239,68,68,0.16);
+  border-radius: 10px;
+}
+.as-camera-analysis {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(30,41,59,0.65);
+}
+.as-camera-analysis-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+.as-camera-analysis-main {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.as-camera-analysis-sub {
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  color: #94a3b8;
+}
 
 .as-alert-strip {
   display: flex; align-items: center; gap: 0.35rem;
@@ -458,12 +538,40 @@
 @keyframes dd-spin { to { transform: rotate(360deg); } }
 
 /* ── Responsive ── */
+@media (max-width: 1500px) {
+  .as-camera-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 1100px) {
   .as-panels.grid { grid-template-columns: 1fr; }
   .as-cam-panel, .as-em-panel, .as-dw-panel, .as-rs-panel, .as-hz-panel {
     grid-column: 1; grid-row: auto;
   }
+  .as-camera-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .as-hz-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 780px) {
+  .as-topbar,
+  .as-active-banner,
+  .as-start-banner {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+  .as-topbar { flex-wrap: wrap; gap: 0.75rem; }
+  .as-topbar-center { align-items: flex-start; }
+  .as-camera-grid,
+  .as-panels,
+  .as-panel-tabs {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  .as-camera-grid,
+  .as-panels.grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
