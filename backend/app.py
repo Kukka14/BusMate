@@ -20,6 +20,7 @@ from ultralytics import YOLO
 import time
 import threading
 from pathlib import Path
+import joblib
 from tensorflow import keras as _keras
 from tensorflow.keras import layers as _layers
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as _mob_preprocess
@@ -74,13 +75,26 @@ CHEATING_LABELS = {
 
 WINDOW_SIZE = 30
 
-# Normalized weights
-ALPHA = 0.4
-BETA = 0.3
-GAMMA = 0.3
-
-
 session_buffers: Dict[str, deque] = defaultdict(lambda: deque(maxlen=WINDOW_SIZE))
+
+# ─── BVI ML Model ─────────────────────────────────────────────────────────────
+_BVI_MODEL_DIR = Path(__file__).resolve().parent / "BVI_model"
+
+try:
+    _bvi_scaler      = joblib.load(_BVI_MODEL_DIR / "scaler.pkl")
+    _bvi_pca         = joblib.load(_BVI_MODEL_DIR / "pca_model.pkl")
+    _bvi_pca_weights = np.load(_BVI_MODEL_DIR / "pca_weights.npy")
+    _bvi_score_range = np.load(_BVI_MODEL_DIR / "pca_score_range.npy")  # [min, max]
+    _bvi_thresholds  = np.load(_BVI_MODEL_DIR / "bvi_thresholds.npy")   # [stable_thr, erratic_thr]
+    _bvi_rf          = joblib.load(_BVI_MODEL_DIR / "rf_model.pkl")
+    _bvi_kmeans      = joblib.load(_BVI_MODEL_DIR / "kmeans_model.pkl")
+    _bvi_le          = joblib.load(_BVI_MODEL_DIR / "label_encoder.pkl")
+    _bvi_ml_ready    = True
+    print("\u2705 BVI ML models loaded.")
+except Exception as _bvi_err:
+    _bvi_ml_ready = False
+    _bvi_thresholds = np.array([0.40, 0.55])  # fallback to original thresholds
+    print(f"\u26a0  BVI ML models not loaded ({_bvi_err}). Falling back to formula.")
 
 
 # Emotion intensity map (covers all labels the model can emit)
@@ -254,22 +268,51 @@ def compute_bvi_for_session(session_id):
     probs_list = [np.array(p) for p in buffer]
     T, V, E = compute_bvi_components(probs_list)
 
-    bvi = ALPHA * T + BETA * V + GAMMA * E
+    stable_thr  = float(_bvi_thresholds[0])
+    erratic_thr = float(_bvi_thresholds[1])
 
-    if bvi < 0.4:
-        state = "stable"
-    elif bvi < 0.55:
-        state = "unstable"
+    if _bvi_ml_ready:
+        # ── Mean probability per emotion class over the window ─────────────────
+        # EMOTION_LABELS = [angry(0), disgusted(1), fearful(2), happy(3), neutral(4), sad(5), surprised(6)]
+        stacked    = np.stack(probs_list)      # shape (N, 7)
+        mean_probs = stacked.mean(axis=0)      # shape (7,)
+
+        # Feature vector matches scaler training:
+        # [transition_rate, entropy, negative_affect_conf, fatigue_proxy_conf]
+        neg_affect   = float(mean_probs[0] + mean_probs[1] + mean_probs[2] + mean_probs[5])  # angry+disgusted+fearful+sad
+        fatigue_prxy = float(mean_probs[4] + mean_probs[5])                                   # neutral+sad
+        features = np.array([[T, E, neg_affect, fatigue_prxy]])
+
+        # Pipeline: scale → PCA → weighted score → normalise to [0, 1]
+        scaled     = _bvi_scaler.transform(features)
+        pca_scores = _bvi_pca.transform(scaled)[0]
+        raw_score  = float(np.dot(pca_scores, _bvi_pca_weights))
+        s_min, s_max = float(_bvi_score_range[0]), float(_bvi_score_range[1])
+        bvi = float(np.clip((raw_score - s_min) / (s_max - s_min + 1e-9), 0.0, 1.0))
+
+        # State via RF classifier
+        rf_pred = _bvi_rf.predict(scaled)[0]
+        if isinstance(rf_pred, (int, np.integer)):
+            state = _bvi_le.inverse_transform([rf_pred])[0]
+        else:
+            state = str(rf_pred)
     else:
-        state = "erratic"
+        # Fallback: original weighted formula
+        bvi = 0.4 * T + 0.3 * V + 0.3 * E
+        if bvi < stable_thr:
+            state = "stable"
+        elif bvi < erratic_thr:
+            state = "unstable"
+        else:
+            state = "erratic"
 
     return {
-        "bvi_score": float(bvi),
-        "state": state,
-        "transition_rate": float(T),
+        "bvi_score":        float(bvi),
+        "state":            state,
+        "transition_rate":  float(T),
         "emotion_variance": float(V),
-        "entropy": float(E),
-        "window_size": len(buffer)
+        "entropy":          float(E),
+        "window_size":      len(buffer),
     }
 
 
@@ -846,19 +889,33 @@ def analyze_video_frames():
 
                     # --- BVI inline (same logic as compute_bvi_for_session) ---
                     if len(bvi_buffer) >= 5:
-                        emo_seq = [EMOTION_LABELS[int(np.argmax(p))].lower() for p in bvi_buffer]
-                        T = compute_transition_rate(emo_seq)
-                        V = compute_emotion_variance(emo_seq)
-                        E = compute_entropy(emo_seq)
-                        bvi_score = ALPHA * T + BETA * V + GAMMA * E
-                        bvi_state = "stable" if bvi_score < 0.4 else "unstable" if bvi_score < 0.55 else "erratic"
+                        probs_list = [np.array(p) for p in bvi_buffer]
+                        T, V, E = compute_bvi_components(probs_list)
+                        stable_thr  = float(_bvi_thresholds[0])
+                        erratic_thr = float(_bvi_thresholds[1])
+                        if _bvi_ml_ready:
+                            stacked      = np.stack(probs_list)
+                            mean_probs   = stacked.mean(axis=0)
+                            neg_affect   = float(mean_probs[0] + mean_probs[1] + mean_probs[2] + mean_probs[5])
+                            fatigue_prxy = float(mean_probs[4] + mean_probs[5])
+                            features     = np.array([[T, E, neg_affect, fatigue_prxy]])
+                            scaled       = _bvi_scaler.transform(features)
+                            pca_scores   = _bvi_pca.transform(scaled)[0]
+                            raw_score    = float(np.dot(pca_scores, _bvi_pca_weights))
+                            s_min, s_max = float(_bvi_score_range[0]), float(_bvi_score_range[1])
+                            bvi_score    = float(np.clip((raw_score - s_min) / (s_max - s_min + 1e-9), 0.0, 1.0))
+                            rf_pred      = _bvi_rf.predict(scaled)[0]
+                            bvi_state    = _bvi_le.inverse_transform([rf_pred])[0] if isinstance(rf_pred, (int, np.integer)) else str(rf_pred)
+                        else:
+                            bvi_score = 0.4 * T + 0.3 * V + 0.3 * E
+                            bvi_state = "stable" if bvi_score < stable_thr else "unstable" if bvi_score < erratic_thr else "erratic"
                         bvi_result = {
-                            "bvi_score":       round(float(bvi_score), 4),
-                            "state":           bvi_state,
-                            "transition_rate": round(float(T), 4),
-                            "emotion_variance":round(float(V), 4),
-                            "entropy":         round(float(E), 4),
-                            "window_size":     len(bvi_buffer),
+                            "bvi_score":        round(float(bvi_score), 4),
+                            "state":            bvi_state,
+                            "transition_rate":  round(float(T), 4),
+                            "emotion_variance": round(float(V), 4),
+                            "entropy":          round(float(E), 4),
+                            "window_size":      len(bvi_buffer),
                         }
 
                 # --- draw annotations on frame ---
@@ -1539,9 +1596,19 @@ def analyze_route():
 # -----------------------------
 
 if __name__ == "__main__":
+    import signal, psutil
+    _PORT = 5000
+    for _conn in psutil.net_connections(kind="inet"):
+        if _conn.laddr.port == _PORT and _conn.pid and _conn.pid != os.getpid():
+            try:
+                psutil.Process(_conn.pid).kill()
+                print(f"Freed port {_PORT} (killed PID {_conn.pid})")
+            except Exception:
+                pass
     socketio.run(
         app,
         host="0.0.0.0",
-        port=5000,
-        debug=False
+        port=_PORT,
+        debug=False,
+        use_reloader=False,
     )

@@ -1,9 +1,22 @@
 from datetime import datetime, timedelta
 import random, math
+import numpy as np
+from pathlib import Path
+import joblib
 from flask import Blueprint, jsonify, request
 from ..utils.auth_helpers import token_required
 
 driver_bp = Blueprint("driver", __name__)
+
+# ── Load BVI thresholds from trained model (fallback to original values) ────────
+try:
+    _BVI_MODEL_DIR  = Path(__file__).resolve().parent.parent.parent / "BVI_model"
+    _bvi_thresholds = np.load(_BVI_MODEL_DIR / "bvi_thresholds.npy")
+    _STABLE_THR     = float(_bvi_thresholds[0])
+    _ERRATIC_THR    = float(_bvi_thresholds[1])
+except Exception:
+    _STABLE_THR  = 0.30
+    _ERRATIC_THR = 0.60
 
 
 # ── DSS (Driver Safety Score) ────────────────────────────────────────────────
@@ -79,9 +92,9 @@ def _bvi_history(days=30, seed=42):
         bvi_score = max(0.0, min(1.0, arc + rng.uniform(-0.06, 0.06)))
 
         # Map BVI → state
-        if   bvi_score < 0.30: state = "stable"
-        elif bvi_score < 0.60: state = "unstable"
-        else:                  state = "erratic"
+        if   bvi_score < _STABLE_THR:  state = "stable"
+        elif bvi_score < _ERRATIC_THR: state = "unstable"
+        else:                          state = "erratic"
 
         # Emotion probabilities that roughly track the BVI score
         angry   = max(0, min(1, bvi_score * 0.4 + rng.uniform(-0.04, 0.04)))
