@@ -130,75 +130,17 @@ def fleet_analytics(current_user):
     }), 200
 
 
-# ── fleet drivers list (lightweight) ─────────────────────────────────────────
-
-# ── Create a new admin account (existing admin only) ─────────────────────────
-
-@admin_bp.post("/create-admin")
-@token_required
-@admin_required
-def create_admin(current_user):
-    """
-    Create a new admin account.  Requires an existing admin token.
-    Body: { username, email, password, company? }
-    """
-    data = request.get_json(force=True) or {}
-    username = (data.get("username") or "").strip()
-    email    = (data.get("email")    or "").strip()
-    password = (data.get("password") or "").strip()
-    company  = (data.get("company")  or "").strip()
-
-    if not username or not email or not password:
-        return jsonify({"error": "username, email and password are required"}), 400
-
-    from ..services.user_service import UserService
-    result, status = UserService.register(
-        username=username,
-        email=email,
-        password=password,
-        company=company,
-        role="admin",
-    )
-    return jsonify(result), status
-
-
-# ── First-time setup: create the very first admin (no token required) ─────────
-
-@admin_bp.post("/setup")
-def setup_first_admin():
-    """
-    One-time endpoint: creates the first admin account only if NO admin
-    account exists yet.  Once an admin exists this returns 403.
-    Body: { username, email, password, company? }
-    """
-    try:
-        from ..database import get_db
-        db = get_db()
-        if db.users.count_documents({"role": "admin"}) > 0:
-            return jsonify({
-                "error": "Setup already complete. Use /admin/create-admin with an admin token."
-            }), 403
-    except Exception as exc:
-        return jsonify({"error": f"Database error: {exc}"}), 500
-
-    data = request.get_json(force=True) or {}
-    username = (data.get("username") or "").strip()
-    email    = (data.get("email")    or "").strip()
-    password = (data.get("password") or "").strip()
-    company  = (data.get("company")  or "").strip()
-
-    if not username or not email or not password:
-        return jsonify({"error": "username, email and password are required"}), 400
-
-    from ..services.user_service import UserService
-    result, status = UserService.register(
-        username=username,
-        email=email,
-        password=password,
-        company=company,
-        role="admin",
-    )
-    return jsonify(result), status
+# ── Admin account creation is DISABLED via API ───────────────────────────────
+#
+# Admin credentials are hard-coded in the server's .env file and seeded
+# automatically on startup.  There is no endpoint to create or register
+# admin accounts — this is intentional and prevents privilege escalation.
+#
+# To change the admin password: update ADMIN_PASSWORD in .env and restart.
+# To add a second admin: add ADMIN_EMAIL_2 / ADMIN_PASSWORD_2 and extend
+# the _seed_admin() function in app.py.
+#
+# The former /setup and /create-admin endpoints have been permanently removed.
 
 
 # ── fleet drivers list (lightweight) ─────────────────────────────────────────

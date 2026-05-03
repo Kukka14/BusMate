@@ -9,6 +9,12 @@ class Config:
     # MongoDB
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/driveguard")
 
+    # ── Hard-coded Admin Seed (only used once, at first startup) ─────────────
+    ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "BusMate Admin")
+    ADMIN_EMAIL    = os.getenv("ADMIN_EMAIL",    "admin@busmate.com")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "BusMate@Admin2025")
+    ADMIN_COMPANY  = os.getenv("ADMIN_COMPANY",  "BusMate Fleet")
+
     # SSO (SAML / OIDC)
     SSO_PROVIDER_URL = os.getenv("SSO_PROVIDER_URL", "")
     SSO_CLIENT_ID = os.getenv("SSO_CLIENT_ID", "")
