@@ -1,0 +1,257 @@
+/* ── Root ────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+.dd-root {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: #0a0f1e;
+  font-family: "Inter", system-ui, sans-serif;
+  color: #e2e8f0;
+}
+
+.dd-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Loading ─────────────────────────────────────────────────────────────── */
+.dd-loading {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0.75rem; height: 100%;
+  color: #475569; font-size: 0.84rem;
+}
+.dd-spinner {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid #1a2744; border-top-color: #2563eb;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.dd-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1.75rem;
+  background: #0d1526;
+  border-bottom: 1px solid #1a2744;
+  flex-shrink: 0;
+}
+.dd-topbar-left { display: flex; align-items: center; gap: 0.75rem; }
+.dd-back-btn {
+  display: flex; align-items: center; gap: 0.35rem;
+  background: none; border: 1px solid #1a2744; border-radius: 7px;
+  color: #64748b; font-size: 0.78rem; font-family: inherit;
+  padding: 0.38rem 0.75rem; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.dd-back-btn:hover { color: #94a3b8; border-color: #2d4a80; }
+.dd-topbar-divider { color: #1a2744; font-size: 1rem; }
+.dd-topbar-title   { font-size: 0.9rem; font-weight: 600; color: #94a3b8; }
+.dd-edit-btn {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: #1e3a5f; border: 1px solid #2563eb44; border-radius: 8px;
+  color: #38bdf8; font-size: 0.78rem; font-weight: 600; font-family: inherit;
+  padding: 0.42rem 0.9rem; cursor: pointer;
+  transition: background 0.15s;
+}
+.dd-edit-btn:hover { background: #1e4a80; }
+
+/* ── Hero banner ─────────────────────────────────────────────────────────── */
+.dd-hero {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.25rem 1.75rem;
+  background: #0d1526;
+  border-bottom: 1px solid #1a2744;
+  flex-shrink: 0;
+  gap: 1rem;
+}
+.dd-hero-left  { display: flex; align-items: center; gap: 1rem; }
+.dd-hero-right { flex-shrink: 0; }
+
+.dd-hero-av {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: #1e3a5f; color: #38bdf8;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; font-weight: 800; flex-shrink: 0;
+}
+.dd-hero-name { font-size: 1.3rem; font-weight: 800; color: #f1f5f9; margin: 0 0 0.35rem; }
+.dd-hero-meta {
+  display: flex; flex-wrap: wrap; gap: 0.9rem;
+  font-size: 0.77rem; color: #475569;
+}
+.dd-hero-meta span { display: flex; align-items: center; gap: 0.3rem; }
+
+.dd-status-badge {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.9rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 700; border: 1px solid;
+}
+.dd-status-badge.on  { background: #14532d22; color: #22c55e; border-color: #22c55e44; }
+.dd-status-badge.off { background: #450a0a22; color: #f87171; border-color: #ef444444; }
+.dd-status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; animation: blink 1.4s ease infinite;
+}
+.dd-status-badge.off .dd-status-dot { animation: none; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Body layout ─────────────────────────────────────────────────────────── */
+.dd-body {
+  flex: 1; overflow-y: auto;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 1.5rem;
+  padding: 1.5rem 1.75rem;
+  align-items: start;
+}
+
+/* ── Shared card ─────────────────────────────────────────────────────────── */
+.dd-card {
+  background: #0d1526; border: 1px solid #1a2744; border-radius: 12px;
+  padding: 1.1rem 1.2rem; margin-bottom: 1rem;
+}
+.dd-card-title {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: #334155;
+  border-bottom: 1px solid #1a2744;
+  padding-bottom: 0.45rem; margin: 0 0 0.85rem;
+}
+
+/* ── Left column: profile ────────────────────────────────────────────────── */
+.dd-profile-col { display: flex; flex-direction: column; }
+
+.dd-info-list { display: flex; flex-direction: column; gap: 0.55rem; }
+.dd-info-row {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.38rem 0; border-bottom: 1px solid #111b30;
+}
+.dd-info-row:last-child { border-bottom: none; }
+.dd-info-icon  { color: #334155; flex-shrink: 0; }
+.dd-info-label { font-size: 0.72rem; color: #334155; flex: 0 0 100px; }
+.dd-info-value { font-size: 0.8rem; color: #cbd5e1; font-weight: 500; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Right column: scores ────────────────────────────────────────────────── */
+.dd-scores-col { display: flex; flex-direction: column; }
+
+/* summary stat bar */
+.dd-summary-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.dd-summary-stat {
+  background: #0d1526; border: 1px solid #1a2744; border-radius: 12px;
+  padding: 0.85rem 1rem; text-align: center;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.dd-summary-stat span   { font-size: 0.65rem; color: #334155; text-transform: uppercase; letter-spacing: 0.07em; }
+.dd-summary-stat strong { font-size: 1.5rem; font-weight: 800; color: #f1f5f9; line-height: 1; }
+.dd-stat-sub { font-size: 0.65rem; font-weight: 400; color: #475569; margin-left: 2px; }
+
+/* shift list card expands */
+.dd-shifts-card { margin-bottom: 0; }
+
+.dd-shift-loading {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.6rem; padding: 2.5rem 1rem; color: #475569; font-size: 0.82rem;
+}
+.dd-err-bar {
+  background: #450a0a; border: 1px solid #ef444455; color: #fca5a5;
+  border-radius: 8px; padding: 0.6rem 0.9rem; font-size: 0.8rem; margin-bottom: 1rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.dd-retry-btn {
+  background: #7f1d1d; border: 1px solid #ef444466; color: #fca5a5;
+  border-radius: 6px; padding: 0.28rem 0.7rem; font-size: 0.75rem;
+  font-family: inherit; cursor: pointer; white-space: nowrap;
+  transition: background 0.15s;
+}
+.dd-retry-btn:hover { background: #991b1b; }
+.dd-empty-shifts {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.4rem; padding: 3rem 1rem; color: #334155; text-align: center;
+}
+.dd-empty-shifts p    { font-size: 0.88rem; color: #64748b; margin: 0; }
+.dd-empty-shifts span { font-size: 0.75rem; }
+
+/* shift rows */
+.dd-shift-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.dd-shift-row {
+  border: 1px solid #1a2744; border-radius: 10px; overflow: hidden;
+  transition: border-color 0.15s;
+  background: #090e1a;
+}
+.dd-shift-row:hover  { border-color: #2d3f5a; }
+.dd-shift-row.open   { border-color: #2563eb55; }
+
+.dd-shift-head {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.85rem 1.1rem; cursor: pointer;
+  transition: background 0.1s;
+}
+.dd-shift-head:hover { background: #0d1526; }
+
+.dd-shift-info { flex: 1; min-width: 0; }
+.dd-shift-route {
+  font-size: 0.9rem; font-weight: 700; color: #e2e8f0;
+  margin-bottom: 0.25rem;
+}
+.dd-shift-meta-row {
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  font-size: 0.69rem; color: #334155;
+}
+.dd-shift-meta-row span { display: flex; align-items: center; gap: 0.2rem; }
+.dd-shift-meta-row span::before { content: "·"; margin-right: 0.3rem; }
+.dd-shift-meta-row span:first-child::before { display: none; }
+
+.dd-shift-right {
+  display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0;
+}
+.dd-tier-badge {
+  font-size: 0.68rem; font-weight: 700; padding: 0.22rem 0.7rem;
+  border-radius: 999px; border: 1px solid; white-space: nowrap;
+}
+.dd-chevron {
+  font-size: 1rem; color: #475569;
+  display: inline-block; transition: transform 0.2s ease;
+}
+
+/* expanded component breakdown */
+.dd-shift-comps {
+  padding: 1rem 1.1rem 1.1rem;
+  border-top: 1px solid #1a2744;
+  background: #0a0f1e;
+  animation: slideDown 0.18s ease;
+}
+@keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+
+.dd-comps-title {
+  font-size: 0.67rem; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: #334155; margin: 0 0 0.85rem;
+}
+.dd-comps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; }
+
+.dd-comp-bar { }
+.dd-comp-bar-head {
+  display: flex; justify-content: space-between;
+  font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.28rem;
+}
+.dd-comp-bar-track {
+  height: 6px; background: #1a2744; border-radius: 4px; overflow: hidden;
+}
+.dd-comp-bar-fill {
+  height: 100%; border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .dd-body           { grid-template-columns: 1fr; }
+  .dd-summary-bar    { grid-template-columns: repeat(2, 1fr); }
+  .dd-comps-grid     { grid-template-columns: 1fr; }
+}
