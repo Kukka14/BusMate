@@ -27,6 +27,8 @@ load_dotenv()
 from user_management import register_user_management
 from user_management.config import Config
 from drowsiness_engine import DrowsinessEngine
+# GPS routes and listener (lazy-start in __main__)
+from routes.gps_routes import gps_bp
 
 
 app = Flask(__name__)
@@ -47,6 +49,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Register user management blueprints (MongoDB — no table creation needed)
 register_user_management(app)
+# Register GPS routes
+app.register_blueprint(gps_bp)
 
 # Drowsiness detection engine (loaded once at startup)
 _dw_engine = DrowsinessEngine()
@@ -2831,6 +2835,33 @@ def analyze_drowsiness_video():
 # -----------------------------
 
 if __name__ == "__main__":
+    # Optionally start GPS TCP client (e.g. connect to GPS2IP on your phone)
+    try:
+        gps_host = os.getenv("GPS_TCP_HOST")
+        gps_port = os.getenv("GPS_TCP_PORT")
+        if gps_host and gps_port:
+            try:
+                from services.gps_listener import start_tcp_nmea_client
+                t = threading.Thread(target=start_tcp_nmea_client, args=(gps_host, int(gps_port)), daemon=True)
+                t.start()
+                app.logger.info(f"Started GPS TCP client to {gps_host}:{gps_port}")
+            except Exception as e:
+                app.logger.warning(f"Could not start GPS TCP client: {e}")
+        # Also optionally start UDP listener if configured
+        udp_port = os.getenv("GPS_UDP_PORT")
+        udp_enable = os.getenv("GPS_UDP_ENABLE", "false").lower() in ("1", "true", "yes")
+        if udp_enable and udp_port:
+            try:
+                from services.gps_listener import start_udp_nmea_listener
+                t2 = threading.Thread(target=start_udp_nmea_listener, args=("0.0.0.0", int(udp_port)), daemon=True)
+                t2.start()
+                app.logger.info(f"Started GPS UDP listener on 0.0.0.0:{udp_port}")
+            except Exception as e:
+                app.logger.warning(f"Could not start GPS UDP listener: {e}")
+
+    except Exception:
+        pass
+
     socketio.run(
         app,
         host="0.0.0.0",

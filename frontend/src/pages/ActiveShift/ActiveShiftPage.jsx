@@ -9,18 +9,36 @@ import "./ActiveShiftPage.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-// ── Color helpers ─────────────────────────────────────────────────────────────
 const EMOTION_COLOR = {
-  happy:"#22c55e", neutral:"#64748b", sad:"#a78bfa", angry:"#ef4444",
-  fearful:"#f97316", surprised:"#f59e0b", disgust:"#84cc16", disgusted:"#84cc16",
+  happy: "#22c55e",
+  neutral: "#64748b",
+  sad: "#a78bfa",
+  angry: "#ef4444",
+  fearful: "#f97316",
+  surprised: "#f59e0b",
+  surprise: "#f59e0b",
+  disgust: "#84cc16",
+  disgusted: "#84cc16",
 };
-function bviColor(s) { return s==null?"#475569":s<0.30?"#22c55e":s<0.60?"#f59e0b":"#ef4444"; }
-function verdictColor(v) { return v==="Drowsy"?"#ef4444":v==="Alert"?"#22c55e":"#475569"; }
-function confColor(p) { return p==null?"#475569":p<0.30?"#22c55e":p<0.60?"#f59e0b":"#ef4444"; }
-function hazardColor(l) { return l==="High"?"#ef4444":l==="Medium"?"#f59e0b":"#22c55e"; }
-
-// ── Icons ─────────────────────────────────────────────────────────────────────
+function bviColor(score) {
+  return score == null ? "#475569" : score < 0.3 ? "#22c55e" : score < 0.6 ? "#f59e0b" : "#ef4444";
+}
+function verdictColor(v) {
+  if (v === "Drowsy") return "#ef4444";
+  if (v === "Alert")  return "#22c55e";
+  return "#475569";
+}
+function confColor(p) {
+  if (p == null)  return "#475569";
+  if (p < 0.30)   return "#22c55e";
+  if (p < 0.60)   return "#f59e0b";
+  return "#ef4444";
+}
+function hazardColor(level) {
+  if (level === "High") return "#ef4444";
+  if (level === "Medium") return "#f59e0b";
+  return "#22c55e";
+}
 const IcoStop  = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>;
 const IcoAlert = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
@@ -301,6 +319,10 @@ export default function ActiveShiftPage() {
   const hudMapRef     = useRef(null);
   const hudMapInst    = useRef(null);
   const hudMarkerRef  = useRef(null);
+  const gpsMapRef     = useRef(null);
+  const gpsMapInst    = useRef(null);
+  const gpsMarkerRef  = useRef(null);
+  const gpsSocketRef  = useRef(null);
   const [hzIdx, setHzIdx]             = useState(0);
   const [hzPoint, setHzPoint]         = useState(null);
   const [hzPlaying, setHzPlaying]     = useState(false);
@@ -368,6 +390,57 @@ export default function ActiveShiftPage() {
     hudMapInst.current.panTo([hzPoint.lat, hzPoint.lon], { animate: true, duration: 0.3 });
   }, [drivingMode, hzPoint]);
 
+  // ── GPS map — listen for phone GPS updates and show live marker ──────
+  useEffect(() => {
+    // init map once
+    if (gpsMapInst.current || !gpsMapRef.current) return;
+    try {
+      const map = L.map(gpsMapRef.current, { zoomControl: false, attributionControl: false }).setView([7.0, 80.0], 6);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "" }).addTo(map);
+      gpsMapInst.current = map;
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      try { if (gpsMapInst.current) { gpsMapInst.current.remove(); gpsMapInst.current = null; gpsMarkerRef.current = null; } } catch(e){}
+    };
+  }, []);
+
+  useEffect(() => {
+    // connect socket and listen for gps_update
+    if (gpsSocketRef.current) return;
+    try {
+      const sock = io(SOCKET_URL, { transports: ["websocket"], reconnectionDelayMax: 10000 });
+      gpsSocketRef.current = sock;
+      sock.on("connect", () => {
+        // console.log("gps socket connected");
+      });
+      sock.on("gps_update", (data) => {
+        try {
+          const lat = parseFloat(data.lat);
+          const lon = parseFloat(data.lon);
+          if (!isFinite(lat) || !isFinite(lon)) return;
+          const map = gpsMapInst.current;
+          if (!map) return;
+          if (!gpsMarkerRef.current) {
+            gpsMarkerRef.current = L.marker([lat, lon]).addTo(map);
+            map.setView([lat, lon], 14);
+          } else {
+            gpsMarkerRef.current.setLatLng([lat, lon]);
+          }
+        } catch (e) {
+          // ignore
+        }
+      });
+      sock.on("gps_raw", () => {});
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      try { if (gpsSocketRef.current) { gpsSocketRef.current.disconnect(); gpsSocketRef.current = null; } } catch(e){}
+    };
+  }, []);
+
   // ── Elapsed timer ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!shiftStart) { setElapsed("00:00"); return; }
@@ -384,8 +457,18 @@ export default function ActiveShiftPage() {
     let active = true;
     async function loadDevices() {
       try {
+        // Request camera permission first (triggers browser prompt)
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 } }, audio: false });
+          console.log("[Camera Debug] Permission granted");
+        } catch (permErr) {
+          console.warn("[Camera Debug] Permission grant attempt:", permErr.message);
+        }
+        
+        // Now enumerate devices
         const list = await navigator.mediaDevices.enumerateDevices();
         const cams = list.filter(d => d.kind === "videoinput");
+        console.log(`[Camera Debug] Found ${cams.length} cameras:`, cams.map(c => ({id: c.deviceId, label: c.label})));
         setDevices(cams);
         // Prefer previously selected device ids, otherwise choose the first two external webcams.
         const preferredDriverId = driverDeviceId || findPreferredDriverDeviceId(cams);
@@ -393,7 +476,7 @@ export default function ActiveShiftPage() {
         if (cams.length > 0 && !roadDeviceId) setRoadDeviceId(findPreferredRoadDeviceId(cams, preferredDriverId));
         setDevicesLoaded(true);
       } catch (e) {
-        // ignore
+        console.error("[Camera Debug] Error enumerating devices:", e);
       }
     }
     loadDevices();
@@ -474,6 +557,46 @@ export default function ActiveShiftPage() {
     openRoadCamera();
     return () => { active = false; };
   }, [roadDeviceId, devicesLoaded, driverDeviceId, devices]);
+
+  const handleEnableCamera = async () => {
+    try {
+      console.log("[Camera] Requesting permission...");
+      
+      // Try with different constraints
+      let stream = null;
+      const constraints = [
+        { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: "user" }, audio: false },
+        { video: true, audio: false }
+      ];
+      
+      for (const constraint of constraints) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraint);
+          console.log("[Camera] Permission granted with constraint:", constraint);
+          break;
+        } catch (e) {
+          console.log("[Camera] Constraint failed, trying next:", e.message);
+        }
+      }
+      
+      if (!stream) throw new Error("No camera constraint worked");
+      
+      stream.getTracks().forEach(t => t.stop());
+      
+      // Refresh device list
+      setTimeout(async () => {
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const cams = list.filter(d => d.kind === "videoinput");
+        console.log(`[Camera] Found ${cams.length} cameras after permission:`, cams.map(c => ({id: c.deviceId, label: c.label})));
+        setDevices(cams);
+        if (cams.length > 0 && !driverDeviceId) setDriverDeviceId(cams[0].deviceId);
+      }, 500);
+    } catch (err) {
+      console.error("[Camera] Error:", err);
+      alert(`❌ Camera Error: ${err.message}\n\n✅ Fix:\n1. Close Skype/Teams/Zoom\n2. Enable camera in Windows Settings\n3. Check Device Manager for drivers`);
+    }
+  };
 
   // Re-assign camera stream when video element appears (shift started)
   useEffect(() => {
@@ -950,8 +1073,12 @@ export default function ActiveShiftPage() {
                     <option value="">None</option>
                     {devices.map((d,i)=>(<option key={d.deviceId} value={d.deviceId}>{d.label||`Camera ${i+1}`}</option>))}
                   </select>
+                  <button onClick={handleEnableCamera} style={{background:'#0b5fff',color:'white',border:'none',padding:'4px 12px',borderRadius:6,fontSize:12,cursor:'pointer',fontWeight:600}}>🎥 Enable</button>
                 </div>
               </div>
+            </div>
+            <div style={{marginLeft:12}}>
+              <div ref={gpsMapRef} style={{width:160,height:96,borderRadius:8,overflow:'hidden',border:'1px solid #243447'}} />
             </div>
           </div>
         </header>
@@ -1003,6 +1130,20 @@ export default function ActiveShiftPage() {
               </button>
             ))}
           </div>
+        )}
+
+        {/* ── Live GPS map ───────────────────────────────────── */}
+        {shiftActive && (
+          <section className="as-live-map-section">
+            <div className="as-live-map-head">
+              <div>
+                <div className="as-live-map-title">Live GPS Map</div>
+                <div className="as-live-map-subtitle">Phone location feed from GPS2IP Lite</div>
+              </div>
+              <div className="as-live-map-pill">Active</div>
+            </div>
+            <div ref={gpsMapRef} className="as-live-map" />
+          </section>
         )}
 
         {/* Four live analyzer camera feeds */}
