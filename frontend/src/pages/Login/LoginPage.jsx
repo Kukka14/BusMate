@@ -194,20 +194,24 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Enterprise / SSO divider */}
-          <div className="lp-divider">
-            <span>ENTERPRISE ACCESS</span>
-          </div>
+          {/* Enterprise / SSO — drivers only */}
+          {role === "driver" && (
+            <>
+              <div className="lp-divider">
+                <span>ENTERPRISE ACCESS</span>
+              </div>
 
-          <button
-            className="lp-btn-sso"
-            onClick={handleSSO}
-            disabled={ssoLoading}
-          >
-            {ssoLoading
-              ? <span className="lp-spinner dark" />
-              : <><IconShield /> Sign in with SSO</>}
-          </button>
+              <button
+                className="lp-btn-sso"
+                onClick={handleSSO}
+                disabled={ssoLoading}
+              >
+                {ssoLoading
+                  ? <span className="lp-spinner dark" />
+                  : <><IconShield /> Sign in with SSO</>}
+              </button>
+            </>
+          )}
 
           <p className="lp-support">
             Need assistance?{" "}

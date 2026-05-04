@@ -1,5 +1,5 @@
 .venv/
-
+backend/Video/
 
 # Python compiled files
 __pycache__/

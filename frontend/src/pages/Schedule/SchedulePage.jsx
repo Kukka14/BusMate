@@ -72,6 +72,7 @@ export default function SchedulePage() {
           { id: "SCH-D004", date: fmt(day(1)),  shift_time: "14:00 – 22:00", start_town: "Kandy", end_town: "Nuwara Eliya", bus: "BUS-301", route_name: "505 Hill Country", status: "Upcoming" },
           { id: "SCH-D005", date: fmt(day(2)),  shift_time: "06:00 – 14:00", start_town: "Colombo", end_town: "Galle", bus: "BUS-204", route_name: "606 Southern Exp", status: "Upcoming" },
           { id: "SCH-D006", date: fmt(day(3)),  shift_time: "10:00 – 18:00", start_town: "Kurunegala", end_town: "Anuradhapura", bus: "BUS-088", route_name: "303 North Central", status: "Upcoming" },
+          { id: "SCH-D007", date: fmt(day(4)),  shift_time: "08:00 – 16:00", start_town: "Amaragoda", end_town: "SLIIT", bus: "BUS-250", route_name: "701 Western Link", status: "Upcoming" },
         ]);
       })
       .finally(() => setLoading(false));
