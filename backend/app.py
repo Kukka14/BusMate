@@ -24,8 +24,8 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as _mob_
 from dotenv import load_dotenv
 load_dotenv()
 
-from user_management import register_user_management
-from user_management.config import Config
+from Emotion_Shift_Profile import register_user_management
+from Emotion_Shift_Profile.config import Config
 from drowsiness_engine import DrowsinessEngine
 
 
@@ -963,7 +963,7 @@ def _rs_append_sign_to_active_shift_score(
 ):
     """Append one road-sign object into the current active shift_scores document using $push."""
     try:
-        from user_management.database import get_db
+        from Emotion_Shift_Profile.database import get_db
 
         db = get_db()
         sid = str(schedule_id) if schedule_id else (_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None)
@@ -1872,7 +1872,7 @@ def index():
 def _save_frame_to_session(session_id, driver_id, frame_record):
     """Fire-and-forget: persist one frame result into driving_sessions."""
     try:
-        from user_management.database import get_db
+        from Emotion_Shift_Profile.database import get_db
         from bson import ObjectId
         db = get_db()
         db.driving_sessions.update_one(
