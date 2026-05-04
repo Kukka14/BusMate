@@ -1,0 +1,2 @@
+# Add this to backend/requirements.txt
+pynmea2
