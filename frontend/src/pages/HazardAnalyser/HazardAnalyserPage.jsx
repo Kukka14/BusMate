@@ -445,9 +445,24 @@ export default function HazardAnalyserPage() {
       const data = await res.json();
       if (!res.ok || data.error) { setError(data.error || "Analysis failed."); return; }
       setAnalysis(data);
-      setViewMode("static");
+      setViewMode("animated");
     } catch (e) {
       setError("Network error — is the backend running on port 5000?");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadDemo = async () => {
+    setError(""); setLoading(true); setAnalysis(null);
+    try {
+      const res = await fetch("/api/analyze-route-demo");
+      const data = await res.json();
+      if (!res.ok || data.error) { setError(data.error || "Demo load failed."); return; }
+      setAnalysis(data);
+      setViewMode("animated");
+    } catch (e) {
+      setError("Failed to load demo — is the backend running on port 5000?");
     } finally {
       setLoading(false);
     }
@@ -530,6 +545,12 @@ export default function HazardAnalyserPage() {
               {loading ? (
                 <><span className="hz-spinner" /> Analysing…</>
               ) : "Analyse Route"}
+            </button>
+
+            <button className="hz-analyze-btn" onClick={loadDemo} disabled={loading} style={{ background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)" }}>
+              {loading ? (
+                <><span className="hz-spinner" /> Loading…</>
+              ) : "🎬 Demo Route"}
             </button>
 
             {error && <div className="hz-error">{error}</div>}

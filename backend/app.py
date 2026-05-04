@@ -13,7 +13,10 @@ from flask import Flask, request, jsonify, Response
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 from tensorflow.keras.models import load_model
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+except Exception:
+    YOLO = None
 import time
 import threading
 from pathlib import Path
@@ -27,6 +30,8 @@ load_dotenv()
 from Emotion_Shift_Profile import register_user_management
 from Emotion_Shift_Profile.config import Config
 from drowsiness_engine import DrowsinessEngine
+# GPS routes and listener (lazy-start in __main__)
+from routes.gps_routes import gps_bp
 
 
 app = Flask(__name__)
@@ -47,6 +52,65 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Register user management blueprints (MongoDB — no table creation needed)
 register_user_management(app)
+# Register GPS routes
+app.register_blueprint(gps_bp)
+
+
+# ── Auto-seed the hard-coded admin account ───────────────────────────────────
+def _seed_admin():
+    """
+    Runs at every startup.
+    • If no admin with ADMIN_EMAIL exists  → creates it.
+    • If the account already exists        → syncs the password + username
+      from .env so credentials always match what is configured.
+    Admin accounts CANNOT be created through any API endpoint.
+    """
+    try:
+        from user_management.database import get_db
+        from user_management.models.user import User
+        from user_management.utils.password import hash_password
+        from datetime import datetime
+
+        admin_email    = os.getenv("ADMIN_EMAIL",    "admin@busmate.com")
+        admin_username = os.getenv("ADMIN_USERNAME", "BusMate Admin")
+        admin_password = os.getenv("ADMIN_PASSWORD", "BusMate@Admin2025")
+        admin_company  = os.getenv("ADMIN_COMPANY",  "BusMate Fleet")
+
+        db        = get_db()
+        pw_hash   = hash_password(admin_password)
+        existing  = db.users.find_one({"email": admin_email})
+
+        if existing:
+            # Sync credentials from .env on every restart
+            db.users.update_one(
+                {"email": admin_email},
+                {"$set": {
+                    "username":      admin_username,
+                    "password_hash": pw_hash,
+                    "role":          "admin",
+                    "company":       admin_company,
+                    "is_active":     True,
+                    "updated_at":    datetime.utcnow(),
+                }},
+            )
+            print(f"[seed] ✓ Admin credentials synced → {admin_email}")
+        else:
+            doc = User.new_doc(
+                username=admin_username,
+                email=admin_email,
+                password_hash=pw_hash,
+                role="admin",
+                company=admin_company,
+            )
+            db.users.insert_one(doc)
+            print(f"[seed] ✓ Admin account created  → {admin_email}")
+
+    except Exception as exc:
+        print(f"[seed] WARNING: could not seed admin account: {exc}")
+
+
+_seed_admin()
+
 
 # Drowsiness detection engine (loaded once at startup)
 _dw_engine = DrowsinessEngine()
@@ -59,10 +123,41 @@ _dw_engine = DrowsinessEngine()
 MODEL_PATH = "emotion_model.h5"
 LABELS_PATH = "emotion_labels.json"
 
-with open(LABELS_PATH, "r") as f:
-    EMOTION_LABELS = json.load(f)
+# Load emotion labels and model with guarded fallbacks so the server
+# can start even when heavy TF weights are missing or incompatible.
+EMOTION_LABELS = []
+emotion_model = None
+try:
+    with open(LABELS_PATH, "r") as f:
+        EMOTION_LABELS = json.load(f)
+except Exception as _e:
+    print(f"\u26a0  Emotion labels load failed: {_e}")
+    # Provide a minimal fallback label set so downstream code can operate.
+    EMOTION_LABELS = ["neutral", "happy", "sad", "angry"]
 
-emotion_model = load_model(MODEL_PATH)
+try:
+    emotion_model = load_model(MODEL_PATH)
+except Exception as _e:
+    print(f"\u26a0  Emotion model load failed: {_e}")
+    emotion_model = None
+
+
+def _safe_emotion_predict(face_input):
+    """Return a prediction vector for `face_input`.
+    If the real model is unavailable, return a deterministic fallback.
+    """
+    if emotion_model is None:
+        # Fallback: return a one-hot 'neutral' prediction
+        probs = np.zeros(len(EMOTION_LABELS), dtype=float)
+        probs[0] = 1.0
+        return probs
+    try:
+        return emotion_model.predict(face_input, verbose=0)[0]
+    except Exception:
+        # If runtime prediction fails, return fallback
+        probs = np.zeros(len(EMOTION_LABELS), dtype=float)
+        probs[0] = 1.0
+        return probs
 
 
 # -----------------------------
@@ -70,7 +165,14 @@ emotion_model = load_model(MODEL_PATH)
 # -----------------------------
 
 YOLO_MODEL_PATH = "yolov8n.pt"
-yolo_model = YOLO(YOLO_MODEL_PATH)
+yolo_model = None
+if YOLO is None:
+    print("\u26a0  ultralytics.YOLO package not available — object detection disabled.")
+else:
+    try:
+        yolo_model = YOLO(YOLO_MODEL_PATH)
+    except Exception as _e:
+        print(f"\u26a0  YOLO model load failed: {_e} — object detection disabled.")
 
 CHEATING_LABELS = {
     "phone", "cell phone", "mobile phone", "smartphone",
@@ -81,33 +183,30 @@ CHEATING_LABELS = {
 
 
 # -----------------------------
-# BVI CONFIG
+# BVI CONFIG — PCA + K-Means data-driven model
 # -----------------------------
 
 WINDOW_SIZE = 30
 
-# Normalized weights
-ALPHA = 0.4
-BETA = 0.3
-GAMMA = 0.3
+_BVI_MODEL_DIR = Path(__file__).resolve().parent / "user_management" / "BVI_Models"
 
+try:
+    _pca_weights     = np.load(_BVI_MODEL_DIR / "pca_weights.npy")      # shape (4,) — [T, E, A, F]
+    _pca_score_range = np.load(_BVI_MODEL_DIR / "pca_score_range.npy")  # [min, max]
+    _bvi_thresholds  = np.load(_BVI_MODEL_DIR / "bvi_thresholds.npy")   # [t1, t2]
+    print(f"✅ BVI PCA+KMeans model loaded — weights={_pca_weights.round(4)}, thresholds={_bvi_thresholds.round(4)}")
+except Exception as _bvi_e:
+    print(f"⚠  BVI model load failed: {_bvi_e} — falling back to manual weights")
+    _pca_weights     = np.array([0.30, 0.25, 0.25, 0.20])
+    _pca_score_range = np.array([0.0, 1.0])
+    _bvi_thresholds  = np.array([0.35, 0.60])
 
 session_buffers: Dict[str, deque] = defaultdict(lambda: deque(maxlen=WINDOW_SIZE))
 
-
-# Emotion intensity map (covers all labels the model can emit)
-EMOTION_VALUE_MAP = {
-    "neutral":   0,
-    "happy":     1,
-    "sad":      -1,
-    "angry":    -2,
-    "fearful":  -2,
-    "fear":     -2,
-    "surprised": 0.5,
-    "surprise":  0.5,
-    "disgusted": -1,
-    "disgust":  -1,
-}
+# Indices of negative-affect and fatigue emotions in EMOTION_LABELS
+# Resolved after EMOTION_LABELS is populated (see feature extraction below)
+_NEGATIVE_EMOTIONS = {"angry", "disgusted", "fearful", "fear", "sad", "disgust"}
+_FATIGUE_EMOTIONS  = {"sad", "fearful", "fear"}
 
 
 # -----------------------------
@@ -173,6 +272,10 @@ def decode_base64_image(data_url):
 
 def detect_objects_yolo(img_bgr: np.ndarray, conf: float = 0.15, imgsz: int = 640):
 
+    # If YOLO isn't available, return empty detection results.
+    if yolo_model is None:
+        return {"detections": [], "labels": [], "cheating": False}
+
     results = yolo_model.predict(img_bgr, imgsz=imgsz, conf=conf)
 
     detections = []
@@ -211,77 +314,103 @@ def detect_objects_yolo(img_bgr: np.ndarray, conf: float = 0.15, imgsz: int = 64
 
 
 # -----------------------------
-# BVI CALCULATIONS
+# BVI CALCULATIONS — PCA + K-Means model
+# Features: T (transition_rate), E (entropy),
+#           A (negative_affect_conf), F (fatigue_proxy_conf)
 # -----------------------------
 
 def compute_transition_rate(labels):
-
     changes = sum(
-        1 for i in range(1,len(labels))
+        1 for i in range(1, len(labels))
         if labels[i] != labels[i-1]
     )
-
-    return changes / max(1,len(labels)-1)
-
-
-def compute_emotion_variance(labels):
-
-    values = [EMOTION_VALUE_MAP.get(l, 0) for l in labels]
-
-    return float(np.var(values))
+    return changes / max(1, len(labels) - 1)
 
 
 def compute_entropy(labels):
-
     counts = Counter(labels)
     total = len(labels)
-
-    entropy = 0
-
+    entropy = 0.0
     for c in counts.values():
-
         p = c / total
         entropy -= p * np.log2(p)
-
     return float(entropy)
 
 
-def compute_bvi_components(probs_buffer):
-    """Shared helper: compute T, V, E from a list of prediction arrays."""
-    label_ids = [int(np.argmax(p)) for p in probs_buffer]
-    emotions  = [EMOTION_LABELS[i].lower() for i in label_ids]
-    T = compute_transition_rate(emotions)
-    V = compute_emotion_variance(emotions)
-    E = compute_entropy(emotions)
-    return T, V, E
+def _negative_affect_conf(probs: np.ndarray) -> float:
+    """Sum of predicted probabilities for negative-affect emotion classes."""
+    total = 0.0
+    for i, label in enumerate(EMOTION_LABELS):
+        if label.lower() in _NEGATIVE_EMOTIONS and i < len(probs):
+            total += float(probs[i])
+    return total
+
+
+def _fatigue_proxy_conf(probs: np.ndarray) -> float:
+    """Sum of predicted probabilities for fatigue-proxy emotion classes."""
+    total = 0.0
+    for i, label in enumerate(EMOTION_LABELS):
+        if label.lower() in _FATIGUE_EMOTIONS and i < len(probs):
+            total += float(probs[i])
+    return total
 
 
 def compute_bvi_for_session(session_id):
-
+    """Compute BVI using PCA-derived weights and K-Means thresholds."""
     buffer = session_buffers[session_id]
 
     if len(buffer) < 5:
         return None
 
     probs_list = [np.array(p) for p in buffer]
-    T, V, E = compute_bvi_components(probs_list)
 
-    bvi = ALPHA * T + BETA * V + GAMMA * E
+    # Feature 1 — Transition Rate (T): how often emotion label changes
+    label_ids = [int(np.argmax(p)) for p in probs_list]
+    emotions  = [EMOTION_LABELS[i].lower() for i in label_ids]
+    T = compute_transition_rate(emotions)
 
-    if bvi < 0.4:
+    # Feature 2 — Entropy (E): unpredictability of emotion sequence
+    E = compute_entropy(emotions)
+
+    # Feature 3 — Negative Affect (A): avg probability of negative emotions
+    A = float(np.mean([_negative_affect_conf(p) for p in probs_list]))
+
+    # Feature 4 — Fatigue Proxy (F): avg probability of fatigue-linked emotions
+    F = float(np.mean([_fatigue_proxy_conf(p) for p in probs_list]))
+
+    # Normalize each feature to [0,1] using known max ranges
+    # T in [0,1], E in [0, log2(7)≈2.807], A in [0,1], F in [0,1]
+    features_scaled = np.array([
+        np.clip(T, 0.0, 1.0),
+        np.clip(E / 2.807, 0.0, 1.0),
+        np.clip(A, 0.0, 1.0),
+        np.clip(F, 0.0, 1.0),
+    ], dtype=float)
+
+    # Apply PCA-derived weights
+    raw_bvi = float(np.dot(features_scaled, _pca_weights))
+
+    # Normalize raw score to [0,1] using the saved training range
+    bvi_min, bvi_max = float(_pca_score_range[0]), float(_pca_score_range[1])
+    bvi = float(np.clip((raw_bvi - bvi_min) / max(bvi_max - bvi_min, 1e-9), 0.0, 1.0))
+
+    # Assign state using K-Means derived thresholds
+    t1, t2 = float(_bvi_thresholds[0]), float(_bvi_thresholds[1])
+    if bvi < t1:
         state = "stable"
-    elif bvi < 0.55:
+    elif bvi < t2:
         state = "unstable"
     else:
         state = "erratic"
 
     return {
-        "bvi_score": float(bvi),
-        "state": state,
-        "transition_rate": float(T),
-        "emotion_variance": float(V),
-        "entropy": float(E),
-        "window_size": len(buffer)
+        "bvi_score":        round(bvi, 4),
+        "state":            state,
+        "transition_rate":  round(T, 4),
+        "entropy":          round(E, 4),
+        "negative_affect":  round(A, 4),
+        "fatigue_proxy":    round(F, 4),
+        "window_size":      len(buffer),
     }
 
 
@@ -1319,7 +1448,10 @@ def rs_upload():
                 pass
         if not results_list:
             return jsonify({"detected": False, "message": "No road signs found in video."})
-        return jsonify({"detected": True, "results": results_list, "input_type": "video"})
+        primary = results_list[0]
+        primary["input_type"] = "video"
+        primary["results"] = results_list
+        return jsonify(primary)
 
     return jsonify({"error": "Unknown input_type"}), 400
 
@@ -1367,6 +1499,7 @@ def rs_stop_webcam_session():
     _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
+###
 
 @app.route("/capture_webcam", methods=["POST"])
 def rs_capture_webcam():
@@ -1928,7 +2061,7 @@ def predict():
 
         face_input, bbox = processed
 
-        preds = emotion_model.predict(face_input)[0]
+        preds = _safe_emotion_predict(face_input)
 
         idx = int(np.argmax(preds))
         label = EMOTION_LABELS[idx]
@@ -2032,11 +2165,11 @@ def analyze_video_frames():
 
                 if not err:
                     face_input, bbox = processed
-                    preds = emotion_model.predict(face_input, verbose=0)[0]
-                    idx   = int(np.argmax(preds))
+                    preds = _safe_emotion_predict(face_input)
+                    idx = int(np.argmax(preds))
                     emotion_label = EMOTION_LABELS[idx]
-                    confidence    = float(preds[idx])
-                    probs_dict    = {lbl: float(p) for lbl, p in zip(EMOTION_LABELS, preds)}
+                    confidence = float(preds[idx])
+                    probs_dict = {lbl: float(p) for lbl, p in zip(EMOTION_LABELS, preds)}
 
                     bvi_buffer.append(preds)
 
@@ -2143,17 +2276,11 @@ def on_frame(data):
 
     face_input, bbox = processed
 
-    preds = emotion_model.predict(face_input, verbose=0)[0]
-
-    idx   = int(np.argmax(preds))
+    preds = _safe_emotion_predict(face_input)
+    idx = int(np.argmax(preds))
     label = EMOTION_LABELS[idx]
-
     confidence = float(preds[idx])
-
-    probs_dict = {
-        lbl: float(p) for lbl, p in zip(EMOTION_LABELS, preds)
-    }
-
+    probs_dict = {lbl: float(p) for lbl, p in zip(EMOTION_LABELS, preds)}
     session_buffers[driver_id].append(preds.tolist())
 
     bvi = compute_bvi_for_session(driver_id)
@@ -2617,6 +2744,84 @@ def _hz_road_context_penalty(highway, near_intersections, is_bridge, is_tunnel):
     return base + junc_pen + struct_pen
 
 
+@app.route("/api/analyze-route-demo", methods=["GET"])
+def analyze_route_demo():
+    """
+    Demo endpoint: returns hardcoded sample route data for testing the HazardAnalyzer UI.
+    No external API calls needed — perfect for immediate UI testing.
+    """
+    import math
+    
+    # Sample route: Colombo → Galle (south coast)
+    start_lat, start_lon = 6.9271, 80.6365  # Colombo
+    end_lat, end_lon = 6.0367, 80.2167      # Galle
+    
+    # Generate 100 interpolated points
+    path_data = []
+    for i in range(100):
+        t = i / 99.0
+        lat = start_lat + t * (end_lat - start_lat)
+        lon = start_lon + t * (end_lon - start_lon)
+        
+        # ~305m / 100 points = ~3.05m per step
+        distance = t * 305000
+        
+        # Create risk zones: some high/critical risk areas
+        if 30 <= i <= 35:
+            risk = 0.85
+            risk_label = "High Risk"
+            color = "red"
+            terrain = "High Steep Hill"
+        elif 60 <= i <= 68:
+            risk = 1.15
+            risk_label = "Critical Risk"
+            color = "darkred"
+            terrain = "High Downhill"
+        elif 40 <= i <= 50:
+            risk = 0.55
+            risk_label = "Medium Risk"
+            color = "orange"
+            terrain = "Moderate Grade"
+        else:
+            risk = 0.25
+            risk_label = "Low Risk"
+            color = "green"
+            terrain = "Flat"
+        
+        path_data.append({
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "risk": round(risk, 2),
+            "risk_label": risk_label,
+            "color": color,
+            "slope": round(3.5 + 6 * math.sin(i / 20), 1),
+            "curvature": round(0.005 + 0.008 * math.sin(i / 15), 3),
+            "distance": round(distance, 1),
+            "terrain_feature": terrain,
+            "road_name": "A2 South Expressway" if i < 50 else "Matara Road",
+            "road_class": "trunk" if i < 50 else "primary",
+            "road_ref": "A2" if i < 50 else "A3",
+            "maxspeed": "80" if i < 50 else "60",
+            "lanes": "2" if i < 50 else "2",
+            "is_bridge": i == 25 or i == 75,
+            "is_tunnel": i == 80,
+            "near_intersections": 1 if 40 <= i <= 42 else 0,
+            "context_penalty": round(0.08 if i < 50 else 0.12, 2),
+            "signed_grade": round(2.5 + 5 * math.sin(i / 18), 1),
+        })
+    
+    return jsonify({
+        "status": "success",
+        "start_location": "Colombo",
+        "end_location": "Galle",
+        "start_coords": {"lat": start_lat, "lon": start_lon},
+        "end_coords": {"lat": end_lat, "lon": end_lon},
+        "total_points": len(path_data),
+        "path_data": path_data,
+        "note": "Demo data for UI testing — no real analysis performed"
+    }), 200
+
+
 @app.route("/api/analyze-route", methods=["POST"])
 def analyze_route():
     """Analyze a bus route for terrain hazards and safety risks."""
@@ -2831,6 +3036,33 @@ def analyze_drowsiness_video():
 # -----------------------------
 
 if __name__ == "__main__":
+    # Optionally start GPS TCP client (e.g. connect to GPS2IP on your phone)
+    try:
+        gps_host = os.getenv("GPS_TCP_HOST")
+        gps_port = os.getenv("GPS_TCP_PORT")
+        if gps_host and gps_port:
+            try:
+                from services.gps_listener import start_tcp_nmea_client
+                t = threading.Thread(target=start_tcp_nmea_client, args=(gps_host, int(gps_port)), daemon=True)
+                t.start()
+                app.logger.info(f"Started GPS TCP client to {gps_host}:{gps_port}")
+            except Exception as e:
+                app.logger.warning(f"Could not start GPS TCP client: {e}")
+        # Also optionally start UDP listener if configured
+        udp_port = os.getenv("GPS_UDP_PORT")
+        udp_enable = os.getenv("GPS_UDP_ENABLE", "false").lower() in ("1", "true", "yes")
+        if udp_enable and udp_port:
+            try:
+                from services.gps_listener import start_udp_nmea_listener
+                t2 = threading.Thread(target=start_udp_nmea_listener, args=("0.0.0.0", int(udp_port)), daemon=True)
+                t2.start()
+                app.logger.info(f"Started GPS UDP listener on 0.0.0.0:{udp_port}")
+            except Exception as e:
+                app.logger.warning(f"Could not start GPS UDP listener: {e}")
+
+    except Exception:
+        pass
+
     socketio.run(
         app,
         host="0.0.0.0",

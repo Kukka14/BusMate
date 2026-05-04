@@ -9,18 +9,36 @@ import "./ActiveShiftPage.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-// ── Color helpers ─────────────────────────────────────────────────────────────
 const EMOTION_COLOR = {
-  happy:"#22c55e", neutral:"#64748b", sad:"#a78bfa", angry:"#ef4444",
-  fearful:"#f97316", surprised:"#f59e0b", disgust:"#84cc16", disgusted:"#84cc16",
+  happy: "#22c55e",
+  neutral: "#64748b",
+  sad: "#a78bfa",
+  angry: "#ef4444",
+  fearful: "#f97316",
+  surprised: "#f59e0b",
+  surprise: "#f59e0b",
+  disgust: "#84cc16",
+  disgusted: "#84cc16",
 };
-function bviColor(s) { return s==null?"#475569":s<0.30?"#22c55e":s<0.60?"#f59e0b":"#ef4444"; }
-function verdictColor(v) { return v==="Drowsy"?"#ef4444":v==="Alert"?"#22c55e":"#475569"; }
-function confColor(p) { return p==null?"#475569":p<0.30?"#22c55e":p<0.60?"#f59e0b":"#ef4444"; }
-function hazardColor(l) { return l==="High"?"#ef4444":l==="Medium"?"#f59e0b":"#22c55e"; }
-
-// ── Icons ─────────────────────────────────────────────────────────────────────
+function bviColor(score) {
+  return score == null ? "#475569" : score < 0.3 ? "#22c55e" : score < 0.6 ? "#f59e0b" : "#ef4444";
+}
+function verdictColor(v) {
+  if (v === "Drowsy") return "#ef4444";
+  if (v === "Alert")  return "#22c55e";
+  return "#475569";
+}
+function confColor(p) {
+  if (p == null)  return "#475569";
+  if (p < 0.30)   return "#22c55e";
+  if (p < 0.60)   return "#f59e0b";
+  return "#ef4444";
+}
+function hazardColor(level) {
+  if (level === "High") return "#ef4444";
+  if (level === "Medium") return "#f59e0b";
+  return "#22c55e";
+}
 const IcoStop  = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>;
 const IcoAlert = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
@@ -203,10 +221,53 @@ export default function ActiveShiftPage() {
   const [drivingMode, setDrivingMode] = useState(false);
 
   // ── Shared webcam ───────────────────────────────────────────────────────
-  const videoRef   = useRef(null);
+  const videoRef   = useRef(null);      // Capture source for emotion + drowsiness
   const captureRef = useRef(null);
   const streamRef  = useRef(null);
+  const videoRefEmotionDisplay = useRef(null);      // Display for emotion card
+  const videoRefDrowsinessDisplay = useRef(null);   // Display for drowsiness card
   const [camError, setCamError] = useState("");
+  // ── Second (road-facing) webcam ───────────────────────────────────────
+  const videoRef2   = useRef(null);     // Capture source for road sign + road scene
+  const captureRef2 = useRef(null);
+  const streamRef2  = useRef(null);
+  const videoRefRoadSignDisplay = useRef(null);      // Display for road sign card
+  const videoRefRoadSceneDisplay = useRef(null);     // Display for road scene card
+  const [cam2Error, setCam2Error] = useState("");
+  const [devices, setDevices] = useState([]);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  const [driverDeviceId, setDriverDeviceId] = useState(null);
+  const [roadDeviceId, setRoadDeviceId] = useState(null);
+
+  const isLaptopCamera = (device) => {
+    const label = (device?.label || "").toLowerCase();
+    return (
+      label.includes("integrated") ||
+      label.includes("internal") ||
+      label.includes("built-in") ||
+      label.includes("builtin") ||
+      label.includes("laptop") ||
+      label.includes("default camera")
+    );
+  };
+
+  const getExternalCameras = (cams) => cams.filter((device) => !isLaptopCamera(device));
+
+  const findPreferredDriverDeviceId = (cams) => {
+    const externalCams = getExternalCameras(cams);
+    return externalCams[0]?.deviceId || cams[0]?.deviceId || null;
+  };
+
+  const findPreferredRoadDeviceId = (cams, driverId = null) => {
+    const externalCams = getExternalCameras(cams);
+    const roadExternalCam = externalCams.find((device) => device.deviceId !== driverId);
+    if (roadExternalCam?.deviceId) {
+      return roadExternalCam.deviceId;
+    }
+
+    const nonDriverCam = cams.find((device) => device.deviceId !== driverId);
+    return nonDriverCam?.deviceId || cams[1]?.deviceId || cams[0]?.deviceId || null;
+  };
 
   // ── Emotion state ───────────────────────────────────────────────────────
   const emSocketRef = useRef(null);
@@ -244,17 +305,25 @@ export default function ActiveShiftPage() {
   const [rsPlaying, setRsPlaying]     = useState(true);
   const rsPlayRef = useRef(null);
 
+  // Toggle to show only the 4 live analyzer cards (keep page minimal)
+  const showOnlyFeeds = false;
+
   // ── Hazard state ────────────────────────────────────────────────────────
   const [hzAnalysis, setHzAnalysis]   = useState(null);
   const [hzLoading, setHzLoading]     = useState(false);
   const [hzError, setHzError]         = useState("");
   const hzMapRef      = useRef(null);
   const hzMapInstance = useRef(null);
+  const liveGpsMapInstance = useRef(null);
   const hzMarkerRef   = useRef(null);
   const hzAnimRef     = useRef(null);
   const hudMapRef     = useRef(null);
   const hudMapInst    = useRef(null);
   const hudMarkerRef  = useRef(null);
+  const gpsMapRef     = useRef(null);
+  const gpsMapInst    = useRef(null);
+  const gpsMarkerRef  = useRef(null);
+  const gpsSocketRef  = useRef(null);
   const [hzIdx, setHzIdx]             = useState(0);
   const [hzPoint, setHzPoint]         = useState(null);
   const [hzPlaying, setHzPlaying]     = useState(false);
@@ -262,11 +331,9 @@ export default function ActiveShiftPage() {
 
   // ── Road Sign state ─────────────────────────────────────────────────────
   const [rsSignInfo, setRsSignInfo]         = useState(null); // {class_name, confidence, status}
-  const [rsSignStreamErr, setRsSignStreamErr] = useState(false);
   const rsSignPollRef = useRef(null);
   const rsSignLastRef = useRef(null);
   const [rsSignLog, setRsSignLog]           = useState([]);
-  const rsSignStreamSrc = useRef(`/road-sign/video_feed?t=${Date.now()}`);
 
 
   // ── Auth guard ──────────────────────────────────────────────────────────
@@ -324,6 +391,100 @@ export default function ActiveShiftPage() {
     hudMapInst.current.panTo([hzPoint.lat, hzPoint.lon], { animate: true, duration: 0.3 });
   }, [drivingMode, hzPoint]);
 
+  // ── GPS map — listen for phone GPS updates and show live marker ──────
+  useEffect(() => {
+    // init map once
+    if (gpsMapInst.current || !gpsMapRef.current) return;
+    try {
+      const map = L.map(gpsMapRef.current, { zoomControl: false, attributionControl: false }).setView([7.0, 80.0], 6);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "" }).addTo(map);
+      gpsMapInst.current = map;
+    } catch (e) {
+      console.error("GPS map init error:", e);
+    }
+    return () => {
+      try { if (gpsMapInst.current) { gpsMapInst.current.remove(); gpsMapInst.current = null; gpsMarkerRef.current = null; } } catch(e){}
+    };
+  }, []);
+
+  // ── GPS map — draw route when analysis completes ──────────────────────
+  useEffect(() => {
+    const map = gpsMapInst.current;
+    const pd = hzAnalysis?.path_data;
+    if (!map || !pd?.length) return;
+
+    // Clear old route
+    map.eachLayer(layer => {
+      if (layer instanceof L.Polyline || layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+        if (layer !== gpsMarkerRef.current) {
+          map.removeLayer(layer);
+        }
+      }
+    });
+
+    // Draw colored route segments
+    const coords = pd.map(p => [p.lat, p.lon]);
+    for (let i = 0; i < coords.length - 1; i++) {
+      L.polyline([coords[i], coords[i + 1]], {
+        color: pd[i].color || "green",
+        weight: 5,
+        opacity: 0.8,
+      }).addTo(map);
+    }
+
+    // Start and end markers
+    L.circleMarker(coords[0], { radius: 10, color: "#0b5fff", fillColor: "#0b5fff", opacity: 0.9, weight: 2 })
+      .bindPopup("START").addTo(map);
+    L.circleMarker(coords[coords.length - 1], { radius: 10, color: "red", fillColor: "red", opacity: 0.8, weight: 2 })
+      .bindPopup("END").addTo(map);
+
+    // Critical risk markers
+    pd.forEach((p, idx) => {
+      if (p.risk_label === "Critical Risk" && idx % 5 === 0) {
+        L.circleMarker([p.lat, p.lon], { radius: 5, color: "darkred", fillColor: "darkred", opacity: 0.7 })
+          .bindPopup(`Risk: ${p.risk?.toFixed(2)}`).addTo(map);
+      }
+    });
+
+    // Fit bounds
+    map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+  }, [hzAnalysis]);
+
+  useEffect(() => {
+    // connect socket and listen for gps_update
+    if (gpsSocketRef.current) return;
+    try {
+      const sock = io(SOCKET_URL, { transports: ["websocket"], reconnectionDelayMax: 10000 });
+      gpsSocketRef.current = sock;
+      sock.on("connect", () => {
+        // console.log("gps socket connected");
+      });
+      sock.on("gps_update", (data) => {
+        try {
+          const lat = parseFloat(data.lat);
+          const lon = parseFloat(data.lon);
+          if (!isFinite(lat) || !isFinite(lon)) return;
+          const map = gpsMapInst.current;
+          if (!map) return;
+          if (!gpsMarkerRef.current) {
+            gpsMarkerRef.current = L.marker([lat, lon]).addTo(map);
+            map.setView([lat, lon], 14);
+          } else {
+            gpsMarkerRef.current.setLatLng([lat, lon]);
+          }
+        } catch (e) {
+          // ignore
+        }
+      });
+      sock.on("gps_raw", () => {});
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      try { if (gpsSocketRef.current) { gpsSocketRef.current.disconnect(); gpsSocketRef.current = null; } } catch(e){}
+    };
+  }, []);
+
   // ── Elapsed timer ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!shiftStart) { setElapsed("00:00"); return; }
@@ -338,27 +499,182 @@ export default function ActiveShiftPage() {
   // ── WEBCAM (shared by emotion + drowsiness) ────────────────────────────
   useEffect(() => {
     let active = true;
-    navigator.mediaDevices
-      .getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"},audio:false})
-      .then(s => {
-        if (!active) { s.getTracks().forEach(t=>t.stop()); return; }
-        streamRef.current = s;
-        if (videoRef.current) videoRef.current.srcObject = s;
-      })
-      .catch(() => setCamError("Camera permission denied or not available."));
+    async function loadDevices() {
+      try {
+        // Request camera permission first (triggers browser prompt)
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 } }, audio: false });
+          console.log("[Camera Debug] Permission granted");
+        } catch (permErr) {
+          console.warn("[Camera Debug] Permission grant attempt:", permErr.message);
+        }
+        
+        // Now enumerate devices
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const cams = list.filter(d => d.kind === "videoinput");
+        console.log(`[Camera Debug] Found ${cams.length} cameras:`, cams.map(c => ({id: c.deviceId, label: c.label})));
+        setDevices(cams);
+        // Prefer previously selected device ids, otherwise choose the first two external webcams.
+        const preferredDriverId = driverDeviceId || findPreferredDriverDeviceId(cams);
+        if (cams.length > 0 && !driverDeviceId) setDriverDeviceId(preferredDriverId);
+        if (cams.length > 0 && !roadDeviceId) setRoadDeviceId(findPreferredRoadDeviceId(cams, preferredDriverId));
+        setDevicesLoaded(true);
+      } catch (e) {
+        console.error("[Camera Debug] Error enumerating devices:", e);
+      }
+    }
+    loadDevices();
     return () => {
       active = false;
-      if (streamRef.current) { streamRef.current.getTracks().forEach(t=>t.stop()); streamRef.current = null; }
-      if (videoRef.current) videoRef.current.srcObject = null;
     };
-  }, []);
+  }, [driverDeviceId, roadDeviceId]);
+
+  useEffect(() => {
+    if (!devicesLoaded) return;
+    let active = true;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+
+    async function openDriverCamera() {
+      try {
+        const constraint = driverDeviceId ? { deviceId: { exact: driverDeviceId } } : { facingMode: "user" };
+        const s = await navigator.mediaDevices.getUserMedia({ video: { ...constraint, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        if (!active) { s.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+        if (videoRefEmotionDisplay.current) videoRefEmotionDisplay.current.srcObject = s;
+        if (videoRefDrowsinessDisplay.current) videoRefDrowsinessDisplay.current.srcObject = s;
+        setCamError("");
+      } catch {
+        setCamError("Driver camera not available or permission denied.");
+      }
+    }
+
+    openDriverCamera();
+    return () => { active = false; };
+  }, [driverDeviceId, devicesLoaded]);
+
+  useEffect(() => {
+    if (!devicesLoaded) return;
+    let active = true;
+    if (streamRef2.current) {
+      streamRef2.current.getTracks().forEach(t => t.stop());
+      streamRef2.current = null;
+    }
+    if (videoRef2.current) videoRef2.current.srcObject = null;
+
+    async function openRoadCamera() {
+      try {
+        const constraint = roadDeviceId ? { deviceId: { exact: roadDeviceId } } : { facingMode: "environment" };
+        const s2 = await navigator.mediaDevices.getUserMedia({ video: { ...constraint, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        if (!active) { s2.getTracks().forEach(t => t.stop()); return; }
+        streamRef2.current = s2;
+        if (videoRef2.current) videoRef2.current.srcObject = s2;
+        if (videoRefRoadSignDisplay.current) videoRefRoadSignDisplay.current.srcObject = s2;
+        if (videoRefRoadSceneDisplay.current) videoRefRoadSceneDisplay.current.srcObject = s2;
+        setCam2Error("");
+      } catch {
+        // Fallback: try any remaining external camera other than the driver selection.
+        try {
+          const externalDevices = getExternalCameras(devices);
+          const fallback = externalDevices.find(d => d.deviceId !== driverDeviceId) || devices.find(d => d.deviceId !== driverDeviceId);
+          if (fallback?.deviceId) {
+            const s2 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: fallback.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+            if (!active) { s2.getTracks().forEach(t => t.stop()); return; }
+            streamRef2.current = s2;
+            if (videoRef2.current) videoRef2.current.srcObject = s2;
+            if (videoRefRoadSignDisplay.current) videoRefRoadSignDisplay.current.srcObject = s2;
+            if (videoRefRoadSceneDisplay.current) videoRefRoadSceneDisplay.current.srcObject = s2;
+            setCam2Error("");
+            return;
+          }
+        } catch {
+          // fall through to error below
+        }
+        setCam2Error("Road camera not available or permission denied.");
+      }
+    }
+
+    openRoadCamera();
+    return () => { active = false; };
+  }, [roadDeviceId, devicesLoaded, driverDeviceId, devices]);
+
+  const handleEnableCamera = async () => {
+    try {
+      console.log("[Camera] Requesting permission...");
+      
+      // Try with different constraints
+      let stream = null;
+      const constraints = [
+        { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: "user" }, audio: false },
+        { video: true, audio: false }
+      ];
+      
+      for (const constraint of constraints) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraint);
+          console.log("[Camera] Permission granted with constraint:", constraint);
+          break;
+        } catch (e) {
+          console.log("[Camera] Constraint failed, trying next:", e.message);
+        }
+      }
+      
+      if (!stream) throw new Error("No camera constraint worked");
+      
+      stream.getTracks().forEach(t => t.stop());
+      
+      // Refresh device list
+      setTimeout(async () => {
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const cams = list.filter(d => d.kind === "videoinput");
+        console.log(`[Camera] Found ${cams.length} cameras after permission:`, cams.map(c => ({id: c.deviceId, label: c.label})));
+        setDevices(cams);
+        if (cams.length > 0 && !driverDeviceId) setDriverDeviceId(cams[0].deviceId);
+      }, 500);
+    } catch (err) {
+      console.error("[Camera] Error:", err);
+      alert(`❌ Camera Error: ${err.message}\n\n✅ Fix:\n1. Close Skype/Teams/Zoom\n2. Enable camera in Windows Settings\n3. Check Device Manager for drivers`);
+    }
+  };
 
   // Re-assign camera stream when video element appears (shift started)
   useEffect(() => {
     if (shiftActive && videoRef.current && streamRef.current && !videoRef.current.srcObject) {
       videoRef.current.srcObject = streamRef.current;
     }
+    if (shiftActive && videoRef2.current && streamRef2.current && !videoRef2.current.srcObject) {
+      videoRef2.current.srcObject = streamRef2.current;
+    }
   }, [shiftActive]);
+
+  // Propagate driver stream to display refs
+  useEffect(() => {
+    if (streamRef.current) {
+      if (videoRefEmotionDisplay.current && !videoRefEmotionDisplay.current.srcObject) {
+        videoRefEmotionDisplay.current.srcObject = streamRef.current;
+      }
+      if (videoRefDrowsinessDisplay.current && !videoRefDrowsinessDisplay.current.srcObject) {
+        videoRefDrowsinessDisplay.current.srcObject = streamRef.current;
+      }
+    }
+  }, [streamRef.current]);
+
+  // Propagate road stream to display refs
+  useEffect(() => {
+    if (streamRef2.current) {
+      if (videoRefRoadSignDisplay.current && !videoRefRoadSignDisplay.current.srcObject) {
+        videoRefRoadSignDisplay.current.srcObject = streamRef2.current;
+      }
+      if (videoRefRoadSceneDisplay.current && !videoRefRoadSceneDisplay.current.srcObject) {
+        videoRefRoadSceneDisplay.current.srcObject = streamRef2.current;
+      }
+    }
+  }, [streamRef2.current]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── EMOTION Socket ─────────────────────────────────────────────────────
@@ -431,23 +747,57 @@ export default function ActiveShiftPage() {
   }, [shiftActive, dwSessionId]);
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ── ROAD CAMERA: send frames to RSA and Road-Sign upload endpoints ──────
+  useEffect(() => {
+    if (!shiftActive) return;
+    let iv = null;
+    const sendFrame = async () => {
+      const v = videoRef2.current, c = captureRef2.current;
+      if (!v || !c || v.readyState < 2) return;
+      c.width = 640; c.height = 480;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+      const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.8));
+      if (!blob) return;
+      try {
+        const form = new FormData();
+        form.append("file", blob, "frame.jpg");
+        // Send to RSA analyse (scene analysis)
+        fetch(`${API}/rsa/analyse`, { method: "POST", body: form }).then(r=>r.json()).then(data=>{
+          if (data && !data.error) {
+            const mappedFrame = {
+              original: data.original,
+              overlay: data.overlay,
+              segments: data.segments || [],
+              hazard: data.hazard || null,
+            };
+            setRsResult({ scene_latest: mappedFrame, frames: [mappedFrame] });
+          }
+        }).catch(()=>{});
+        // Send to road-sign upload endpoint (if exists)
+        fetch(`${API}/upload`, { method: "POST", body: form }).then(r=>r.json()).then(data=>{
+          if (data && !data.error) {
+            setRsSignInfo(data.class_name ? data : null);
+            if (data.class_name && data.status === "Normal") {
+              setRsSignLog(prev => [ { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() }, ...prev.slice(0,19) ]);
+            }
+          }
+        }).catch(()=>{});
+      } catch (e) {}
+    };
+    iv = setInterval(sendFrame, 1500);
+    return () => clearInterval(iv);
+  }, [shiftActive]);
+
+  // ═══════════════════════════════════════════════════════════════════════
   // ── ROAD SIGN — Poll detection info when shift active ──────────────────
   useEffect(() => {
     if (!shiftActive) {
       if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
       return;
     }
-    // Generate fresh stream URL each time shift starts (demo video)
-    const rsQ = new URLSearchParams({
-      t: String(Date.now()),
-      driver_id: String(driverId || ""),
-      schedule_id: String(scheduleId || ""),
-    });
-    rsSignStreamSrc.current = `/video_feed_demo?${rsQ.toString()}`;
-    setRsSignStreamErr(false);
-
     rsSignPollRef.current = setInterval(() => {
-      fetch("/get_demo_detection_info")
+      fetch(`${API}/get_detection_info`)
         .then(r => r.json())
         .then(data => {
           const hasSign = data?.class_name;
@@ -467,9 +817,8 @@ export default function ActiveShiftPage() {
 
     return () => {
       clearInterval(rsSignPollRef.current);
-      fetch("/stop_demo_video").catch(() => {});
     };
-  }, [shiftActive, driverId, scheduleId]);
+  }, [shiftActive, API]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── HAZARD — Auto-analyze route on shift start ─────────────────────────
@@ -481,10 +830,22 @@ export default function ActiveShiftPage() {
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({start_location:startTown,end_location:endTown,step_m:5}),
       });
-      const data = await res.json();
-      if (!res.ok||data.error) { setHzError(data.error||"Hazard analysis failed."); return; }
+      let data = await res.json();
+      
+      // Fallback to demo route if real analysis fails
+      if (!res.ok||data.error) {
+        console.log("Real route analysis failed, using demo route...");
+        const demoRes = await fetch(`${API}/api/analyze-route-demo`);
+        data = await demoRes.json();
+        if (!demoRes.ok||data.error) { setHzError("Route analysis failed."); return; }
+      }
+      
       setHzAnalysis(data);
-    } catch { setHzError("Network error — backend not reachable."); }
+      // Start real GPS tracking from device
+      startRealGpsTracking();
+    } catch { 
+      setHzError("Network error — backend not reachable."); 
+    }
     finally { setHzLoading(false); }
   }
 
@@ -499,13 +860,40 @@ export default function ActiveShiftPage() {
     // Leaflet needs a size recalc after the container becomes visible
     setTimeout(() => map.invalidateSize(), 100);
     setTimeout(() => map.invalidateSize(), 500);
-    return () => { if(hzAnimRef.current) clearTimeout(hzAnimRef.current); };
+    return () => { if(hzAnimRef.current) clearInterval(hzAnimRef.current); };
+  }, [shiftActive, activePanel]);
+
+  // Initialize Live GPS Map (for All Panels view)
+  useEffect(() => {
+    if (!liveGpsMapRef.current || !shiftActive || activePanel !== "all") return;
+    if (liveGpsMapInstance.current) return; // Already initialized
+    
+    const map = L.map(liveGpsMapRef.current).setView([7.0, 80.0], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap"
+    }).addTo(map);
+    liveGpsMapInstance.current = map;
+    // Add vehicle marker (div icon)
+    liveGpsMarkerRef.current = L.marker([7.0, 80.0], {
+      icon: L.divIcon({
+        className: "as-vehicle-icon",
+        html: '<div class="as-bus-marker"><svg viewBox="0 0 24 24" width="22" height="22" fill="white"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18" stroke="#0b5fff" stroke-width="1" fill="none"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2" stroke="white" stroke-width="1" fill="none"/></svg></div>',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      })
+    }).addTo(map).bindPopup("Your Location");
+    
+    setTimeout(() => map.invalidateSize(), 100);
+    setTimeout(() => map.invalidateSize(), 500);
   }, [shiftActive, activePanel]);
 
   // Invalidate map size whenever the panel visibility changes
   useEffect(() => {
     if (hzMapInstance.current && shiftActive) {
       setTimeout(() => hzMapInstance.current.invalidateSize(), 150);
+    }
+    if (liveGpsMapInstance.current && shiftActive && activePanel === "all") {
+      setTimeout(() => liveGpsMapInstance.current.invalidateSize(), 150);
     }
   }, [shiftActive, activePanel]);
 
@@ -616,30 +1004,80 @@ export default function ActiveShiftPage() {
   // ═══════════════════════════════════════════════════════════════════════
   // ── Road Scene upload & analysis ───────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════
-  // ── Road Scene — auto-advance frames ───────────────────────────────────
-  useEffect(() => {
-    if (!rsResult?.frames?.length || !rsPlaying) {
-      clearInterval(rsPlayRef.current);
-      return;
-    }
-    rsPlayRef.current = setInterval(() => {
-      setRsActiveIdx(prev => {
-        const next = prev + 1;
-        return next >= rsResult.frames.length ? 0 : next;  // loop
-      });
-    }, 2000);
-    return () => clearInterval(rsPlayRef.current);
-  }, [rsResult, rsPlaying]);
+  // Real GPS Tracking - send live location updates from device
+  const gpsSimulatorRef = useRef(null);
+  const liveGpsMapRef = useRef(null);
+  const liveGpsMarkerRef = useRef(null);
 
-  // ── Road Scene — analyze demo video ────────────────────────────────────
-  async function analyzeRsVideo() {
-    setRsLoading(true); setRsResult(null);
-    try {
-      const res=await fetch(`${API}/rsa/analyse-demo`,{method:"POST"});
-      const data=await res.json();
-      if(!res.ok||data.error) return;
-      setRsResult(data);
-    } catch {} finally { setRsLoading(false); }
+  function startRealGpsTracking() {
+    // Stop any existing GPS listener
+    if (gpsSimulatorRef.current) {
+      if (gpsSimulatorRef.current.disconnect) {
+        gpsSimulatorRef.current.disconnect();
+      }
+      gpsSimulatorRef.current = null;
+    }
+    
+    // Connect to Socket.IO to receive live GPS updates from GPS2IP Lite (iPhone)
+    const gpsSocket = io(SOCKET_URL, { transports: ["polling", "websocket"] });
+    gpsSimulatorRef.current = gpsSocket;
+    
+    gpsSocket.on("connect", () => {
+      console.log("Connected to GPS2IP stream");
+    });
+    
+    gpsSocket.on("gps_update", (payload) => {
+      console.debug("gps_update raw", payload);
+      // payload may include _lat_raw/_lon_raw from backend for debugging
+      const normalizeGps = (p) => {
+        if (!p) return null;
+        let lat = Number(p.lat);
+        let lon = Number(p.lon);
+        if (Number.isNaN(lat) || Number.isNaN(lon)) {
+          // try raw fallbacks
+          if (p._lat_raw) lat = parseFloat(p._lat_raw) || lat;
+          if (p._lon_raw) lon = parseFloat(p._lon_raw) || lon;
+        }
+        // If values still not numbers, give up
+        if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+
+        // Detect swapped lat/lon: lat must be within [-90,90], lon within [-180,180]
+        const absLat = Math.abs(lat), absLon = Math.abs(lon);
+        if (absLat > 90 && absLon <= 90) {
+          // likely swapped
+          const tmp = lat; lat = lon; lon = tmp;
+        } else if (absLon > 180 && absLat <= 180 && absLat <= 90) {
+          // lon invalid but lat looks like lon; try swap
+          const tmp = lat; lat = lon; lon = tmp;
+        }
+
+        // Final sanity check
+        if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+        return { lat, lon };
+      };
+
+      const np = normalizeGps(payload);
+      console.debug("gps_update normalized", np);
+      if (!np) {
+        console.warn("Invalid gps_update payload, ignoring:", payload);
+        return;
+      }
+
+      // Update vehicle marker position on hazard map in real-time
+      if (hzMarkerRef.current) {
+        hzMarkerRef.current.setLatLng([np.lat, np.lon]);
+      }
+      // Update live GPS map marker (for All Panels view)
+      if (liveGpsMarkerRef.current && liveGpsMapInstance.current) {
+        liveGpsMarkerRef.current.setLatLng([np.lat, np.lon]);
+        // Center map on vehicle
+        liveGpsMapInstance.current.setView([np.lat, np.lon], 16);
+      }
+    });
+    
+    gpsSocket.on("error", (err) => {
+      console.error("GPS stream error:", err);
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -662,16 +1100,26 @@ export default function ActiveShiftPage() {
       });
     } catch {}
     setShiftActive(true);
+    setActivePanel("hazard");
     setShiftStart(Date.now());
     setEmFrames(0); setDwFrames(0); setDwAlerts(0); setDwDrowsyFrames(0);
     bviSumRef.current = 0; bviCountRef.current = 0; cheatCountRef.current = 0;
     setShiftScore(null);
-    // Auto-start hazard analysis + road scene demo analysis
+    // Auto-start hazard analysis; road-scene frames come from the live road camera
     analyzeRoute();
-    analyzeRsVideo();
+    // Start real GPS tracking from device
+    startRealGpsTracking();
   }
 
   async function handleEndShift() {
+    // Stop GPS tracking
+    if (gpsSimulatorRef.current) {
+      if (gpsSimulatorRef.current.disconnect) {
+        gpsSimulatorRef.current.disconnect();
+      }
+      gpsSimulatorRef.current = null;
+    }
+    
     // Compute & send score before navigating away
     const durationSec = shiftStart ? Math.round((Date.now() - shiftStart) / 1000) : 0;
     const avgBvi = bviCountRef.current > 0 ? bviSumRef.current / bviCountRef.current : null;
@@ -717,7 +1165,6 @@ export default function ActiveShiftPage() {
       await fetch(`${API}/api/driver/shift/stop`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     } catch {}
     // Stop demo video
-    fetch("/stop_demo_video").catch(() => {});
     setShiftActive(false); setShiftStart(null);
     setEmResult(null); setDwResult(null);
     setRsSignInfo(null); setRsSignLog([]);
@@ -746,7 +1193,15 @@ export default function ActiveShiftPage() {
   const dwStreak   = dwResult?.consecutive_frames??0;
 
   const rsFrame = rsResult?.frames?.[rsActiveIdx];
-  const rsHazardLevel = rsFrame?.hazard?.level;
+  const liveSceneFrame = rsResult?.scene_latest
+    ? {
+        overlay: rsResult.scene_latest.overlay || rsResult.scene_latest.original,
+        hazard: rsResult.scene_latest.hazard || { level: rsResult.scene_latest.hazard_level, score: rsResult.scene_latest.hazard_score },
+        segments: rsResult.scene_latest.segments || [],
+      }
+    : null;
+  const activeSceneFrame = rsFrame || liveSceneFrame;
+  const rsHazardLevel = activeSceneFrame?.hazard?.level;
 
   const pd = hzAnalysis?.path_data;
   const hzProgress = pd?.length>1 ? (hzIdx/(pd.length-1))*100 : 0;
@@ -774,7 +1229,27 @@ export default function ActiveShiftPage() {
               <span className="as-status-dot"/>
               {shiftActive?"SHIFT ACTIVE":"READY"}
             </div>
-            <div className="as-avatar">{(user.username||"D")[0].toUpperCase()}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div className="as-avatar">{(user.username||"D")[0].toUpperCase()}</div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}} className="as-cam-selects">
+                  <label style={{fontSize:12,color:'#94a3b8'}}>Driver</label>
+                  <select value={driverDeviceId||""} onChange={e=>setDriverDeviceId(e.target.value)} style={{background:'#071025',color:'#e2e8f0',border:'1px solid #243447',padding:'4px',borderRadius:6}}>
+                    <option value="">Default</option>
+                    {devices.map((d,i)=>(<option key={d.deviceId} value={d.deviceId}>{d.label||`Camera ${i+1}`}</option>))}
+                  </select>
+                  <label style={{fontSize:12,color:'#94a3b8'}}>Road</label>
+                  <select value={roadDeviceId||""} onChange={e=>setRoadDeviceId(e.target.value)} style={{background:'#071025',color:'#e2e8f0',border:'1px solid #243447',padding:'4px',borderRadius:6}}>
+                    <option value="">None</option>
+                    {devices.map((d,i)=>(<option key={d.deviceId} value={d.deviceId}>{d.label||`Camera ${i+1}`}</option>))}
+                  </select>
+                  <button onClick={handleEnableCamera} style={{background:'#0b5fff',color:'white',border:'none',padding:'4px 12px',borderRadius:6,fontSize:12,cursor:'pointer',fontWeight:600}}>🎥 Enable</button>
+                </div>
+              </div>
+            </div>
+            <div style={{marginLeft:12}}>
+              <div ref={gpsMapRef} style={{width:160,height:96,borderRadius:8,overflow:'hidden',border:'1px solid #243447'}} />
+            </div>
           </div>
         </header>
 
@@ -827,37 +1302,199 @@ export default function ActiveShiftPage() {
           </div>
         )}
 
+        {/* Four live analyzer camera feeds */}
+        {shiftActive && activePanel !== "hazard" && (
+          <div className="as-camera-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"0.75rem",padding:"0 1.25rem 1rem"}}>
+            {/* Emotion Camera Feed */}
+            <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
+              <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
+                <span className="as-panel-title" style={{fontSize:"0.9rem"}}>😊 Emotion</span>
+                <span className={`as-badge ${emConnected?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
+                  {emConnected ? "Live" : "Waiting"}
+                </span>
+              </div>
+              {camError && <div className="as-cam-error">{camError}</div>}
+              <div className="as-cam-wrap">
+                <video ref={videoRefEmotionDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
+              </div>
+              {/* Full Emotion analysis panel (duplicated) */}
+              <div className="as-em-body" style={{marginTop:"0.5rem"}}>
+                <div className="as-em-gauge-row" style={{alignItems:"flex-start"}}>
+                  <MiniGauge value={bviScore} label={bvi?.state||"Waiting"} color={bviColor(bviScore)} size={70}/>
+                  <div className="as-em-metrics" style={{marginLeft:12}}>
+                    <div className="as-metric-row"><span>BVI</span><span style={{color:bviColor(bviScore)}}>{bviScore?.toFixed(3)??"—"}</span></div>
+                    <div className="as-metric-row"><span>Transition</span><span>{bvi?.transition_rate?.toFixed(3)??"—"}</span></div>
+                    <div className="as-metric-row"><span>Entropy</span><span>{bvi?.entropy?.toFixed(3)??"—"}</span></div>
+                  </div>
+                </div>
+
+                {Object.keys(probs).length>0 ? (
+                  <div className="as-probs" style={{marginTop:8}}>
+                    {Object.entries(probs).sort(([,a],[,b])=>b-a).map(([lbl,val])=>(
+                      <ProbBar key={lbl} label={lbl.charAt(0).toUpperCase()+lbl.slice(1)} value={val}
+                        color={EMOTION_COLOR[lbl.toLowerCase()]||"#64748b"}/>
+                    ))}
+                  </div>
+                ) : <p className="as-no-data">Waiting for predictions…</p>}
+              </div>
+            </div>
+
+            {/* Drowsiness Camera Feed */}
+            <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
+              <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
+                <span className="as-panel-title" style={{fontSize:"0.9rem"}}>😴 Drowsiness</span>
+                <span className={`as-badge ${dwConnected?"blue":"gray"}`} style={{fontSize:"0.75rem"}}>
+                  {dwConnected ? "Live" : "Waiting"}
+                </span>
+              </div>
+              {camError && <div className="as-cam-error">{camError}</div>}
+              <div className="as-cam-wrap">
+                <video ref={videoRefDrowsinessDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
+              </div>
+              {/* Full Drowsiness analysis panel (duplicated) */}
+              <div className="as-dw-body" style={{marginTop:"0.5rem"}}>
+                <div className="as-dw-gauge-row">
+                  <MiniGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)} size={70}/>
+                  <div className="as-dw-right" style={{marginLeft:12}}>
+                    <div className="as-dw-streak-label">Alert Streak</div>
+                    <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
+                  </div>
+                </div>
+
+                <div className="as-probs" style={{marginTop:8}}>
+                  <ModelBar name="LSTM" weight="0.60" prob={dwModels.lstm} color={confColor(dwModels.lstm)}/>
+                  <ModelBar name="RGB CNN" weight="0.25" prob={dwModels.rgb} color={confColor(dwModels.rgb)}/>
+                  <ModelBar name="IR CNN" weight="0.15" prob={dwModels.ir} color={confColor(dwModels.ir)}/>
+                </div>
+
+                <div className="as-feat-row" style={{marginTop:8}}>
+                  <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
+                  <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>
+                  <FeatChip label="Pitch" value={dwFeatures.pitch?.toFixed(1)} unit="°" warn={Math.abs(dwFeatures.pitch||0)>25}/>
+                </div>
+              </div>
+            </div>
+
+            {/* Road Sign Camera Feed */}
+            <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
+              <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
+                <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🚦 Road Sign</span>
+                <span className={`as-badge ${rsSignInfo?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
+                  {rsSignInfo ? "Detected" : "Scanning"}
+                </span>
+              </div>
+              {cam2Error && <div className="as-cam-error">{cam2Error}</div>}
+              <div className="as-cam-wrap">
+                <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
+              </div>
+              {/* Full Road Sign analysis panel (duplicated) */}
+              <div className="as-rsign-body" style={{marginTop:"0.5rem"}}>
+                <div className="as-rsign-stream-wrap">
+                  <div className="as-rsign-no-stream">
+                    <p>Live road feed is shown above</p>
+                    <p style={{fontSize:"0.7rem",color:"#475569"}}>Road sign detection uses the road camera feed in the top row</p>
+                  </div>
+                </div>
+
+                {rsSignInfo ? (() => {
+                  const instr = getSignInstruction(rsSignInfo.class_name);
+                  const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                  return (
+                    <div className="as-rsign-detection" style={pc ? {background:pc.bg, borderColor:pc.border} : {}}>
+                      <div className="as-rsign-det-head">
+                        <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
+                        <div>
+                          <div className="as-rsign-det-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                          <div className="as-rsign-det-conf">{(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}</div>
+                        </div>
+                        {instr && (
+                          <span className="as-rsign-priority" style={{background:pc?.badge}}>
+                            {instr.priorityLabel}
+                          </span>
+                        )}
+                      </div>
+                      {instr?.instructions && (
+                        <ul className="as-rsign-instructions">
+                          {instr.instructions.map((ins,i) => <li key={i}>{ins}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })() : (
+                  <div className="as-rsign-no-detect">
+                    <span style={{fontSize:"1.5rem"}}>👁</span>
+                    <p>Scanning for road signs…</p>
+                  </div>
+                )}
+
+                {rsSignLog.length > 0 && (
+                  <div className="as-rsign-log">
+                    <div className="as-rsign-log-title">Recent Detections</div>
+                    {rsSignLog.slice(0,5).map((entry,i) => (
+                      <div key={i} className="as-rsign-log-row">
+                        <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
+                        <span className="as-rsign-log-conf">{(entry.confidence*100).toFixed(0)}%</span>
+                        <span className="as-rsign-log-time">{entry.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Road Scene Camera Feed */}
+            <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
+              <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
+                <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🛣 Road Scene</span>
+                <span className={`as-badge ${rsResult?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
+                  {rsResult ? "Analyzing" : "Waiting"}
+                </span>
+              </div>
+              {cam2Error && <div className="as-cam-error">{cam2Error}</div>}
+              <div className="as-cam-wrap">
+                <video ref={videoRefRoadSceneDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
+              </div>
+              {/* Full Road Scene analysis panel (duplicated) */}
+              <div className="as-rs-body" style={{marginTop:"0.5rem"}}>
+                {!rsResult && !rsLoading && (
+                  <div className="as-rs-upload">
+                    <p style={{color:"#94a3b8",textAlign:"center"}}>Road-scene analysis will follow the live road camera during the shift.</p>
+                  </div>
+                )}
+
+                {activeSceneFrame && (
+                  <div className="as-rs-results as-rs-live">
+                    <div className="as-rs-live-img-wrap">
+                      <img src={activeSceneFrame.overlay} alt="Scene analysis" className="as-rs-overlay"/>
+                      <div className="as-rs-live-badge"><span className="as-rs-live-dot"/>Live road camera</div>
+                      <div className="as-rs-live-hazard" style={{color:hazardColor(activeSceneFrame.hazard?.level), borderColor:hazardColor(activeSceneFrame.hazard?.level)}}>
+                        {activeSceneFrame.hazard?.score?.toFixed(1)} — {activeSceneFrame.hazard?.level}
+                      </div>
+                    </div>
+                    <div className="as-rs-segs">
+                      {activeSceneFrame.segments?.slice(0,6).map(seg => (
+                        <div key={seg.id} className="as-rs-seg-row">
+                          <span className="as-rs-seg-dot" style={{background:seg.color}}/>
+                          <span className="as-rs-seg-label">{seg.label}</span>
+                          <span className="as-rs-seg-pct">{seg.pixel_pct?.toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {rsLoading && <div className="as-rs-loading"><div className="dd-spinner"/><p>Analyzing video frames…</p></div>}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Hidden canvas always mounted for frame capture */}
         <canvas ref={captureRef} style={{display:"none"}}/>
 
         {/* ═══════════════════ PANELS ═══════════════════════════ */}
-        {shiftActive && (
+        {shiftActive && !showOnlyFeeds && (
           <div className={`as-panels ${activePanel==="all"?"grid":"single"}`}>
-
-            {/* ── WEBCAM FEED (shared) ─────────────────────────── */}
-            {(activePanel==="all"||activePanel==="emotion"||activePanel==="drowsiness") && (
-              <div className={`as-panel as-cam-panel ${activePanel!=="all"?"wide":""}`}>
-                <div className="as-panel-head">
-                  <span className="as-panel-title">📹 Camera Feed</span>
-                  <div className="as-panel-badges">
-                    {emConnected && <span className="as-badge green">Emotion</span>}
-                    {dwConnected && <span className="as-badge blue">Drowsiness</span>}
-                  </div>
-                </div>
-                {camError && <div className="as-cam-error">{camError}</div>}
-                <div className="as-cam-wrap">
-                  <video ref={videoRef} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)"}}/>
-                </div>
-
-                {/* Quick alert banners */}
-                {cheating && (
-                  <div className="as-alert-strip red"><IcoAlert/> DISTRACTION: {emResult?.objects?.labels?.join(", ")}</div>
-                )}
-                {dwResult?.alert && (
-                  <div className="as-alert-strip red"><IcoAlert/> DROWSINESS ALERT — Pull over safely!</div>
-                )}
-              </div>
-            )}
 
             {/* ── EMOTION PANEL ─────────────────────────────────── */}
             {(activePanel==="all"||activePanel==="emotion") && (
@@ -950,21 +1587,11 @@ export default function ActiveShiftPage() {
                 </div>
 
                 <div className="as-rsign-body">
-                  {/* MJPEG webcam stream */}
                   <div className="as-rsign-stream-wrap">
-                    {!rsSignStreamErr ? (
-                      <img
-                        src={rsSignStreamSrc.current}
-                        alt="Road sign live feed"
-                        className="as-rsign-stream"
-                        onError={() => setRsSignStreamErr(true)}
-                      />
-                    ) : (
-                      <div className="as-rsign-no-stream">
-                        <p>📷 Camera stream unavailable</p>
-                        <p style={{fontSize:"0.7rem",color:"#475569"}}>Make sure the backend is running</p>
-                      </div>
-                    )}
+                    <div className="as-rsign-no-stream">
+                      <p>Live road feed is shown above</p>
+                      <p style={{fontSize:"0.7rem",color:"#475569"}}>Road sign detection uses the road camera feed in the top row</p>
+                    </div>
                   </div>
 
                   {/* Detection info */}
@@ -1023,7 +1650,7 @@ export default function ActiveShiftPage() {
               <div className={`as-panel as-rs-panel ${activePanel!=="all"?"wide":""}`}>
                 <div className="as-panel-head">
                   <span className="as-panel-title">🛣 Road Scene Analysis</span>
-                  {rsFrame && (
+                  {activeSceneFrame && (
                     <span className="as-badge" style={{color:hazardColor(rsHazardLevel),borderColor:hazardColor(rsHazardLevel)}}>
                       Hazard: {rsHazardLevel}
                     </span>
@@ -1031,45 +1658,37 @@ export default function ActiveShiftPage() {
                 </div>
 
                 <div className="as-rs-body">
-                  {/* Auto-analyzing demo video */}
+                  {/* Live analysis from the road-facing camera */}
                   {!rsResult && !rsLoading && (
                     <div className="as-rs-upload">
-                      <p style={{color:"#94a3b8",textAlign:"center"}}>Demo video analysis will start automatically when shift begins.</p>
-                      <button className="as-rs-analyze-btn" onClick={analyzeRsVideo}>Analyze Demo Video</button>
+                      <p style={{color:"#94a3b8",textAlign:"center"}}>Road-scene analysis will follow the live road camera during the shift.</p>
                     </div>
                   )}
 
-                  {/* Results — auto-advancing frame-by-frame */}
-                  {rsResult && rsFrame && (
+                  {/* Results — live road-camera frame */}
+                  {activeSceneFrame && (
                     <div className="as-rs-results as-rs-live">
                       {/* Large overlay image */}
                       <div className="as-rs-live-img-wrap">
-                        <img src={rsFrame.overlay} alt="Scene analysis" className="as-rs-overlay"/>
+                        <img src={activeSceneFrame.overlay} alt="Scene analysis" className="as-rs-overlay"/>
                         <div className="as-rs-live-badge">
                           <span className="as-rs-live-dot"/>
-                          Frame {rsActiveIdx+1} / {rsResult.frames.length}
+                          Live road camera
                         </div>
-                        <div className="as-rs-live-hazard" style={{color:hazardColor(rsFrame.hazard?.level), borderColor:hazardColor(rsFrame.hazard?.level)}}>
-                          {rsFrame.hazard?.score?.toFixed(1)} — {rsFrame.hazard?.level}
+                        <div className="as-rs-live-hazard" style={{color:hazardColor(activeSceneFrame.hazard?.level), borderColor:hazardColor(activeSceneFrame.hazard?.level)}}>
+                          {activeSceneFrame.hazard?.score?.toFixed(1)} — {activeSceneFrame.hazard?.level}
                         </div>
                       </div>
 
                       {/* Segment breakdown bar */}
                       <div className="as-rs-segs">
-                        {rsFrame.segments?.slice(0,6).map(seg=>(
+                        {activeSceneFrame.segments?.slice(0,6).map(seg => (
                           <div key={seg.id} className="as-rs-seg-row">
                             <span className="as-rs-seg-dot" style={{background:seg.color}}/>
                             <span className="as-rs-seg-label">{seg.label}</span>
                             <span className="as-rs-seg-pct">{seg.pixel_pct?.toFixed(1)}%</span>
                           </div>
                         ))}
-                      </div>
-
-                      {/* Playback controls */}
-                      <div className="as-rs-frame-nav">
-                        <button onClick={()=>{setRsPlaying(false);setRsActiveIdx(i=>Math.max(0,i-1));}}>◀</button>
-                        <button onClick={()=>setRsPlaying(p=>!p)}>{rsPlaying ? "⏸ Pause" : "▶ Play"}</button>
-                        <button onClick={()=>{setRsPlaying(false);setRsActiveIdx(i=>Math.min(rsResult.frames.length-1,i+1));}}>▶</button>
                       </div>
                     </div>
                   )}
@@ -1120,6 +1739,16 @@ export default function ActiveShiftPage() {
                   {/* Dashboard cards */}
                   <HazardDashPanel currentPoint={hzPoint} nextPoints={pd?.slice(hzIdx)} isFinished={hzFinished} totalDistance={pd?.length ? pd[pd.length-1].distance : 0}/>
                 </div>
+              </div>
+            )}
+
+            {/* ── LIVE GPS TRACKING (All Panels Only) ──────────────── */}
+            {activePanel==="all" && (
+              <div className="as-panel as-gps-panel">
+                <div className="as-panel-head">
+                  <span className="as-panel-title">📍 Live GPS Tracking</span>
+                </div>
+                <div ref={liveGpsMapRef} className="as-live-gps-map"/>
               </div>
             )}
 
@@ -1276,6 +1905,12 @@ export default function ActiveShiftPage() {
           </div>
         </div>
       )}
+
+      {/* Hidden capture elements for camera processing */}
+      <video ref={videoRef} autoPlay muted playsInline style={{display:'none'}} />
+      <canvas ref={captureRef} style={{display:'none'}} />
+      <video ref={videoRef2} autoPlay muted playsInline style={{display:'none'}} />
+      <canvas ref={captureRef2} style={{display:'none'}} />
 
       <style>{`
         .as-vehicle-icon {
