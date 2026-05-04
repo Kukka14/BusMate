@@ -55,6 +55,63 @@ register_user_management(app)
 # Register GPS routes
 app.register_blueprint(gps_bp)
 
+
+# ── Auto-seed the hard-coded admin account ───────────────────────────────────
+def _seed_admin():
+    """
+    Runs at every startup.
+    • If no admin with ADMIN_EMAIL exists  → creates it.
+    • If the account already exists        → syncs the password + username
+      from .env so credentials always match what is configured.
+    Admin accounts CANNOT be created through any API endpoint.
+    """
+    try:
+        from user_management.database import get_db
+        from user_management.models.user import User
+        from user_management.utils.password import hash_password
+        from datetime import datetime
+
+        admin_email    = os.getenv("ADMIN_EMAIL",    "admin@busmate.com")
+        admin_username = os.getenv("ADMIN_USERNAME", "BusMate Admin")
+        admin_password = os.getenv("ADMIN_PASSWORD", "BusMate@Admin2025")
+        admin_company  = os.getenv("ADMIN_COMPANY",  "BusMate Fleet")
+
+        db        = get_db()
+        pw_hash   = hash_password(admin_password)
+        existing  = db.users.find_one({"email": admin_email})
+
+        if existing:
+            # Sync credentials from .env on every restart
+            db.users.update_one(
+                {"email": admin_email},
+                {"$set": {
+                    "username":      admin_username,
+                    "password_hash": pw_hash,
+                    "role":          "admin",
+                    "company":       admin_company,
+                    "is_active":     True,
+                    "updated_at":    datetime.utcnow(),
+                }},
+            )
+            print(f"[seed] ✓ Admin credentials synced → {admin_email}")
+        else:
+            doc = User.new_doc(
+                username=admin_username,
+                email=admin_email,
+                password_hash=pw_hash,
+                role="admin",
+                company=admin_company,
+            )
+            db.users.insert_one(doc)
+            print(f"[seed] ✓ Admin account created  → {admin_email}")
+
+    except Exception as exc:
+        print(f"[seed] WARNING: could not seed admin account: {exc}")
+
+
+_seed_admin()
+
+
 # Drowsiness detection engine (loaded once at startup)
 _dw_engine = DrowsinessEngine()
 
