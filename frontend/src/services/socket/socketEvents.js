@@ -1,9 +1,9 @@
 export const EVENTS = {
   // Client → Server
-  SEND_FRAME: "video_frame",
+  SEND_FRAME: "frame",
 
   // Server → Client
-  RESULT: "detection_result",
+  RESULT: "prediction",
   ERROR: "error",
   CONNECT: "connect",
   DISCONNECT: "disconnect",
