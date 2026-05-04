@@ -36,12 +36,49 @@ def start_tcp_nmea_client(host: str, port: int, reconnect_delay: float = 5.0):
                                 import pynmea2
                                 msg = pynmea2.parse(s)
                                 if hasattr(msg, "latitude") and hasattr(msg, "longitude"):
+                                    # Normalize coordinates to decimal degrees (numeric)
+                                    def _to_decimal(val, dir_char=None):
+                                        try:
+                                            # If already a float/int-like, return float
+                                            return float(val)
+                                        except Exception:
+                                            pass
+                                        try:
+                                            sval = str(val).strip()
+                                            if not sval:
+                                                return None
+                                            # Determine degree length: lat typically 2, lon typically 3
+                                            whole = sval.split('.')[0]
+                                            deg_len = 2 if len(whole) <= 4 else 3
+                                            deg = int(sval[:deg_len])
+                                            mins = float(sval[deg_len:])
+                                            dec = deg + mins/60.0
+                                            if dir_char and str(dir_char).upper() in ("S","W"):
+                                                dec = -abs(dec)
+                                            return dec
+                                        except Exception:
+                                            return None
+
+                                    lat_raw = getattr(msg, "latitude", None)
+                                    lon_raw = getattr(msg, "longitude", None)
+                                    lat_dir = getattr(msg, "lat_dir", None) or getattr(msg, "latitude_direction", None)
+                                    lon_dir = getattr(msg, "lon_dir", None) or getattr(msg, "longitude_direction", None)
+                                    lat = _to_decimal(lat_raw, lat_dir)
+                                    lon = _to_decimal(lon_raw, lon_dir)
                                     payload = {
-                                        "lat": getattr(msg, "latitude", None),
-                                        "lon": getattr(msg, "longitude", None),
+                                        "lat": lat,
+                                        "lon": lon,
                                         "raw": s,
+                                        "_lat_raw": lat_raw,
+                                        "_lon_raw": lon_raw,
+                                        "_lat_dir": lat_dir,
+                                        "_lon_dir": lon_dir,
                                     }
-                                    socketio.emit("gps_update", payload, broadcast=True)
+                                    try:
+                                        socketio.emit("gps_update", payload, broadcast=True)
+                                    except Exception:
+                                        # fallback: emit raw if emit fails
+                                        socketio.emit("gps_raw", {"raw": s}, broadcast=True)
                             except Exception:
                                 # If parsing fails, forward raw NMEA line
                                 socketio.emit("gps_raw", {"raw": s}, broadcast=True)
@@ -72,7 +109,33 @@ def start_udp_nmea_listener(host: str = "0.0.0.0", port: int = 5001):
                 import pynmea2
                 msg = pynmea2.parse(s)
                 if hasattr(msg, "latitude") and hasattr(msg, "longitude"):
-                    payload = {"lat": getattr(msg, "latitude", None), "lon": getattr(msg, "longitude", None), "raw": s}
+                    def _to_decimal(val, dir_char=None):
+                        try:
+                            return float(val)
+                        except Exception:
+                            pass
+                        try:
+                            sval = str(val).strip()
+                            if not sval:
+                                return None
+                            whole = sval.split('.')[0]
+                            deg_len = 2 if len(whole) <= 4 else 3
+                            deg = int(sval[:deg_len])
+                            mins = float(sval[deg_len:])
+                            dec = deg + mins/60.0
+                            if dir_char and str(dir_char).upper() in ("S","W"):
+                                dec = -abs(dec)
+                            return dec
+                        except Exception:
+                            return None
+
+                    lat_raw = getattr(msg, "latitude", None)
+                    lon_raw = getattr(msg, "longitude", None)
+                    lat_dir = getattr(msg, "lat_dir", None) or getattr(msg, "latitude_direction", None)
+                    lon_dir = getattr(msg, "lon_dir", None) or getattr(msg, "longitude_direction", None)
+                    lat = _to_decimal(lat_raw, lat_dir)
+                    lon = _to_decimal(lon_raw, lon_dir)
+                    payload = {"lat": lat, "lon": lon, "raw": s, "_lat_raw": lat_raw, "_lon_raw": lon_raw, "_lat_dir": lat_dir, "_lon_dir": lon_dir}
                     socketio.emit("gps_update", payload, broadcast=True)
                 else:
                     socketio.emit("gps_raw", {"raw": s}, broadcast=True)

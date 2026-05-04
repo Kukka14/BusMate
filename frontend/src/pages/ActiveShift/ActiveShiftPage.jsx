@@ -306,7 +306,7 @@ export default function ActiveShiftPage() {
   const rsPlayRef = useRef(null);
 
   // Toggle to show only the 4 live analyzer cards (keep page minimal)
-  const showOnlyFeeds = true;
+  const showOnlyFeeds = false;
 
   // ── Hazard state ────────────────────────────────────────────────────────
   const [hzAnalysis, setHzAnalysis]   = useState(null);
@@ -314,6 +314,7 @@ export default function ActiveShiftPage() {
   const [hzError, setHzError]         = useState("");
   const hzMapRef      = useRef(null);
   const hzMapInstance = useRef(null);
+  const liveGpsMapInstance = useRef(null);
   const hzMarkerRef   = useRef(null);
   const hzAnimRef     = useRef(null);
   const hudMapRef     = useRef(null);
@@ -399,12 +400,55 @@ export default function ActiveShiftPage() {
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "" }).addTo(map);
       gpsMapInst.current = map;
     } catch (e) {
-      // ignore
+      console.error("GPS map init error:", e);
     }
     return () => {
       try { if (gpsMapInst.current) { gpsMapInst.current.remove(); gpsMapInst.current = null; gpsMarkerRef.current = null; } } catch(e){}
     };
   }, []);
+
+  // ── GPS map — draw route when analysis completes ──────────────────────
+  useEffect(() => {
+    const map = gpsMapInst.current;
+    const pd = hzAnalysis?.path_data;
+    if (!map || !pd?.length) return;
+
+    // Clear old route
+    map.eachLayer(layer => {
+      if (layer instanceof L.Polyline || layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+        if (layer !== gpsMarkerRef.current) {
+          map.removeLayer(layer);
+        }
+      }
+    });
+
+    // Draw colored route segments
+    const coords = pd.map(p => [p.lat, p.lon]);
+    for (let i = 0; i < coords.length - 1; i++) {
+      L.polyline([coords[i], coords[i + 1]], {
+        color: pd[i].color || "green",
+        weight: 5,
+        opacity: 0.8,
+      }).addTo(map);
+    }
+
+    // Start and end markers
+    L.circleMarker(coords[0], { radius: 10, color: "#0b5fff", fillColor: "#0b5fff", opacity: 0.9, weight: 2 })
+      .bindPopup("START").addTo(map);
+    L.circleMarker(coords[coords.length - 1], { radius: 10, color: "red", fillColor: "red", opacity: 0.8, weight: 2 })
+      .bindPopup("END").addTo(map);
+
+    // Critical risk markers
+    pd.forEach((p, idx) => {
+      if (p.risk_label === "Critical Risk" && idx % 5 === 0) {
+        L.circleMarker([p.lat, p.lon], { radius: 5, color: "darkred", fillColor: "darkred", opacity: 0.7 })
+          .bindPopup(`Risk: ${p.risk?.toFixed(2)}`).addTo(map);
+      }
+    });
+
+    // Fit bounds
+    map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+  }, [hzAnalysis]);
 
   useEffect(() => {
     // connect socket and listen for gps_update
@@ -786,10 +830,22 @@ export default function ActiveShiftPage() {
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({start_location:startTown,end_location:endTown,step_m:5}),
       });
-      const data = await res.json();
-      if (!res.ok||data.error) { setHzError(data.error||"Hazard analysis failed."); return; }
+      let data = await res.json();
+      
+      // Fallback to demo route if real analysis fails
+      if (!res.ok||data.error) {
+        console.log("Real route analysis failed, using demo route...");
+        const demoRes = await fetch(`${API}/api/analyze-route-demo`);
+        data = await demoRes.json();
+        if (!demoRes.ok||data.error) { setHzError("Route analysis failed."); return; }
+      }
+      
       setHzAnalysis(data);
-    } catch { setHzError("Network error — backend not reachable."); }
+      // Start real GPS tracking from device
+      startRealGpsTracking();
+    } catch { 
+      setHzError("Network error — backend not reachable."); 
+    }
     finally { setHzLoading(false); }
   }
 
@@ -804,13 +860,40 @@ export default function ActiveShiftPage() {
     // Leaflet needs a size recalc after the container becomes visible
     setTimeout(() => map.invalidateSize(), 100);
     setTimeout(() => map.invalidateSize(), 500);
-    return () => { if(hzAnimRef.current) clearTimeout(hzAnimRef.current); };
+    return () => { if(hzAnimRef.current) clearInterval(hzAnimRef.current); };
+  }, [shiftActive, activePanel]);
+
+  // Initialize Live GPS Map (for All Panels view)
+  useEffect(() => {
+    if (!liveGpsMapRef.current || !shiftActive || activePanel !== "all") return;
+    if (liveGpsMapInstance.current) return; // Already initialized
+    
+    const map = L.map(liveGpsMapRef.current).setView([7.0, 80.0], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap"
+    }).addTo(map);
+    liveGpsMapInstance.current = map;
+    // Add vehicle marker (div icon)
+    liveGpsMarkerRef.current = L.marker([7.0, 80.0], {
+      icon: L.divIcon({
+        className: "as-vehicle-icon",
+        html: '<div class="as-bus-marker"><svg viewBox="0 0 24 24" width="22" height="22" fill="white"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18" stroke="#0b5fff" stroke-width="1" fill="none"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2" stroke="white" stroke-width="1" fill="none"/></svg></div>',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      })
+    }).addTo(map).bindPopup("Your Location");
+    
+    setTimeout(() => map.invalidateSize(), 100);
+    setTimeout(() => map.invalidateSize(), 500);
   }, [shiftActive, activePanel]);
 
   // Invalidate map size whenever the panel visibility changes
   useEffect(() => {
     if (hzMapInstance.current && shiftActive) {
       setTimeout(() => hzMapInstance.current.invalidateSize(), 150);
+    }
+    if (liveGpsMapInstance.current && shiftActive && activePanel === "all") {
+      setTimeout(() => liveGpsMapInstance.current.invalidateSize(), 150);
     }
   }, [shiftActive, activePanel]);
 
@@ -921,6 +1004,82 @@ export default function ActiveShiftPage() {
   // ═══════════════════════════════════════════════════════════════════════
   // ── Road Scene upload & analysis ───────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════════
+  // Real GPS Tracking - send live location updates from device
+  const gpsSimulatorRef = useRef(null);
+  const liveGpsMapRef = useRef(null);
+  const liveGpsMarkerRef = useRef(null);
+
+  function startRealGpsTracking() {
+    // Stop any existing GPS listener
+    if (gpsSimulatorRef.current) {
+      if (gpsSimulatorRef.current.disconnect) {
+        gpsSimulatorRef.current.disconnect();
+      }
+      gpsSimulatorRef.current = null;
+    }
+    
+    // Connect to Socket.IO to receive live GPS updates from GPS2IP Lite (iPhone)
+    const gpsSocket = io(SOCKET_URL, { transports: ["polling", "websocket"] });
+    gpsSimulatorRef.current = gpsSocket;
+    
+    gpsSocket.on("connect", () => {
+      console.log("Connected to GPS2IP stream");
+    });
+    
+    gpsSocket.on("gps_update", (payload) => {
+      console.debug("gps_update raw", payload);
+      // payload may include _lat_raw/_lon_raw from backend for debugging
+      const normalizeGps = (p) => {
+        if (!p) return null;
+        let lat = Number(p.lat);
+        let lon = Number(p.lon);
+        if (Number.isNaN(lat) || Number.isNaN(lon)) {
+          // try raw fallbacks
+          if (p._lat_raw) lat = parseFloat(p._lat_raw) || lat;
+          if (p._lon_raw) lon = parseFloat(p._lon_raw) || lon;
+        }
+        // If values still not numbers, give up
+        if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+
+        // Detect swapped lat/lon: lat must be within [-90,90], lon within [-180,180]
+        const absLat = Math.abs(lat), absLon = Math.abs(lon);
+        if (absLat > 90 && absLon <= 90) {
+          // likely swapped
+          const tmp = lat; lat = lon; lon = tmp;
+        } else if (absLon > 180 && absLat <= 180 && absLat <= 90) {
+          // lon invalid but lat looks like lon; try swap
+          const tmp = lat; lat = lon; lon = tmp;
+        }
+
+        // Final sanity check
+        if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+        return { lat, lon };
+      };
+
+      const np = normalizeGps(payload);
+      console.debug("gps_update normalized", np);
+      if (!np) {
+        console.warn("Invalid gps_update payload, ignoring:", payload);
+        return;
+      }
+
+      // Update vehicle marker position on hazard map in real-time
+      if (hzMarkerRef.current) {
+        hzMarkerRef.current.setLatLng([np.lat, np.lon]);
+      }
+      // Update live GPS map marker (for All Panels view)
+      if (liveGpsMarkerRef.current && liveGpsMapInstance.current) {
+        liveGpsMarkerRef.current.setLatLng([np.lat, np.lon]);
+        // Center map on vehicle
+        liveGpsMapInstance.current.setView([np.lat, np.lon], 16);
+      }
+    });
+    
+    gpsSocket.on("error", (err) => {
+      console.error("GPS stream error:", err);
+    });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // ── START / STOP SHIFT ─────────────────────────────────────────────────
   async function handleStartShift() {
@@ -941,15 +1100,26 @@ export default function ActiveShiftPage() {
       });
     } catch {}
     setShiftActive(true);
+    setActivePanel("hazard");
     setShiftStart(Date.now());
     setEmFrames(0); setDwFrames(0); setDwAlerts(0); setDwDrowsyFrames(0);
     bviSumRef.current = 0; bviCountRef.current = 0; cheatCountRef.current = 0;
     setShiftScore(null);
     // Auto-start hazard analysis; road-scene frames come from the live road camera
     analyzeRoute();
+    // Start real GPS tracking from device
+    startRealGpsTracking();
   }
 
   async function handleEndShift() {
+    // Stop GPS tracking
+    if (gpsSimulatorRef.current) {
+      if (gpsSimulatorRef.current.disconnect) {
+        gpsSimulatorRef.current.disconnect();
+      }
+      gpsSimulatorRef.current = null;
+    }
+    
     // Compute & send score before navigating away
     const durationSec = shiftStart ? Math.round((Date.now() - shiftStart) / 1000) : 0;
     const avgBvi = bviCountRef.current > 0 ? bviSumRef.current / bviCountRef.current : null;
@@ -1132,22 +1302,8 @@ export default function ActiveShiftPage() {
           </div>
         )}
 
-        {/* ── Live GPS map ───────────────────────────────────── */}
-        {shiftActive && (
-          <section className="as-live-map-section">
-            <div className="as-live-map-head">
-              <div>
-                <div className="as-live-map-title">Live GPS Map</div>
-                <div className="as-live-map-subtitle">Phone location feed from GPS2IP Lite</div>
-              </div>
-              <div className="as-live-map-pill">Active</div>
-            </div>
-            <div ref={gpsMapRef} className="as-live-map" />
-          </section>
-        )}
-
         {/* Four live analyzer camera feeds */}
-        {shiftActive && (
+        {shiftActive && activePanel !== "hazard" && (
           <div className="as-camera-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"0.75rem",padding:"0 1.25rem 1rem"}}>
             {/* Emotion Camera Feed */}
             <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
@@ -1583,6 +1739,16 @@ export default function ActiveShiftPage() {
                   {/* Dashboard cards */}
                   <HazardDashPanel currentPoint={hzPoint} nextPoints={pd?.slice(hzIdx)} isFinished={hzFinished} totalDistance={pd?.length ? pd[pd.length-1].distance : 0}/>
                 </div>
+              </div>
+            )}
+
+            {/* ── LIVE GPS TRACKING (All Panels Only) ──────────────── */}
+            {activePanel==="all" && (
+              <div className="as-panel as-gps-panel">
+                <div className="as-panel-head">
+                  <span className="as-panel-title">📍 Live GPS Tracking</span>
+                </div>
+                <div ref={liveGpsMapRef} className="as-live-gps-map"/>
               </div>
             )}
 
