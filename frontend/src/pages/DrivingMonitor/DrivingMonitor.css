@@ -5,9 +5,9 @@
 /* ── Main content ─────────────────────────────────────────── */
 .dm-main {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-width: 0;
+  overflow-y: auto;
+  height: 100vh;
 }
 .dm-content {
   padding: 1.5rem;

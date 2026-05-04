@@ -1,9 +1,9 @@
 /* ─── Active Shift Page ────────────────────────────────────────────────────── */
 .as-main {
   flex: 1; min-width: 0;
-  display: flex; flex-direction: column;
   background: #0a0e1a; color: #e2e8f0;
   overflow-y: auto;
+  height: 100vh;
 }
 
 /* ── Top bar ── */

@@ -5,9 +5,9 @@
 /* ── Main content ─────────────────────────────────────────── */
 .dw-main {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-width: 0;
+  overflow-y: auto;
+  height: 100vh;
 }
 .dw-content {
   padding: 1.5rem;
