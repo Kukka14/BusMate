@@ -51,28 +51,6 @@ function ConfGauge({ value, label, color }) {
   );
 }
 
-// ── Model prediction bar ──────────────────────────────────────────────────────
-function ModelBar({ name, weight, drowsyProb, available }) {
-  const pct   = Math.round((drowsyProb ?? 0) * 100);
-  const color = confColor(drowsyProb);
-  return (
-    <div className="dw-model-row">
-      <div className="dw-model-head">
-        <span className="dw-model-name">{name}</span>
-        <span className="dw-model-weight">weight ×{weight}</span>
-        {!available && <span className="dw-model-warmup">warm-up</span>}
-      </div>
-      <div className="dw-model-track">
-        <div className="dw-model-fill"
-          style={{ width: `${pct}%`, background: color, opacity: available ? 1 : 0.35 }}/>
-      </div>
-      <span className="dw-model-pct" style={{ color }}>
-        {available ? `${pct}%` : "—"}
-      </span>
-    </div>
-  );
-}
-
 // ── Facial feature chip ───────────────────────────────────────────────────────
 function FeatChip({ label, value, unit, warn }) {
   return (
@@ -464,12 +442,7 @@ export default function DrowsinessMonitorPage() {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
-                    <div className="dw-session-meta">
-                      M1(10%) + M2 LSTM(35%) + M3 Fusion(25%) + M4 Transformer(15%) + M5 TCN(15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter
-                    </div>
-                  </>
+                  <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
                 )}
               </div>
               <div className="dw-session-controls">
@@ -602,32 +575,58 @@ export default function DrowsinessMonitorPage() {
                   {!result && <p className="dw-no-data">Waiting — start session and face the camera…</p>}
                 </div>
 
-                {/* Per-model predictions */}
+                {/* Session Analytics */}
                 <div className="dw-card">
                   <div className="dw-card-head">
                     <div>
-                      <span className="dw-card-title">Model Predictions</span>
-                      <span className="dw-card-hint">Five PyTorch models fused by accuracy weight</span>
+                      <span className="dw-card-title">Session Analytics</span>
+                      <span className="dw-card-hint">Fused ensemble result · real-time</span>
+                    </div>
+                    {faceOk != null && (
+                      <span className={`dw-card-badge ${faceOk ? "green" : "red"}`}>
+                        {faceOk ? "Face Detected" : "No Face"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="dw-analytics-grid">
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Drowsy Probability</span>
+                      <span className="dw-stat-val" style={{ color: vColor }}>
+                        {confidence != null ? `${Math.round(confidence * 100)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Verdict</span>
+                      <span className="dw-stat-val" style={{ color: vColor }}>
+                        {verdict ?? "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Frames Analyzed</span>
+                      <span className="dw-stat-val">{sessionFrames > 0 ? sessionFrames : "—"}</span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Drowsy Frames</span>
+                      <span className="dw-stat-val" style={{ color: drowsyFrames > 0 ? "#f59e0b" : "#22c55e" }}>
+                        {sessionFrames > 0
+                          ? `${drowsyFrames} (${Math.round((drowsyFrames / sessionFrames) * 100)}%)`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Alerts Triggered</span>
+                      <span className="dw-stat-val" style={{ color: sessionAlerts > 0 ? "#ef4444" : "#22c55e" }}>
+                        {sessionId ? sessionAlerts : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Alertness Score</span>
+                      <span className="dw-stat-val" style={{ color: liveDAS?.tierColor ?? "#475569" }}>
+                        {liveDAS ? `${liveDAS.das}/100 · ${liveDAS.tier}` : "—"}
+                      </span>
                     </div>
                   </div>
-                  <div className="dw-models">
-                    <ModelBar name="M1 EfficientNet (Single frame)" weight="0.10"
-                      drowsyProb={models.m1?.drowsy_prob}
-                      available={models.m1?.available ?? false}/>
-                    <ModelBar name="M2 CNN+LSTM (Temporal · 16 frames)" weight="0.35"
-                      drowsyProb={models.m2?.drowsy_prob}
-                      available={models.m2?.available ?? false}/>
-                    <ModelBar name="M3 Fusion+Eye (Reliability-aware)" weight="0.25"
-                      drowsyProb={models.m3?.drowsy_prob}
-                      available={models.m3?.available ?? false}/>
-                    <ModelBar name="M4 Transformer (Self-attention)" weight="0.15"
-                      drowsyProb={models.m4?.drowsy_prob}
-                      available={models.m4?.available ?? false}/>
-                    <ModelBar name="M5 MS-TCN (Dilated temporal)" weight="0.15"
-                      drowsyProb={models.m5?.drowsy_prob}
-                      available={models.m5?.available ?? false}/>
-                  </div>
-                  {!result && <p className="dw-no-data">Predictions appear after first frame arrives…</p>}
+                  {!result && <p className="dw-no-data">Analytics appear after session starts…</p>}
                 </div>
 
                 {/* Facial features */}
@@ -1088,36 +1087,6 @@ export default function DrowsinessMonitorPage() {
                                   )}
                                 </div>
 
-                                {/* Model scores row */}
-                                {(f.models?.m1?.available || f.models?.m2?.available || f.models?.m3?.available || f.models?.m4?.available || f.models?.m5?.available) && (
-                                  <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
-                                    {f.models.m1?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        M1 {Math.round((f.models.m1.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.m2?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · M2 {Math.round((f.models.m2.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.m3?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · M3 {Math.round((f.models.m3.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.m4?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · M4 {Math.round((f.models.m4.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.m5?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · M5 {Math.round((f.models.m5.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </div>
                           );

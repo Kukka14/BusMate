@@ -263,24 +263,20 @@
 .dw-streak-label { font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
 .dw-streak-note  { font-size: 0.65rem; color: #334155; margin: 0; }
 
-/* ── Model prediction bars ────────────────────────────────── */
-.dw-models { display: flex; flex-direction: column; gap: 0.65rem; }
-.dw-model-row { display: flex; flex-direction: column; gap: 0.3rem; }
-.dw-model-head { display: flex; align-items: center; gap: 0.4rem; }
-.dw-model-name   { font-size: 0.72rem; color: #94a3b8; font-weight: 600; flex: 1; }
-.dw-model-weight { font-size: 0.62rem; color: #475569; font-family: monospace; }
-.dw-model-warmup {
-  font-size: 0.58rem; padding: 0.1rem 0.4rem; border-radius: 999px;
-  background: rgba(245,158,11,0.12); color: #fbbf24;
-  border: 1px solid rgba(245,158,11,0.2); font-weight: 700;
+/* ── Session analytics grid ───────────────────────────────── */
+.dw-analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  padding: 0.2rem 0;
 }
-.dw-model-track {
-  height: 6px; background: #1e293b; border-radius: 999px; overflow: hidden;
+.dw-stat-cell {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  background: #0f172a; border: 1px solid #1e293b;
+  border-radius: 8px; padding: 0.6rem 0.75rem;
 }
-.dw-model-fill {
-  height: 100%; border-radius: 999px; transition: width 0.35s ease;
-}
-.dw-model-pct { font-size: 0.68rem; font-weight: 700; text-align: right; }
+.dw-stat-label { font-size: 0.65rem; color: #475569; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+.dw-stat-val   { font-size: 0.9rem; font-weight: 700; color: #f1f5f9; }
 
 /* ── Facial feature chips ─────────────────────────────────── */
 .dw-feats-grid {
