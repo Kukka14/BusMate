@@ -1,5 +1,5 @@
 /* ── Main ────────────────────────────────────────────────────────────────── */
-.dp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dp-main { flex: 1; min-width: 0; overflow-y: auto; height: 100vh; }
 
 /* ── Topbar ──────────────────────────────────────────────────────────────── */
 .dp-topbar {

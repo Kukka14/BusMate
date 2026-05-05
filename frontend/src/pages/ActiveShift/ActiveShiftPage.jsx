@@ -1188,7 +1188,6 @@ export default function ActiveShiftPage() {
 
   const dwVerdict  = dwResult?.verdict;
   const dwConf     = dwResult?.confidence;
-  const dwModels   = dwResult?.models||{};
   const dwFeatures = dwResult?.features||{};
   const dwStreak   = dwResult?.consecutive_frames??0;
 
@@ -1552,13 +1551,6 @@ export default function ActiveShiftPage() {
                       <div className="as-dw-streak-label">Alert Streak</div>
                       <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
                     </div>
-                  </div>
-
-                  {/* Model bars */}
-                  <div className="as-probs">
-                    <ModelBar name="LSTM" weight="0.60" prob={dwModels.lstm} color={confColor(dwModels.lstm)}/>
-                    <ModelBar name="RGB CNN" weight="0.25" prob={dwModels.rgb} color={confColor(dwModels.rgb)}/>
-                    <ModelBar name="IR CNN" weight="0.15" prob={dwModels.ir} color={confColor(dwModels.ir)}/>
                   </div>
 
                   {/* Feature chips */}
