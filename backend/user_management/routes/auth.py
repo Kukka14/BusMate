@@ -10,11 +10,30 @@ auth_bp = Blueprint("auth", __name__)
 # ── Standard auth ────────────────────────────────────────────────────
 @auth_bp.post("/register")
 def register():
-    data = request.get_json()
-    # Accept role from request; default to 'driver' for new signups
-    requested_role = data.get("role", "driver")
-    if requested_role not in ("admin", "driver"):
+    data = request.get_json() or {}
+
+    # ── Role hardening: ONLY 'driver' accounts can be self-registered ─────────
+    # Admin accounts are provisioned exclusively through the server .env file
+    # and seeded at startup.  Any request for a non-driver role is silently
+    # downgraded to 'driver' (or rejected if someone explicitly requests admin).
+    requested_role = (data.get("role") or "driver").strip().lower()
+
+    if requested_role == "admin":
+        # Log the attempt for audit purposes
+        import logging
+        logging.getLogger(__name__).warning(
+            "Blocked admin self-registration attempt for email=%s",
+            data.get("email", "<unknown>"),
+        )
+        return jsonify({
+            "error": "Admin accounts cannot be created through registration. "
+                     "Contact your system administrator."
+        }), 403
+
+    # Force any unknown role to 'driver'
+    if requested_role not in ("driver",):
         requested_role = "driver"
+
     result, status = UserService.register(
         username=data.get("username"),
         email=data.get("email"),

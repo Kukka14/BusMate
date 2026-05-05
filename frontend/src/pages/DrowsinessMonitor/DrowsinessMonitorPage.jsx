@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
+import Sidebar from "../../components/common/Sidebar";
 import "./DrowsinessMonitor.css";
 
 const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -22,91 +23,10 @@ function confColor(p) {
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-const IcoHome     = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
 const IcoEye      = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
-const IcoMonitor  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>;
-const IcoRoadSign = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>;
-const IcoScene    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 20h20"/><path d="M4 20L9 9l4 6 3-3 4 8"/><circle cx="17" cy="6" r="2"/></svg>;
-const IcoUser     = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
-const IcoLogout   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
 const IcoCam      = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>;
 const IcoStop     = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>;
 const IcoAlert    = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-
-// ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({ onLogout }) {
-  const navigate = useNavigate();
-  const [openKey, setOpenKey] = useState(null);
-
-  const items = [
-    { key: "dashboard",  label: "Dashboard",             Icon: IcoHome,     path: "/driver/dashboard" },
-    { key: "drowsiness", label: "Drowsiness Monitor",    Icon: IcoEye,      path: null, isActive: true },
-    { key: "monitor",    label: "Emotion Shift Analysis", Icon: IcoMonitor,  path: "/driver/monitor" },
-    {
-      key: "roadsign", label: "Road Sign Detection", Icon: IcoRoadSign, path: null,
-      sub: [
-        { key: "rs-image",  label: "🖼  Image",  path: "/road-sign?mode=image" },
-        { key: "rs-video",  label: "🎥  Video",  path: "/road-sign?mode=video" },
-        { key: "rs-webcam", label: "📷  Webcam", path: "/road-sign/live"       },
-      ],
-    },
-    {
-      key: "roadscene", label: "Road Scene Analysis", Icon: IcoScene, path: null,
-      sub: [
-        { key: "rsa-image",  label: "🖼  Image",  path: "/road-scene?mode=image" },
-        { key: "rsa-video",  label: "🎥  Video",  path: "/road-scene?mode=video" },
-        { key: "rsa-hazard", label: "🗺  Hazard", path: "/road-scene/hazard"     },
-      ],
-    },
-    { key: "profile", label: "Profile", Icon: IcoUser, path: "/driver/profile" },
-  ];
-
-  return (
-    <aside className="dw-sidebar">
-      <div className="dw-logo">
-        <div className="dw-logo-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="white">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
-        </div>
-        <span>DriveGuard</span>
-      </div>
-      <nav className="dw-nav">
-        {items.map(({ key, label, Icon, path, sub, isActive }) => (
-          <div key={key}>
-            <button
-              className={`dw-nav-btn ${isActive ? "active" : ""}`}
-              onClick={() => {
-                if (sub) setOpenKey(k => k === key ? null : key);
-                else if (path) navigate(path);
-              }}
-            >
-              <Icon /><span>{label}</span>
-              {sub && <span className="dw-nav-arrow">{openKey === key ? "▾" : "▸"}</span>}
-            </button>
-            {sub && openKey === key && (
-              <div className="dw-nav-sub">
-                {sub.map(s => (
-                  <button key={s.key} className="dw-nav-sub-btn"
-                    onClick={() => setTimeout(() => navigate(s.path), 150)}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </nav>
-      <div className="dw-sidebar-foot">
-        <div className="dw-tip-box">
-          <span className="dw-tip-label">MONITOR TIP</span>
-          <p className="dw-tip-text">Good lighting + face centred in camera gives best accuracy.</p>
-        </div>
-        <button className="dw-signout" onClick={onLogout}><IcoLogout />Sign Out</button>
-      </div>
-    </aside>
-  );
-}
 
 // ── Confidence gauge (SVG arc) ────────────────────────────────────────────────
 function ConfGauge({ value, label, color }) {
@@ -128,28 +48,6 @@ function ConfGauge({ value, label, color }) {
         {label ?? "Waiting…"}
       </text>
     </svg>
-  );
-}
-
-// ── Model prediction bar ──────────────────────────────────────────────────────
-function ModelBar({ name, weight, drowsyProb, available }) {
-  const pct   = Math.round((drowsyProb ?? 0) * 100);
-  const color = confColor(drowsyProb);
-  return (
-    <div className="dw-model-row">
-      <div className="dw-model-head">
-        <span className="dw-model-name">{name}</span>
-        <span className="dw-model-weight">weight ×{weight}</span>
-        {!available && <span className="dw-model-warmup">warm-up</span>}
-      </div>
-      <div className="dw-model-track">
-        <div className="dw-model-fill"
-          style={{ width: `${pct}%`, background: color, opacity: available ? 1 : 0.35 }}/>
-      </div>
-      <span className="dw-model-pct" style={{ color }}>
-        {available ? `${pct}%` : "—"}
-      </span>
-    </div>
   );
 }
 
@@ -480,8 +378,8 @@ export default function DrowsinessMonitorPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="dw-root">
-      <Sidebar onLogout={logout} />
+    <div className="dd-root">
+      <Sidebar activeKey="monitor" />
 
       <main className="dw-main">
         {/* Topbar */}
@@ -544,12 +442,7 @@ export default function DrowsinessMonitorPage() {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
-                    <div className="dw-session-meta">
-                      LSTM (60%) + RGB CNN (25%) + IR CNN (15%) · {CONSECUTIVE_THRESHOLD}-frame streak filter
-                    </div>
-                  </>
+                  <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
                 )}
               </div>
               <div className="dw-session-controls">
@@ -655,7 +548,7 @@ export default function DrowsinessMonitorPage() {
                     <div>
                       <span className="dw-card-title">Drowsiness Confidence</span>
                       <span className="dw-card-hint">
-                        Local ensemble · LSTM (60%) + RGB CNN (25%) + IR CNN (15%)
+                        Local ensemble · M1(10%) + M2(35%) + M3(25%) + M4(15%) + M5(15%)
                       </span>
                     </div>
                     {verdict && (
@@ -682,26 +575,58 @@ export default function DrowsinessMonitorPage() {
                   {!result && <p className="dw-no-data">Waiting — start session and face the camera…</p>}
                 </div>
 
-                {/* Per-model predictions */}
+                {/* Session Analytics */}
                 <div className="dw-card">
                   <div className="dw-card-head">
                     <div>
-                      <span className="dw-card-title">Model Predictions</span>
-                      <span className="dw-card-hint">Three models fused by accuracy weight</span>
+                      <span className="dw-card-title">Session Analytics</span>
+                      <span className="dw-card-hint">Fused ensemble result · real-time</span>
+                    </div>
+                    {faceOk != null && (
+                      <span className={`dw-card-badge ${faceOk ? "green" : "red"}`}>
+                        {faceOk ? "Face Detected" : "No Face"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="dw-analytics-grid">
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Drowsy Probability</span>
+                      <span className="dw-stat-val" style={{ color: vColor }}>
+                        {confidence != null ? `${Math.round(confidence * 100)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Verdict</span>
+                      <span className="dw-stat-val" style={{ color: vColor }}>
+                        {verdict ?? "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Frames Analyzed</span>
+                      <span className="dw-stat-val">{sessionFrames > 0 ? sessionFrames : "—"}</span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Drowsy Frames</span>
+                      <span className="dw-stat-val" style={{ color: drowsyFrames > 0 ? "#f59e0b" : "#22c55e" }}>
+                        {sessionFrames > 0
+                          ? `${drowsyFrames} (${Math.round((drowsyFrames / sessionFrames) * 100)}%)`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Alerts Triggered</span>
+                      <span className="dw-stat-val" style={{ color: sessionAlerts > 0 ? "#ef4444" : "#22c55e" }}>
+                        {sessionId ? sessionAlerts : "—"}
+                      </span>
+                    </div>
+                    <div className="dw-stat-cell">
+                      <span className="dw-stat-label">Alertness Score</span>
+                      <span className="dw-stat-val" style={{ color: liveDAS?.tierColor ?? "#475569" }}>
+                        {liveDAS ? `${liveDAS.das}/100 · ${liveDAS.tier}` : "—"}
+                      </span>
                     </div>
                   </div>
-                  <div className="dw-models">
-                    <ModelBar name="LSTM (Temporal · 30 frames)" weight="0.60"
-                      drowsyProb={models.lstm?.drowsy_prob}
-                      available={models.lstm?.available ?? false}/>
-                    <ModelBar name="RGB CNN (Color · MobileNetV3)" weight="0.25"
-                      drowsyProb={models.rgb?.drowsy_prob}
-                      available={models.rgb?.available ?? false}/>
-                    <ModelBar name="IR CNN (Grayscale · Eye state)" weight="0.15"
-                      drowsyProb={models.ir?.drowsy_prob}
-                      available={models.ir?.available ?? false}/>
-                  </div>
-                  {!result && <p className="dw-no-data">Predictions appear after first frame arrives…</p>}
+                  {!result && <p className="dw-no-data">Analytics appear after session starts…</p>}
                 </div>
 
                 {/* Facial features */}
@@ -709,7 +634,7 @@ export default function DrowsinessMonitorPage() {
                   <div className="dw-card-head">
                     <div>
                       <span className="dw-card-title">Facial Features</span>
-                      <span className="dw-card-hint">MediaPipe 478-landmark extraction · LSTM input</span>
+                      <span className="dw-card-hint">Raw pixel input · No landmark extraction required</span>
                     </div>
                     {faceOk != null && (
                       <span className={`dw-card-badge ${faceOk ? "green" : "red"}`}>
@@ -919,7 +844,7 @@ export default function DrowsinessMonitorPage() {
                   <div>
                     <span className="dw-card-title">Video Drowsiness Analysis</span>
                     <span className="dw-card-hint">
-                      Upload a driving video · Every 3rd frame processed · First 30 frames excluded (LSTM warm-up)
+                      Upload a driving video · Every 3rd frame processed · First 16 frames excluded (model warm-up)
                     </span>
                   </div>
                 </div>
@@ -939,7 +864,7 @@ export default function DrowsinessMonitorPage() {
                   </button>
                 </div>
                 {videoLoading && (
-                  <p className="dw-upload-hint">Processing frames — LSTM warms up after 30 frames, results then become reliable…</p>
+                  <p className="dw-upload-hint">Processing frames — models warm up after 16 frames, results then become reliable…</p>
                 )}
                 {videoError && <p className="dw-upload-error">{videoError}</p>}
               </div>
@@ -1162,26 +1087,6 @@ export default function DrowsinessMonitorPage() {
                                   )}
                                 </div>
 
-                                {/* Model scores row */}
-                                {(f.models?.lstm?.available || f.models?.rgb?.available) && (
-                                  <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
-                                    {f.models.lstm?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        LSTM {Math.round((f.models.lstm.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.rgb?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · RGB {Math.round((f.models.rgb.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                    {f.models.ir?.available && (
-                                      <span style={{ fontSize: "0.6rem", color: "#475569" }}>
-                                        · IR {Math.round((f.models.ir.drowsy_prob ?? 0) * 100)}%
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </div>
                           );

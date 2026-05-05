@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Sidebar from "../../components/common/Sidebar";
 import "./Road_sign_UploadPage.css";
 
@@ -16,6 +17,33 @@ const statusColor = (s) => {
   return "#f59e0b";
 };
 
+const formatDistance = (m) => {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+};
+
+const trafficInsightText = (count, level) => {
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  const safeLevel = String(level || "LOW").toLowerCase();
+  return `${safeCount} vehicles detected — traffic appears ${safeLevel} in this area.`;
+};
+
+function playBeep(freq = 520, duration = 0.22, vol = 0.4) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + duration);
+  } catch (_) {}
+}
+
 export default function Road_sign_UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -29,6 +57,13 @@ export default function Road_sign_UploadPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
   const [liveInfo, setLiveInfo] = useState(null);
+  const [videoStreamOn, setVideoStreamOn] = useState(false);
+  const [videoStreamSrc, setVideoStreamSrc] = useState("");
+  const [videoInfo, setVideoInfo] = useState(null);
+  const [videoLog, setVideoLog] = useState([]);
+  const [analytics, setAnalytics] = useState([]);
+  const [videoSessionId, setVideoSessionId] = useState("");
+  const lastCollisionBeepAtRef = useRef(0);
 
   // ── Reset state when mode switches ─────────────────────────────────────────
   useEffect(() => {
@@ -36,6 +71,12 @@ export default function Road_sign_UploadPage() {
     setPreview(null);
     setError("");
     setLiveInfo(null);
+    setVideoInfo(null);
+    setVideoLog([]);
+    setAnalytics([]);
+    setVideoSessionId("");
+    setVideoStreamOn(false);
+    setVideoStreamSrc("");
   }, [mode]);
 
   // ── Webcam: poll detection info + stop camera on mode leave ────────────────
@@ -55,6 +96,73 @@ export default function Road_sign_UploadPage() {
     };
   }, [mode]);
 
+  // ── Video stream: poll detection info + maintain log
+  useEffect(() => {
+    if (mode !== "video" || !videoStreamOn) return;
+
+    const id = setInterval(() => {
+      fetch("/road-sign/get_video_detection_info")
+        .then((r) => r.json())
+        .then((data) => {
+          // Collision beeps disabled for vehicle-distance alerts.
+          const hasSign = Boolean(data?.class_name);
+          const hasVehicleMeta =
+            data?.nearest_vehicle_distance_m !== undefined ||
+            data?.vehicle_collision_risk !== undefined;
+
+          if (hasSign || hasVehicleMeta) {
+            setVideoInfo(data);
+          } else {
+            setVideoInfo(null);
+          }
+
+          if (hasSign) {
+            setVideoLog((prev) => {
+              const next = [{
+                class_name: data.class_name,
+                confidence: data.confidence,
+                status:     data.status,
+                estimated_distance_m: data.estimated_distance_m,
+                time:       new Date().toLocaleTimeString(),
+              }, ...prev];
+              return next.slice(0, 30);
+            });
+          }
+        })
+        .catch(() => {});
+    }, 400);
+
+    return () => clearInterval(id);
+  }, [mode, videoStreamOn]);
+
+  // ── Video analytics: load sign frequency for bar chart (video mode only)
+  useEffect(() => {
+    if (mode !== "video" || !videoStreamOn || !videoSessionId) return;
+
+    const loadAnalytics = () => {
+      const qp = new URLSearchParams({
+        source: "video_stream",
+        video_session_id: videoSessionId,
+      }).toString();
+      fetch(`/road-sign/road_sign_analytics?${qp}`)
+        .then((r) => r.json())
+        .then((d) => setAnalytics(Array.isArray(d?.items) ? d.items : []))
+        .catch(() => setAnalytics([]));
+    };
+
+    loadAnalytics();
+    const id = setInterval(loadAnalytics, 5000);
+    return () => clearInterval(id);
+  }, [mode, videoStreamOn, videoSessionId]);
+
+  // ── Video stream: stop stream on mode leave / unmount ─────────────────────
+  useEffect(() => {
+    if (mode !== "video") return;
+    return () => {
+      fetch("/road-sign/stop_video_stream").catch(() => {});
+    };
+  }, [mode]);
+
   // ── File change ────────────────────────────────────────────────────────────
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -70,6 +178,20 @@ export default function Road_sign_UploadPage() {
     setError("");
     setLoading(true);
     try {
+      if (mode === "video") {
+        const body = new FormData();
+        body.append("file", file);
+        const res  = await fetch("/road-sign/upload_video_stream", { method: "POST", body });
+        const data = await res.json();
+
+        if (!res.ok || data.error) { setError(data.error || "Processing failed."); return; }
+
+        setVideoStreamSrc(`/road-sign/video_stream_feed?t=${Date.now()}`);
+        setVideoSessionId(data?.video_session_id || "");
+        setVideoStreamOn(true);
+        return;
+      }
+
       const body = new FormData();
       body.append("file", file);
       body.append("input_type", mode);
@@ -80,11 +202,7 @@ export default function Road_sign_UploadPage() {
       if (!res.ok || data.error)  { setError(data.error || "Processing failed."); return; }
       if (!data.detected)         { setError(data.message || "No road sign detected."); return; }
 
-      if (mode === "video") {
-        navigate("/road-sign/video-results", { state: data });
-      } else {
-        navigate("/road-sign/results", { state: data });
-      }
+      navigate("/road-sign/results", { state: data });
     } catch {
       setError("Network error — is the road-sign server running on port 5001?");
     } finally {
@@ -112,11 +230,19 @@ export default function Road_sign_UploadPage() {
     }
   };
 
+  const videoTrendData = [...videoLog]
+    .reverse()
+    .map((entry, idx) => ({
+      time: entry.time,
+      confidence: Number((entry.confidence * 100).toFixed(1)),
+      detections: idx + 1,
+    }));
+
   return (
-    <div className="dm-root">
+    <div className="dd-root">
       <Sidebar />
-      <main className="dm-page-main">
-      <div className="rs-page">
+      <main className="dd-page-main">
+      <div className={`rs-page${mode === "video" ? " rs-video-layout" : ""}`}>
       {/* Page header */}
       <div className="rs-header">
         <span className="rs-header-icon">🚦</span>
@@ -267,13 +393,215 @@ export default function Road_sign_UploadPage() {
 
             {error && <div className="rs-error">{error}</div>}
 
-            <button type="submit" className="rs-btn" disabled={loading}>
-              {loading ? (
-                <><span className="rs-spinner" /> Processing…</>
-              ) : (
-                "🔍 Process"
-              )}
-            </button>
+            {!videoStreamOn ? (
+              <button type="submit" className="rs-btn" disabled={loading}>
+                {loading ? (
+                  <><span className="rs-spinner" /> Starting stream…</>
+                ) : (
+                  "▶ Start Live Stream"
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rs-btn"
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await fetch("/road-sign/stop_video_stream");
+                  } catch {}
+                  setVideoStreamOn(false);
+                  setVideoStreamSrc("");
+                  setVideoSessionId("");
+                  setLoading(false);
+                }}
+              >
+                ⏹ Stop Stream
+              </button>
+            )}
+
+            {videoStreamOn && (
+              <div className="rs-video-grid" style={{ marginTop: "1rem" }}>
+                <div className="rs-video-stream-col">
+                  <div className="rs-stream-container">
+                    <img
+                      src={videoStreamSrc}
+                      alt="Live road-sign detection feed"
+                      className="rs-stream"
+                    />
+                  </div>
+                  <p className="rs-note">
+                    Live stream shows road-sign detections overlaid on the video.
+                  </p>
+                </div>
+
+                <div className="rs-video-info-col">
+                  <div className="rs-card rs-mini-card">
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Current Detection</span>
+                    </div>
+                    {videoInfo?.class_name ? (
+                      <div className="rs-det-body">
+                        <div className="rs-det-name">{videoInfo.class_name.replace(/_/g, " ")}</div>
+                        <div className="rs-det-conf">{(videoInfo.confidence * 100).toFixed(1)}%</div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: statusColor(videoInfo.status), gridColumn: "1 / -1" }}
+                        >
+                          Sign Condition: {videoInfo.status || "Unknown"}
+                        </div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>Sign Distance: {formatDistance(videoInfo.estimated_distance_m)}</strong>
+                        </div>
+                        <div className="rs-det-status">
+                          Vehicles: {videoInfo.vehicle_count ?? 0}
+                        </div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          Avg Vehicles (10f): {Number(videoInfo.avg_vehicle_count ?? 0).toFixed(2)}
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}
+                        >
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>Traffic Congestion: {videoInfo.traffic_congestion || "LOW"}</strong>
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}
+                        >
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>{trafficInsightText(videoInfo.vehicle_count, videoInfo.traffic_congestion)}</strong>
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}
+                        >
+                          Collision Risk: {videoInfo.vehicle_collision_risk || "LOW"}
+                        </div>
+                        <div
+                          className="rs-det-status"
+                          style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}
+                        >
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}</strong>
+                        </div>
+                      </div>
+                    ) : videoInfo ? (
+                      <div className="rs-det-body">
+                        <div className="rs-det-name">No road sign detected in this frame</div>
+                        <div className="rs-det-status">
+                          Vehicles: {videoInfo.vehicle_count ?? 0}
+                        </div>
+                        <div className="rs-det-status" style={{ color: "#0ea5e9" }}>
+                          Avg Vehicles (10f): {Number(videoInfo.avg_vehicle_count ?? 0).toFixed(2)}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          Traffic Congestion: {videoInfo.traffic_congestion || "LOW"}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.traffic_congestion === "HIGH" ? "#ef4444" : (videoInfo.traffic_congestion === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}>
+                          {trafficInsightText(videoInfo.vehicle_count, videoInfo.traffic_congestion)}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e") }}>
+                          Collision Risk: {videoInfo.vehicle_collision_risk || "LOW"}
+                        </div>
+                        <div className="rs-det-status" style={{ color: videoInfo.vehicle_collision_risk === "HIGH" ? "#ef4444" : (videoInfo.vehicle_collision_risk === "MEDIUM" ? "#f59e0b" : "#22c55e"), gridColumn: "1 / -1" }}>
+                          <strong style={{ fontWeight: 700, background: "rgba(14,165,233,0.14)", color: "#bae6fd", border: "1px solid rgba(125,211,252,0.30)", padding: "4px 8px", borderRadius: 8, fontSize: "1rem" }}>High Risk Distance: {formatDistance(videoInfo.nearest_vehicle_distance_m)}</strong>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No detection yet</div>
+                    )}
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">Detection Log</span>
+                      <span className="rs-card-hint">Last 30</span>
+                    </div>
+                    <div className="rs-log-list">
+                      {videoLog.length > 0 ? (
+                        videoLog.map((entry, idx) => (
+                          <div key={idx} className="rs-log-row">
+                            <span className="rs-log-time">{entry.time}</span>
+                            <span className="rs-log-name">{entry.class_name.replace(/_/g, " ")}</span>
+                            <span className="rs-log-conf">{(entry.confidence * 100).toFixed(1)}%</span>
+                            <span className="rs-log-conf">{formatDistance(entry.estimated_distance_m)}</span>
+                            <span className="rs-log-status" style={{ color: statusColor(entry.status) }}>
+                              {entry.status}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rs-no-data">No sign detections yet</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">📊 Sign Frequency Analytics</span>
+                      <span className="rs-card-hint">Video mode only</span>
+                    </div>
+                    {analytics.length > 0 ? (
+                      <div style={{ width: "100%", height: 240 }}>
+                        <ResponsiveContainer>
+                          <BarChart data={analytics} margin={{ top: 10, right: 10, left: 0, bottom: 45 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="sign_name" angle={-20} textAnchor="end" interval={0} height={70} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip
+                              formatter={(value) => [value, "Frequency"]}
+                              labelFormatter={(label, payload) => {
+                                const last = payload?.[0]?.payload?.last_seen;
+                                return `${label}${last ? ` | Last seen: ${new Date(last).toLocaleString()}` : ""}`;
+                              }}
+                            />
+                            <Bar dataKey="frequency" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No analytics data yet</div>
+                    )}
+                  </div>
+
+                  <div className="rs-card rs-mini-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="rs-card-head">
+                      <span className="rs-card-title">📈 Detection Trend Over Time</span>
+                      <span className="rs-card-hint">Current stream session</span>
+                    </div>
+                    {videoTrendData.length > 0 ? (
+                      <div style={{ width: "100%", height: 240 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={videoTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="time" interval="preserveStartEnd" minTickGap={20} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Line
+                              type="monotone"
+                              dataKey="detections"
+                              stroke="#10b981"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Detections"
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="confidence"
+                              stroke="#6366f1"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Confidence %"
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="rs-no-data">No trend data yet</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </form>
         )}
       </div> {/* rs-card */}

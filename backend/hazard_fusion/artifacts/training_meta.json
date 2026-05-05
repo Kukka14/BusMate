@@ -1,0 +1,24 @@
+{
+  "feature_cols": [
+    "VRU",
+    "SidewalkDef",
+    "GuidanceSupport",
+    "SurfaceDamage",
+    "TrafficConflict",
+    "DowngradeSeverity",
+    "CurveSeverity",
+    "ComboSeverity",
+    "SpeedRisk"
+  ],
+  "class_names": [
+    "Critical",
+    "High",
+    "Low",
+    "Medium"
+  ],
+  "best_val_f1": 0.6442742612616832,
+  "input_dim": 9,
+  "num_classes": 4,
+  "target_col": "HazardLabel",
+  "best_epoch_estimate": 8
+}

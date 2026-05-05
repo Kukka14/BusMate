@@ -67,7 +67,7 @@ export default function RoadSceneUploadPage() {
   const isVideo = mode === "video";
 
   return (
-    <div className="rsa-layout">
+    <div className="dd-root">
       <Sidebar activeKey="roadscene" />
       <main className="rsa-main">
         <div className="rsa-page">
@@ -156,6 +156,18 @@ export default function RoadSceneUploadPage() {
               Road · Sidewalk · Curb · Lane Marking · Crosswalk · Barrier · Bridge ·
               Tunnel · Building · Vegetation · Traffic Control · Pole/Light ·
               <strong> Person · Two-wheeler · Vehicle · Pothole</strong>
+            </div>
+
+            {/* Live webcam quick link */}
+            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="rsa-btn"
+                onClick={() => window.location.assign('/live?module=roadscene')}
+                style={{ background: '#f59e0b22', borderColor: '#f59e0b66', color: '#f59e0b' }}
+              >
+                📷 Live Road Camera
+              </button>
             </div>
           </div>
         </div>

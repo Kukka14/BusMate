@@ -11,9 +11,6 @@ const IconEyeOn   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="
 const IconEyeOff  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
 const IconArrow   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>;
 const IconCheck   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
-const IconAdmin   = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
-const IconDriver  = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>;
-const IconTick    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>;
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -40,7 +37,7 @@ export default function SignUpPage() {
     password: "",
     confirmPassword: "",
   });
-  const [role, setRole]             = useState("driver");
+  // role is always "driver" — admin accounts are provisioned server-side only
   const [showPw, setShowPw]         = useState(false);
   const [showCPw, setShowCPw]       = useState(false);
   const [agree, setAgree]           = useState(false);
@@ -82,7 +79,7 @@ export default function SignUpPage() {
           email: form.email.trim(),
           password: form.password,
           company: form.company.trim(),
-          role,
+          role: "driver",
         }),
       });
       const data = await res.json();
@@ -118,13 +115,11 @@ export default function SignUpPage() {
       <header className="sp-header">
         <div className="sp-brand" onClick={() => navigate("/")}>
           <div className="sp-brand-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 9h18"/><circle cx="7.5" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/><path d="M5.5 16v2M18.5 16v2"/></svg>
           </div>
-          <span>DriveGuard</span>
+          <span>BusMate</span>
         </div>
-        <a className="sp-header-link" href="#">Fleet Management Solutions</a>
+        <a className="sp-header-link" href="#">AI Driver Safety Platform</a>
       </header>
 
       {/* ── Card ── */}
@@ -132,35 +127,12 @@ export default function SignUpPage() {
         <div className="sp-card">
           <div className="sp-card-header">
             <h1>Create Account</h1>
-            <p>Register your fleet management account to get started with DriveGuard.</p>
+            <p>Join BusMate to access AI-powered driver safety monitoring.</p>
           </div>
 
           {error && <div className="sp-error" role="alert">{error}</div>}
 
           <form className="sp-form" onSubmit={handleSignUp} noValidate>
-
-            {/* Role selector */}
-            <div className="sp-field-group">
-              <label>Account Type</label>
-              <div className="sp-role-toggle">
-                <button
-                  type="button"
-                  className={`sp-role-btn ${role === "admin" ? "active" : ""}`}
-                  onClick={() => setRole("admin")}
-                >
-                  <span className="sp-role-tick">{role === "admin" && <IconTick />}</span>
-                  <IconAdmin /> Admin
-                </button>
-                <button
-                  type="button"
-                  className={`sp-role-btn ${role === "driver" ? "active" : ""}`}
-                  onClick={() => setRole("driver")}
-                >
-                  <span className="sp-role-tick">{role === "driver" && <IconTick />}</span>
-                  <IconDriver /> Driver
-                </button>
-              </div>
-            </div>
             <div className="sp-field-group">
               <label htmlFor="fullName">Full Name</label>
               <div className="sp-input-wrap">
@@ -303,7 +275,7 @@ export default function SignUpPage() {
           <a href="#">Terms of Service</a>
           <a href="#">Compliance</a>
         </div>
-        <span>© 2026 DriveGuard Intelligent Fleet Systems. All rights reserved.</span>
+        <span>&copy; {new Date().getFullYear()} BusMate. All rights reserved.</span>
       </footer>
     </div>
   );

@@ -1,7 +1,7 @@
 /* ── Root ─────────────────────────────────────────────────────────────────── */
 .lp-root {
   min-height: 100vh;
-  background: #1a1f2e;
+  background: #0a0f1e;
   display: flex;
   flex-direction: column;
   font-family: "Inter", system-ui, sans-serif;
@@ -27,11 +27,12 @@
 }
 .lp-brand-icon {
   width: 30px; height: 30px;
-  background: #2563eb;
-  border-radius: 6px;
+  background: #3b82f6;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 12px rgba(59,130,246,0.4);
 }
 .lp-header-link {
   font-size: 0.82rem;
