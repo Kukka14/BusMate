@@ -287,10 +287,12 @@ export default function ActiveShiftPage() {
   const dwInFlight    = useRef(false);
   const [dwConnected, setDwConnected] = useState(false);
   const [dwResult, setDwResult]       = useState(null);
-  const [dwSessionId, setDwSessionId] = useState(null);
   const [dwFrames, setDwFrames]       = useState(0);
   const [dwAlerts, setDwAlerts]       = useState(0);
   const [dwDrowsyFrames, setDwDrowsyFrames] = useState(0);
+  // shiftScoreId: MongoDB _id of the active shift_scores document (set on shift start)
+  const [shiftScoreId, setShiftScoreId] = useState(null);
+  const shiftScoreIdRef = useRef(null); // ref copy so frame loop always has latest value
 
   // ── Shift scoring accumulators ───────────────────────────────────────────
   const bviSumRef    = useRef(0);
@@ -741,10 +743,14 @@ export default function ActiveShiftPage() {
       const ctx=c.getContext("2d"); c.width=640; c.height=480;
       ctx.drawImage(v,0,0,640,480);
       dwInFlight.current = true;
-      s.emit("drowsiness_frame",{image:c.toDataURL("image/jpeg",0.80),session_id:dwSessionId,client_ts:Date.now()});
+      s.emit("drowsiness_frame", {
+        image:    c.toDataURL("image/jpeg", 0.80),
+        shift_id: shiftScoreIdRef.current,   // links readings to this shift in MongoDB
+        client_ts: Date.now(),
+      });
     }, 200);
     return () => { clearInterval(dwSendIvRef.current); dwInFlight.current=false; };
-  }, [shiftActive, dwSessionId]);
+  }, [shiftActive]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── ROAD CAMERA: send frames to RSA and Road-Sign upload endpoints ──────
@@ -1084,7 +1090,7 @@ export default function ActiveShiftPage() {
   // ── START / STOP SHIFT ─────────────────────────────────────────────────
   async function handleStartShift() {
     try {
-      await fetch(`${API}/api/driver/shift/start`, {
+      const res = await fetch(`${API}/api/driver/shift/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -1098,6 +1104,12 @@ export default function ActiveShiftPage() {
           route: `${startTown} → ${endTown}`,
         }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        const sid = data.shift_score_id || null;
+        setShiftScoreId(sid);
+        shiftScoreIdRef.current = sid;   // keep ref in sync for frame loop
+      }
     } catch {}
     setShiftActive(true);
     setActivePanel("hazard");
@@ -1160,6 +1172,17 @@ export default function ActiveShiftPage() {
       const scoreData = await res.json();
       if (res.ok) setShiftScore(scoreData);
     } catch {}
+
+    // ── Save per-shift drowsiness timeline to MongoDB ─────────────────────
+    // Fire-and-forget — doesn't block the shift-end flow.
+    const sid = shiftScoreIdRef.current;
+    if (sid) {
+      fetch(`${API}/api/driver/shift/drowsiness`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shift_id: sid, driver_id: driverId }),
+      }).catch(() => {});   // non-critical; failure doesn't affect shift scoring
+    }
 
     try {
       await fetch(`${API}/api/driver/shift/stop`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
@@ -1350,7 +1373,7 @@ export default function ActiveShiftPage() {
               <div className="as-cam-wrap">
                 <video ref={videoRefDrowsinessDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
               </div>
-              {/* Full Drowsiness analysis panel (duplicated) */}
+              {/* Full Drowsiness analysis panel */}
               <div className="as-dw-body" style={{marginTop:"0.5rem"}}>
                 <div className="as-dw-gauge-row">
                   <MiniGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)} size={70}/>
@@ -1360,10 +1383,14 @@ export default function ActiveShiftPage() {
                   </div>
                 </div>
 
-                <div className="as-feat-row" style={{marginTop:8}}>
-                  <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
-                  <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>
-                  <FeatChip label="Pitch" value={dwFeatures.pitch?.toFixed(1)} unit="°" warn={Math.abs(dwFeatures.pitch||0)>25}/>
+                <div className="as-feat-row" style={{marginTop:8, flexWrap:"wrap", gap:"0.35rem"}}>
+                  <FeatChip label="EAR"       value={dwFeatures.ear?.toFixed(3)}       unit=""  warn={dwFeatures.ear!=null && dwFeatures.ear<0.25}/>
+                  <FeatChip label="MAR"       value={dwFeatures.mar?.toFixed(3)}       unit=""  warn={dwFeatures.mar!=null && dwFeatures.mar>0.60}/>
+                  <FeatChip label="Pitch"     value={dwFeatures.pitch?.toFixed(1)}     unit="°" warn={dwFeatures.pitch!=null && Math.abs(dwFeatures.pitch)>20}/>
+                  <FeatChip label="Yaw"       value={dwFeatures.yaw?.toFixed(1)}       unit="°" warn={dwFeatures.yaw!=null && Math.abs(dwFeatures.yaw)>30}/>
+                  <FeatChip label="Eye Blink" value={dwFeatures.eye_closure?.toFixed(2)} unit="" warn={dwFeatures.eye_closure!=null && dwFeatures.eye_closure>0.45}/>
+                  <FeatChip label="PERCLOS"   value={dwFeatures.perclos!=null ? String(Math.round(dwFeatures.perclos*100)) : null} unit="%" warn={dwFeatures.perclos!=null && dwFeatures.perclos>0.30}/>
+                  <FeatChip label="Yawn"      value={dwFeatures.yawn_freq!=null ? String(Math.round(dwFeatures.yawn_freq*100)) : null} unit="%" warn={dwFeatures.yawn_freq!=null && dwFeatures.yawn_freq>0.20}/>
                 </div>
               </div>
             </div>
@@ -1547,11 +1574,28 @@ export default function ActiveShiftPage() {
                     </div>
                   </div>
 
-                  {/* Feature chips */}
-                  <div className="as-feat-row">
-                    <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
-                    <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>
-                    <FeatChip label="Pitch" value={dwFeatures.pitch?.toFixed(1)} unit="°" warn={Math.abs(dwFeatures.pitch||0)>25}/>
+                  {/* Facial feature chips — 7 metrics */}
+                  <div style={{marginTop:"0.6rem", marginBottom:"0.25rem", fontSize:"0.7rem", color:"#64748b", fontWeight:600, letterSpacing:"0.05em", textTransform:"uppercase"}}>
+                    Facial Features
+                    {dwResult?.face_detected != null && (
+                      <span style={{marginLeft:8, padding:"1px 7px", borderRadius:10, fontSize:"0.65rem", background: dwResult.face_detected ? "#16a34a22" : "#dc262622", color: dwResult.face_detected ? "#22c55e" : "#ef4444", border:`1px solid ${dwResult.face_detected?"#22c55e44":"#ef444444"}`}}>
+                        {dwResult.face_detected ? "Face OK" : "No Face"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="as-feat-row" style={{flexWrap:"wrap", gap:"0.4rem"}}>
+                    <FeatChip label="EAR"       value={dwFeatures.ear?.toFixed(3)}       unit=""  warn={dwFeatures.ear!=null && dwFeatures.ear<0.25}/>
+                    <FeatChip label="MAR"       value={dwFeatures.mar?.toFixed(3)}       unit=""  warn={dwFeatures.mar!=null && dwFeatures.mar>0.60}/>
+                    <FeatChip label="Pitch"     value={dwFeatures.pitch?.toFixed(1)}     unit="°" warn={dwFeatures.pitch!=null && Math.abs(dwFeatures.pitch)>20}/>
+                    <FeatChip label="Yaw"       value={dwFeatures.yaw?.toFixed(1)}       unit="°" warn={dwFeatures.yaw!=null && Math.abs(dwFeatures.yaw)>30}/>
+                    <FeatChip label="Eye Blink" value={dwFeatures.eye_closure?.toFixed(2)} unit="" warn={dwFeatures.eye_closure!=null && dwFeatures.eye_closure>0.45}/>
+                    <FeatChip label="PERCLOS"   value={dwFeatures.perclos!=null ? String(Math.round(dwFeatures.perclos*100)) : null} unit="%" warn={dwFeatures.perclos!=null && dwFeatures.perclos>0.30}/>
+                    <FeatChip label="Yawn"      value={dwFeatures.yawn_freq!=null ? String(Math.round(dwFeatures.yawn_freq*100)) : null} unit="%" warn={dwFeatures.yawn_freq!=null && dwFeatures.yawn_freq>0.20}/>
+                  </div>
+                  <div style={{marginTop:"0.5rem", fontSize:"0.65rem", color:"#475569", display:"flex", flexWrap:"wrap", gap:"0.5rem"}}>
+                    <span>EAR &lt;0.25 → eyes closing</span>
+                    <span>PERCLOS &gt;30% → sustained closure</span>
+                    <span>Yawn &gt;20% → frequent yawning</span>
                   </div>
                 </div>
               </div>

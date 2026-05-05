@@ -17,7 +17,10 @@
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model3/model3_best.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model3_best.pth\")",
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model3/model3_eye_branch.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model3_eye_branch.pth\")",
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model4/model4_best.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model4_best.pth\")",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(dir \"D:/Research Project/Drownsiness/\")",
+      "Bash(python -c ' *)",
+      "PowerShell(Get-ChildItem \"D:\\\\BusMate\\\\BusMate\\\\backend\\\\Drownsiness\\\\\" | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}})"
     ]
   }
 }

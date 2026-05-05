@@ -197,6 +197,14 @@ export default function DrowsinessMonitorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Auto-start session when socket connects ────────────────────────────────
+  useEffect(() => {
+    if (connected && !sessionId && !sessionBusy) {
+      startSession();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
   // ── Frame send loop ────────────────────────────────────────────────────────
   // Runs at user-selected FPS but caps to 1 frame in-flight at a time so
   // frames never pile up regardless of inference speed or transport type.
@@ -428,43 +436,6 @@ export default function DrowsinessMonitorPage() {
               </div>
             )}
 
-            {/* Session banner */}
-            <div className={`dw-session-banner ${sessionId ? "active" : ""}`}>
-              <div className="dw-session-left">
-                {sessionId ? (
-                  <>
-                    <div className="dw-session-title">Session Active — AI monitoring every frame in real-time</div>
-                    <div className="dw-session-meta">
-                      <span>⏱ {elapsed}</span>
-                      <span>📸 {sessionFrames} frames</span>
-                      <span>🚨 {sessionAlerts} alerts</span>
-                      <span className="dw-session-id">ID: {sessionId.slice(-8)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
-                )}
-              </div>
-              <div className="dw-session-controls">
-                <label className="dw-fps-label">
-                  FPS
-                  <input type="number" min={1} max={10} value={fps}
-                    onChange={e => setFps(Math.max(1, Math.min(10, Number(e.target.value) || 10)))}
-                    className="dw-fps-input"/>
-                </label>
-                <button
-                  className={`dw-session-btn ${sessionId ? "stop" : "start"}`}
-                  onClick={sessionId ? stopSession : startSession}
-                  disabled={sessionBusy}>
-                  {sessionBusy
-                    ? <span className="dw-spinner-sm"/>
-                    : sessionId
-                      ? <><IcoStop/> STOP SESSION</>
-                      : <><IcoCam/> START SESSION</>}
-                </button>
-              </div>
-            </div>
-
             {/* Main 2-col grid */}
             <div className="dw-grid">
 
@@ -507,14 +478,15 @@ export default function DrowsinessMonitorPage() {
                     </div>
                   )}
 
-                  {/* Show guide when connected but no session started */}
+                  {/* Show guide when connecting */}
                   {connected && !sessionId && (
                     <div className="dw-cam-placeholder" style={{ background: "rgba(0,0,0,0.55)" }}>
                       <svg width="120" height="150" viewBox="0 0 120 150" style={{ opacity: 0.5 }}>
                         <ellipse cx="60" cy="65" rx="40" ry="52" fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 4"/>
                       </svg>
                       <p style={{ marginTop: "-40px", color: "#94a3b8", fontSize: "0.78rem", textAlign: "center" }}>
-                        Press <strong style={{ color: "#f1f5f9" }}>Start Session</strong><br/>and centre your face
+                        Starting session…<br/>
+                        <span style={{ color: "#64748b" }}>Centre your face in the camera</span>
                       </p>
                     </div>
                   )}
@@ -533,7 +505,7 @@ export default function DrowsinessMonitorPage() {
                   <span>Stream: {fps} fps · 640×480</span>
                   <span>Frames analyzed: {sessionFrames}</span>
                   <span style={{ color: isAlert ? "#ef4444" : "#22c55e" }}>
-                    {isAlert ? "⚠ ALERT ACTIVE" : sessionId ? "✓ Monitoring" : "— Not started"}
+                    {isAlert ? "⚠ ALERT ACTIVE" : sessionId ? "✓ Monitoring" : "● Connecting..."}
                   </span>
                 </div>
               </div>
@@ -572,7 +544,7 @@ export default function DrowsinessMonitorPage() {
                       </p>
                     </div>
                   </div>
-                  {!result && <p className="dw-no-data">Waiting — start session and face the camera…</p>}
+                  {!result && <p className="dw-no-data">Waiting — face the camera to begin analysis…</p>}
                 </div>
 
                 {/* Session Analytics */}

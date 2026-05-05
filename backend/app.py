@@ -112,8 +112,24 @@ def _seed_admin():
 _seed_admin()
 
 
-# Drowsiness detection engine (loaded once at startup)
-_dw_engine = DrowsinessEngine()
+# Drowsiness detection engine — loaded in a background thread so Flask
+# can serve requests immediately while the models warm up (~30-60 s).
+_dw_engine = DrowsinessEngine.__new__(DrowsinessEngine)
+_dw_engine._ready    = False
+_dw_engine._m1       = None
+_dw_engine._m2       = None
+_dw_engine._m3       = None
+_dw_engine._m4       = None
+_dw_engine._m5       = None
+_dw_engine._lock      = __import__("threading").Lock()
+_dw_engine._sess_lock = __import__("threading").Lock()
+_dw_engine._sessions  = {}
+
+def _load_dw_engine():
+    _dw_engine._load()
+
+import threading as _threading
+_threading.Thread(target=_load_dw_engine, daemon=True, name="dw-model-loader").start()
 
 
 # -----------------------------
@@ -2937,23 +2953,32 @@ def analyze_route():
 
 # =============================================================================
 # DROWSINESS DETECTION
-# Socket event : client emits  "drowsiness_frame"  {image, session_id, client_ts}
+# Socket event : client emits  "drowsiness_frame"  {image, shift_id, client_ts}
 #                server emits  "drowsiness_result" {ok, verdict, confidence, …}
 # REST endpoint: POST /analyze-drowsiness-video   (multipart: field "video")
+#               POST /api/driver/shift/drowsiness  (save per-shift readings)
 # =============================================================================
 
-# Per-driver sequence buffers for LSTM are managed inside _dw_engine automatically.
+# Per-shift reading accumulation keyed by shift_id.
+# One reading is stored every 30 s; flushed to MongoDB when shift ends.
+import threading as _dw_threading
+_dw_shift_readings: dict = {}
+_dw_shift_lock = _dw_threading.Lock()
 
 
 @socketio.on("drowsiness_frame")
 def on_drowsiness_frame(data):
     """
     Process one webcam frame for drowsiness detection.
-    Runs the 3-model local ensemble (LSTM + RGB CNN + IR CNN) and emits the result.
+    Accumulates a reading every 30 s, keyed by shift_id, for later analysis.
     """
     try:
-        img_data   = data.get("image")
-        # Use Socket.IO socket-ID as session key — unique per browser tab.
+        img_data  = data.get("image")
+        shift_id  = data.get("shift_id")   # links readings to the active shift
+        client_ts = data.get("client_ts") or 0
+
+        # request.sid = unique Socket.IO connection — used as the model's
+        # per-session frame buffer key (LSTM temporal window).
         session_id = request.sid
 
         img = decode_base64_image(img_data)
@@ -2968,8 +2993,30 @@ def on_drowsiness_frame(data):
             })
             return
 
-        # ── 1. Local ensemble inference ───────────────────────────────────────
+        # ── 1. Ensemble inference ─────────────────────────────────────────────
         result = _dw_engine.process_frame(img, session_id=session_id)
+
+        # ── 2. Accumulate a reading every 30 s (only when shift_id provided) ──
+        if shift_id and result.get("ok"):
+            with _dw_shift_lock:
+                if shift_id not in _dw_shift_readings:
+                    _dw_shift_readings[shift_id] = {
+                        "start_ts":    client_ts,
+                        "last_ts":     0,
+                        "readings":    [],
+                    }
+                state = _dw_shift_readings[shift_id]
+                # Save first reading immediately, then every 30 s
+                since_last = (client_ts - state["last_ts"]) / 1000 if state["last_ts"] else 31
+                if since_last >= 30:
+                    elapsed = round((client_ts - state["start_ts"]) / 1000) if client_ts else 0
+                    state["readings"].append({
+                        "t":          max(0, elapsed),
+                        "confidence": round(result.get("confidence", 0.0), 3),
+                        "verdict":    result.get("verdict", "Alert"),
+                        "alert":      bool(result.get("alert", False)),
+                    })
+                    state["last_ts"] = client_ts
 
         emit("drowsiness_result", result)
 
@@ -2977,6 +3024,69 @@ def on_drowsiness_frame(data):
         import traceback
         traceback.print_exc()
         emit("drowsiness_result", {"ok": False, "error": str(exc)})
+
+
+@app.route("/api/driver/shift/drowsiness", methods=["POST"])
+def save_shift_drowsiness():
+    """
+    Called by the frontend when a shift ends.
+    Retrieves the in-memory per-shift drowsiness readings accumulated during
+    the shift and persists them to the `shift_drowsiness` MongoDB collection.
+
+    Body: { shift_id: str, driver_id: str }
+    """
+    try:
+        from Emotion_Shift_Profile.database import get_db
+        from datetime import datetime as _dt
+
+        body      = request.get_json(force=True, silent=True) or {}
+        shift_id  = (body.get("shift_id")  or "").strip()
+        driver_id = (body.get("driver_id") or "").strip()
+
+        if not shift_id:
+            return jsonify({"error": "shift_id is required"}), 400
+
+        # Pop accumulated readings from memory
+        with _dw_shift_lock:
+            state = _dw_shift_readings.pop(shift_id, None)
+
+        readings = state["readings"] if state else []
+
+        if not readings:
+            return jsonify({"message": "No readings to save", "total": 0}), 200
+
+        # Build summary stats
+        confidences = [r["confidence"] for r in readings]
+        alert_count = sum(1 for r in readings if r.get("alert"))
+        drowsy_readings = sum(1 for r in readings if r.get("verdict") == "Drowsy")
+
+        doc = {
+            "shift_id":       shift_id,
+            "driver_id":      driver_id,
+            "readings":       readings,
+            "total_readings": len(readings),
+            "drowsy_readings":drowsy_readings,
+            "total_alerts":   alert_count,
+            "avg_confidence": round(sum(confidences) / len(confidences), 3),
+            "max_confidence": round(max(confidences), 3),
+            "created_at":     _dt.utcnow(),
+        }
+
+        db = get_db()
+        db.shift_drowsiness.update_one(
+            {"shift_id": shift_id},
+            {"$set": doc},
+            upsert=True,
+        )
+
+        return jsonify({
+            "message": "Drowsiness timeline saved",
+            "total":   len(readings),
+        }), 200
+
+    except Exception as exc:
+        app.logger.exception("save_shift_drowsiness error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/analyze-drowsiness-video", methods=["POST"])
