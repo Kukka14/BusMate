@@ -1,5 +1,22 @@
 .live-monitor-layout {
   display: flex;
+  flex-direction: column;
   gap: 1.5rem;
   height: calc(100vh - 120px);
+  padding: 0 1.5rem 1.5rem;
+}
+
+/* Video takes first 45-50% of vertical space */
+.live-monitor-layout .video-panel {
+  flex: 0 0 auto;
+  height: 45%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+/* Results panel takes remaining space */
+.live-monitor-layout .results-panel {
+  flex: 1;
+  overflow-y: auto;
 }

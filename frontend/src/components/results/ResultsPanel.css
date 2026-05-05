@@ -1,0 +1,43 @@
+/* Styles for Road Scene live results panel */
+.results-panel.rs-panel {
+  background: transparent;
+}
+.rs-card {
+  background: #0b1824;
+  border: 1px solid rgba(255,255,255,0.03);
+  padding: 14px;
+  border-radius: 12px;
+  color: #cbd5e1;
+}
+.rs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.rs-title { font-weight: 700; color: #fff; font-size: 16px; }
+.rs-analyzing { background: #064e3b; color: #86efac; padding: 6px 10px; border-radius: 20px; font-weight: 700; font-size: 13px; }
+.rs-overlay-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: 0 6px 18px rgba(2,6,23,0.6);
+}
+.rs-overlay-img { display:block; width:100%; height:auto; }
+.rs-live-badge {
+  position: absolute; left: 12px; top: 12px;
+  background: rgba(21,128,61,0.12); color: #16a34a; padding:6px 10px; border-radius:16px; font-weight:600; display:flex; gap:8px; align-items:center;
+  border:1px solid rgba(21,128,61,0.18);
+}
+.rs-hazard-badge {
+  position:absolute; right:12px; top:12px; background: #064e3b; color:#86efac; padding:6px 12px; border-radius:18px; font-weight:700;
+}
+.rs-body { display:flex; gap:14px; margin-top:12px; flex-wrap: wrap; }
+.rs-left { flex: 0 0 360px; }
+.rs-right { flex: 1; min-width: 240px; }
+.rs-class-list { margin-top:12px; list-style:none; padding:0; }
+.rs-class-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; }
+.rs-class-label { display:flex; align-items:center; gap:10px; color:#e2e8f0; }
+.rs-swatch { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.rs-pct { color:#94a3b8; }
