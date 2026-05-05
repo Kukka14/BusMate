@@ -1360,6 +1360,12 @@ export default function ActiveShiftPage() {
                   </div>
                 </div>
 
+                <div className="as-probs" style={{marginTop:8}}>
+                  <ModelBar name="LSTM" weight="0.60" prob={dwModels.lstm} color={confColor(dwModels.lstm)}/>
+                  <ModelBar name="RGB CNN" weight="0.25" prob={dwModels.rgb} color={confColor(dwModels.rgb)}/>
+                  <ModelBar name="IR CNN" weight="0.15" prob={dwModels.ir} color={confColor(dwModels.ir)}/>
+                </div>
+
                 <div className="as-feat-row" style={{marginTop:8}}>
                   <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
                   <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>

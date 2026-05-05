@@ -141,23 +141,65 @@ except Exception as _e:
     print(f"\u26a0  Emotion model load failed: {_e}")
     emotion_model = None
 
+# FER library fallback (used when emotion_model.h5 is unavailable)
+_fer_detector = None
+try:
+    from fer.fer import FER as _FER
+    _fer_detector = _FER(mtcnn=False)
+    print("\u2713 FER emotion detector loaded as fallback")
+except Exception as _fer_err:
+    print(f"\u26a0  FER not available: {_fer_err}")
+
+# FER label → our label mapping
+_FER_LABEL_MAP = {
+    "angry": "angry",
+    "disgust": "disgusted",
+    "fear": "fearful",
+    "happy": "happy",
+    "neutral": "neutral",
+    "sad": "sad",
+    "surprise": "surprised",
+}
+
 
 def _safe_emotion_predict(face_input):
-    """Return a prediction vector for `face_input`.
-    If the real model is unavailable, return a deterministic fallback.
-    """
+    """Return a prediction vector for `face_input` using the h5 model."""
     if emotion_model is None:
-        # Fallback: return a one-hot 'neutral' prediction
-        probs = np.zeros(len(EMOTION_LABELS), dtype=float)
-        probs[0] = 1.0
-        return probs
+        return None
     try:
         return emotion_model.predict(face_input, verbose=0)[0]
     except Exception:
-        # If runtime prediction fails, return fallback
-        probs = np.zeros(len(EMOTION_LABELS), dtype=float)
-        probs[0] = 1.0
-        return probs
+        return None
+
+
+def _detect_emotion(img_bgr):
+    """Full emotion detection pipeline. Returns (preds_array, bbox_dict, error).
+    Tries the h5 model first, falls back to FER library.
+    """
+    # --- Primary: h5 model via Haar-cascade preprocessing ---
+    processed, err = preprocess_face_from_bgr(img_bgr)
+    if not err:
+        face_input, bbox = processed
+        preds = _safe_emotion_predict(face_input)
+        if preds is not None:
+            return preds, bbox, None
+
+    # --- Fallback: FER library ---
+    if _fer_detector is not None:
+        try:
+            results = _fer_detector.detect_emotions(img_bgr)
+            if results:
+                best = max(results, key=lambda r: r["box"][2] * r["box"][3])
+                x, y, w, h = best["box"]
+                bbox = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+                raw_probs = best["emotions"]
+                mapped = {_FER_LABEL_MAP.get(k, k): float(v) for k, v in raw_probs.items()}
+                preds = np.array([mapped.get(lbl, 0.0) for lbl in EMOTION_LABELS], dtype=float)
+                return preds, bbox, None
+        except Exception as _fer_ex:
+            pass
+
+    return None, None, err or "No face detected"
 
 
 # -----------------------------
@@ -2051,17 +2093,13 @@ def predict():
 
         objects = detect_objects_yolo(img)
 
-        processed, err = preprocess_face_from_bgr(img)
+        preds, bbox, err = _detect_emotion(img)
 
-        if err:
+        if err or preds is None:
             return jsonify({
-                "error":err,
-                "objects":objects
+                "error": err or "No face detected",
+                "objects": objects
             })
-
-        face_input, bbox = processed
-
-        preds = _safe_emotion_predict(face_input)
 
         idx = int(np.argmax(preds))
         label = EMOTION_LABELS[idx]
@@ -2156,16 +2194,14 @@ def analyze_video_frames():
                 objects = detect_objects_yolo(frame)
 
                 # --- emotion detection ---
-                processed, err = preprocess_face_from_bgr(frame)
                 emotion_label   = "no_face"
                 confidence      = 0.0
                 probs_dict      = {}
                 bbox            = None
                 bvi_result      = None
 
-                if not err:
-                    face_input, bbox = processed
-                    preds = _safe_emotion_predict(face_input)
+                preds, bbox, _emo_err = _detect_emotion(frame)
+                if preds is not None:
                     idx = int(np.argmax(preds))
                     emotion_label = EMOTION_LABELS[idx]
                     confidence = float(preds[idx])
@@ -2259,9 +2295,9 @@ def on_frame(data):
 
     objects = detect_objects_yolo(img)
 
-    processed, err = preprocess_face_from_bgr(img)
+    preds, bbox, err = _detect_emotion(img)
 
-    if err:
+    if err or preds is None:
         emit("prediction", {
             "ok":          True,
             "driver_id":   driver_id,
@@ -2270,13 +2306,10 @@ def on_frame(data):
             "probabilities": {},
             "bbox":        None,
             "objects":     objects,
-            "error":       err
+            "error":       err or "No face detected"
         })
         return
 
-    face_input, bbox = processed
-
-    preds = _safe_emotion_predict(face_input)
     idx = int(np.argmax(preds))
     label = EMOTION_LABELS[idx]
     confidence = float(preds[idx])
