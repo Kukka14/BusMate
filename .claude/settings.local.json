@@ -20,7 +20,8 @@
       "Bash(pip install:*)",
       "Bash(dir \"D:/Research Project/Drownsiness/\")",
       "Bash(python -c ' *)",
-      "PowerShell(Get-ChildItem \"D:\\\\BusMate\\\\BusMate\\\\backend\\\\Drownsiness\\\\\" | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}})"
+      "PowerShell(Get-ChildItem \"D:\\\\BusMate\\\\BusMate\\\\backend\\\\Drownsiness\\\\\" | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "Bash(git rm *)"
     ]
   }
 }
