@@ -27,8 +27,8 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as _mob_
 from dotenv import load_dotenv
 load_dotenv()
 
-from user_management import register_user_management
-from user_management.config import Config
+from Emotion_Shift_Profile import register_user_management
+from Emotion_Shift_Profile.config import Config
 from drowsiness_engine import DrowsinessEngine
 # GPS routes and listener (lazy-start in __main__)
 from routes.gps_routes import gps_bp
@@ -183,33 +183,30 @@ CHEATING_LABELS = {
 
 
 # -----------------------------
-# BVI CONFIG
+# BVI CONFIG — PCA + K-Means data-driven model
 # -----------------------------
 
 WINDOW_SIZE = 30
 
-# Normalized weights
-ALPHA = 0.4
-BETA = 0.3
-GAMMA = 0.3
+_BVI_MODEL_DIR = Path(__file__).resolve().parent / "user_management" / "BVI_Models"
 
+try:
+    _pca_weights     = np.load(_BVI_MODEL_DIR / "pca_weights.npy")      # shape (4,) — [T, E, A, F]
+    _pca_score_range = np.load(_BVI_MODEL_DIR / "pca_score_range.npy")  # [min, max]
+    _bvi_thresholds  = np.load(_BVI_MODEL_DIR / "bvi_thresholds.npy")   # [t1, t2]
+    print(f"✅ BVI PCA+KMeans model loaded — weights={_pca_weights.round(4)}, thresholds={_bvi_thresholds.round(4)}")
+except Exception as _bvi_e:
+    print(f"⚠  BVI model load failed: {_bvi_e} — falling back to manual weights")
+    _pca_weights     = np.array([0.30, 0.25, 0.25, 0.20])
+    _pca_score_range = np.array([0.0, 1.0])
+    _bvi_thresholds  = np.array([0.35, 0.60])
 
 session_buffers: Dict[str, deque] = defaultdict(lambda: deque(maxlen=WINDOW_SIZE))
 
-
-# Emotion intensity map (covers all labels the model can emit)
-EMOTION_VALUE_MAP = {
-    "neutral":   0,
-    "happy":     1,
-    "sad":      -1,
-    "angry":    -2,
-    "fearful":  -2,
-    "fear":     -2,
-    "surprised": 0.5,
-    "surprise":  0.5,
-    "disgusted": -1,
-    "disgust":  -1,
-}
+# Indices of negative-affect and fatigue emotions in EMOTION_LABELS
+# Resolved after EMOTION_LABELS is populated (see feature extraction below)
+_NEGATIVE_EMOTIONS = {"angry", "disgusted", "fearful", "fear", "sad", "disgust"}
+_FATIGUE_EMOTIONS  = {"sad", "fearful", "fear"}
 
 
 # -----------------------------
@@ -317,77 +314,103 @@ def detect_objects_yolo(img_bgr: np.ndarray, conf: float = 0.15, imgsz: int = 64
 
 
 # -----------------------------
-# BVI CALCULATIONS
+# BVI CALCULATIONS — PCA + K-Means model
+# Features: T (transition_rate), E (entropy),
+#           A (negative_affect_conf), F (fatigue_proxy_conf)
 # -----------------------------
 
 def compute_transition_rate(labels):
-
     changes = sum(
-        1 for i in range(1,len(labels))
+        1 for i in range(1, len(labels))
         if labels[i] != labels[i-1]
     )
-
-    return changes / max(1,len(labels)-1)
-
-
-def compute_emotion_variance(labels):
-
-    values = [EMOTION_VALUE_MAP.get(l, 0) for l in labels]
-
-    return float(np.var(values))
+    return changes / max(1, len(labels) - 1)
 
 
 def compute_entropy(labels):
-
     counts = Counter(labels)
     total = len(labels)
-
-    entropy = 0
-
+    entropy = 0.0
     for c in counts.values():
-
         p = c / total
         entropy -= p * np.log2(p)
-
     return float(entropy)
 
 
-def compute_bvi_components(probs_buffer):
-    """Shared helper: compute T, V, E from a list of prediction arrays."""
-    label_ids = [int(np.argmax(p)) for p in probs_buffer]
-    emotions  = [EMOTION_LABELS[i].lower() for i in label_ids]
-    T = compute_transition_rate(emotions)
-    V = compute_emotion_variance(emotions)
-    E = compute_entropy(emotions)
-    return T, V, E
+def _negative_affect_conf(probs: np.ndarray) -> float:
+    """Sum of predicted probabilities for negative-affect emotion classes."""
+    total = 0.0
+    for i, label in enumerate(EMOTION_LABELS):
+        if label.lower() in _NEGATIVE_EMOTIONS and i < len(probs):
+            total += float(probs[i])
+    return total
+
+
+def _fatigue_proxy_conf(probs: np.ndarray) -> float:
+    """Sum of predicted probabilities for fatigue-proxy emotion classes."""
+    total = 0.0
+    for i, label in enumerate(EMOTION_LABELS):
+        if label.lower() in _FATIGUE_EMOTIONS and i < len(probs):
+            total += float(probs[i])
+    return total
 
 
 def compute_bvi_for_session(session_id):
-
+    """Compute BVI using PCA-derived weights and K-Means thresholds."""
     buffer = session_buffers[session_id]
 
     if len(buffer) < 5:
         return None
 
     probs_list = [np.array(p) for p in buffer]
-    T, V, E = compute_bvi_components(probs_list)
 
-    bvi = ALPHA * T + BETA * V + GAMMA * E
+    # Feature 1 — Transition Rate (T): how often emotion label changes
+    label_ids = [int(np.argmax(p)) for p in probs_list]
+    emotions  = [EMOTION_LABELS[i].lower() for i in label_ids]
+    T = compute_transition_rate(emotions)
 
-    if bvi < 0.4:
+    # Feature 2 — Entropy (E): unpredictability of emotion sequence
+    E = compute_entropy(emotions)
+
+    # Feature 3 — Negative Affect (A): avg probability of negative emotions
+    A = float(np.mean([_negative_affect_conf(p) for p in probs_list]))
+
+    # Feature 4 — Fatigue Proxy (F): avg probability of fatigue-linked emotions
+    F = float(np.mean([_fatigue_proxy_conf(p) for p in probs_list]))
+
+    # Normalize each feature to [0,1] using known max ranges
+    # T in [0,1], E in [0, log2(7)≈2.807], A in [0,1], F in [0,1]
+    features_scaled = np.array([
+        np.clip(T, 0.0, 1.0),
+        np.clip(E / 2.807, 0.0, 1.0),
+        np.clip(A, 0.0, 1.0),
+        np.clip(F, 0.0, 1.0),
+    ], dtype=float)
+
+    # Apply PCA-derived weights
+    raw_bvi = float(np.dot(features_scaled, _pca_weights))
+
+    # Normalize raw score to [0,1] using the saved training range
+    bvi_min, bvi_max = float(_pca_score_range[0]), float(_pca_score_range[1])
+    bvi = float(np.clip((raw_bvi - bvi_min) / max(bvi_max - bvi_min, 1e-9), 0.0, 1.0))
+
+    # Assign state using K-Means derived thresholds
+    t1, t2 = float(_bvi_thresholds[0]), float(_bvi_thresholds[1])
+    if bvi < t1:
         state = "stable"
-    elif bvi < 0.55:
+    elif bvi < t2:
         state = "unstable"
     else:
         state = "erratic"
 
     return {
-        "bvi_score": float(bvi),
-        "state": state,
-        "transition_rate": float(T),
-        "emotion_variance": float(V),
-        "entropy": float(E),
-        "window_size": len(buffer)
+        "bvi_score":        round(bvi, 4),
+        "state":            state,
+        "transition_rate":  round(T, 4),
+        "entropy":          round(E, 4),
+        "negative_affect":  round(A, 4),
+        "fatigue_proxy":    round(F, 4),
+        "window_size":      len(buffer),
     }
 
 
@@ -1069,7 +1092,7 @@ def _rs_append_sign_to_active_shift_score(
 ):
     """Append one road-sign object into the current active shift_scores document using $push."""
     try:
-        from user_management.database import get_db
+        from Emotion_Shift_Profile.database import get_db
 
         db = get_db()
         sid = str(schedule_id) if schedule_id else (_rs_active_shift_ctx.get("schedule_id") if isinstance(_rs_active_shift_ctx, dict) else None)
@@ -1425,7 +1448,10 @@ def rs_upload():
                 pass
         if not results_list:
             return jsonify({"detected": False, "message": "No road signs found in video."})
-        return jsonify({"detected": True, "results": results_list, "input_type": "video"})
+        primary = results_list[0]
+        primary["input_type"] = "video"
+        primary["results"] = results_list
+        return jsonify(primary)
 
     return jsonify({"error": "Unknown input_type"}), 400
 
@@ -1473,6 +1499,7 @@ def rs_stop_webcam_session():
     _rs_set_active_shift_ctx(None, None)
     return jsonify({"stopped": True})
 
+###
 
 @app.route("/capture_webcam", methods=["POST"])
 def rs_capture_webcam():
@@ -1978,7 +2005,7 @@ def index():
 def _save_frame_to_session(session_id, driver_id, frame_record):
     """Fire-and-forget: persist one frame result into driving_sessions."""
     try:
-        from user_management.database import get_db
+        from Emotion_Shift_Profile.database import get_db
         from bson import ObjectId
         db = get_db()
         db.driving_sessions.update_one(

@@ -1,13 +1,13 @@
 /* ─── Active Shift Page ────────────────────────────────────────────────────── */
 .as-main {
   flex: 1; min-width: 0;
-  display: flex; flex-direction: column;
   background:
     radial-gradient(circle at top left, rgba(34,197,94,0.08), transparent 28%),
     radial-gradient(circle at top right, rgba(56,189,248,0.08), transparent 24%),
     linear-gradient(180deg, #09101d 0%, #070b14 100%);
   color: #e2e8f0;
   overflow-y: auto;
+  height: 100vh;
 }
 
 /* ── Top bar ── */
