@@ -39,6 +39,40 @@ function hazardColor(level) {
   if (level === "Medium") return "#f59e0b";
   return "#22c55e";
 }
+
+// ── Road Sign audio helpers ────────────────────────────────────────────────────
+function playBeep(freq = 880, duration = 0.2, vol = 0.35) {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type            = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + duration);
+  } catch (_) {}
+}
+
+function speakText(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utt  = new SpeechSynthesisUtterance(text);
+  utt.lang   = "en-US";
+  utt.rate   = 0.95;
+  utt.pitch  = 1;
+  utt.volume = 1;
+  window.speechSynthesis.speak(utt);
+}
+
+function formatDistance(m) {
+  if (m === null || m === undefined || Number.isNaN(Number(m))) return "—";
+  return `${Number(m).toFixed(2)} m`;
+}
+
 const IcoStop  = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>;
 const IcoAlert = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
@@ -353,10 +387,12 @@ export default function ActiveShiftPage() {
   const [hzFinished, setHzFinished]   = useState(false);
 
   // ── Road Sign state ─────────────────────────────────────────────────────
-  const [rsSignInfo, setRsSignInfo]         = useState(null); // {class_name, confidence, status}
+  const [rsSignInfo, setRsSignInfo]         = useState(null); // {class_name, confidence, status, estimated_distance_m}
   const rsSignPollRef = useRef(null);
   const rsSignLastRef = useRef(null);
+  const rsSignAudioEnabledRef = useRef(true);
   const [rsSignLog, setRsSignLog]           = useState([]);
+  const [rsSignAudioEnabled, setRsSignAudioEnabled] = useState(true);
 
 
   // ── Auth guard ──────────────────────────────────────────────────────────
@@ -844,7 +880,7 @@ export default function ActiveShiftPage() {
   }, [shiftActive, shiftLogId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ── ROAD CAMERA: send frames to RSA and Road-Sign upload endpoints ──────
+  // ── ROAD CAMERA: send frames to RSA endpoint for scene analysis ──────────
   useEffect(() => {
     if (!shiftActive) return;
     let iv = null;
@@ -886,24 +922,6 @@ export default function ActiveShiftPage() {
             }
           })
           .catch(err => console.warn("[RSA] Fetch error:", err.message));
-        // Send to road-sign upload endpoint
-        fetch("/road-sign/upload", { method: "POST", body: form })
-          .then(r => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
-          })
-          .then(data => {
-            if (data && !data.error) {
-              console.log("[Road Sign] Received detection:", data);
-              setRsSignInfo(data.class_name ? data : null);
-              if (data.class_name && data.status === "Normal") {
-                setRsSignLog(prev => [ { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() }, ...prev.slice(0,19) ]);
-              }
-            } else {
-              console.log("[Road Sign] No detection or error:", data?.error || "none");
-            }
-          })
-          .catch(err => console.warn("[Road Sign] Fetch error:", err.message));
       } catch (e) {
         console.error("[Road] Frame processing error:", e);
       }
@@ -913,12 +931,15 @@ export default function ActiveShiftPage() {
   }, [shiftActive]);
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ── ROAD SIGN — Poll detection info when shift active ──────────────────
+  // ── ROAD SIGN — Poll detection info (mount + shift state dependent) ─────
   useEffect(() => {
+    // Start polling only when shift is active
     if (!shiftActive) {
       if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
       return;
     }
+
+    // Polling interval runs every 400ms while shift is active
     rsSignPollRef.current = setInterval(() => {
       fetch("/road-sign/get_detection_info")
         .then(r => {
@@ -926,26 +947,100 @@ export default function ActiveShiftPage() {
           return r.json();
         })
         .then(data => {
-          console.log("[Road Sign Poll] Received:", data);
+          console.log("[Road Sign Poll] Response:", data);
+          
+          // Check if detection has data
           const hasSign = data?.class_name;
-          setRsSignInfo(hasSign ? data : null);
-          if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
-            rsSignLastRef.current = data.class_name;
-            setRsSignLog(prev => [
-              { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() },
-              ...prev.slice(0, 19),
-            ]);
-          } else if (!hasSign) {
+          const hasVehicleMeta =
+            data?.nearest_vehicle_distance_m !== undefined ||
+            data?.vehicle_collision_risk !== undefined;
+
+          // Only update display if there's actual detection data
+          if (hasSign || hasVehicleMeta) {
+            setRsSignInfo(data);
+
+            // Audio alert + logging when sign detected (status = Normal)
+            if (hasSign && data.status === "Normal") {
+              // Only trigger alert when sign name changes (prevent duplicate alerts)
+              if (rsSignLastRef.current !== data.class_name) {
+                rsSignLastRef.current = data.class_name;
+
+                // Play audio alert if enabled
+                if (rsSignAudioEnabledRef.current) {
+                  const name = data.class_name.replace(/_/g, " ");
+                  playBeep(880, 0.2, 0.35);
+                  setTimeout(() => speakText(`Road sign detected: ${name}`), 250);
+                }
+
+                // Add to detection log
+                setRsSignLog(prev => [
+                  {
+                    class_name: data.class_name,
+                    confidence: data.confidence,
+                    status: data.status,
+                    estimated_distance_m: data.estimated_distance_m,
+                    time: new Date().toLocaleTimeString(),
+                  },
+                  ...prev.slice(0, 29), // keep last 30 entries
+                ]);
+              }
+            } else if (!hasSign) {
+              // Reset so next appearance triggers alert
+              rsSignLastRef.current = null;
+            }
+          } else {
+            // No detection — keep showing null to keep "Scanning" badge
+            setRsSignInfo(null);
             rsSignLastRef.current = null;
           }
         })
-        .catch(err => console.warn("[Road Sign Poll] Error:", err.message));
-    }, 400);
+        .catch(err => {
+          console.warn("[Road Sign Poll] Fetch error:", err.message);
+          setRsSignInfo(null);
+        });
+    }, 400); // Poll every 400ms
 
     return () => {
-      clearInterval(rsSignPollRef.current);
+      if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
     };
-  }, [shiftActive, API]);
+  }, [shiftActive]);
+
+  // Sync audio enabled ref with state
+  useEffect(() => {
+    rsSignAudioEnabledRef.current = rsSignAudioEnabled;
+  }, [rsSignAudioEnabled]);
+
+  // ── Road Sign — Start webcam session on shift start ──────────────────────
+  useEffect(() => {
+    if (!shiftActive) {
+      // Stop session when shift ends
+      fetch("/road-sign/stop_webcam_session", { method: "POST" }).catch(() => {});
+      return;
+    }
+    
+    // Start session when shift starts
+    const startSession = async () => {
+      try {
+        const res = await fetch("/road-sign/start_webcam_session", { method: "POST" });
+        if (!res.ok) {
+          console.warn("[Road Sign Session] Failed to start:", res.status);
+          return;
+        }
+        const data = await res.json();
+        if (data?.webcam_session_id) {
+          console.log("[Road Sign Session] Started:", data.webcam_session_id);
+          // Reset detection info when session starts
+          setRsSignInfo(null);
+          setRsSignLog([]);
+          rsSignLastRef.current = null;
+        }
+      } catch (err) {
+        console.error("[Road Sign Session] Error:", err.message);
+      }
+    };
+    
+    startSession();
+  }, [shiftActive]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── HAZARD — Auto-analyze route on shift start ─────────────────────────
@@ -1590,9 +1685,28 @@ export default function ActiveShiftPage() {
             <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
               <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
                 <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🚦 Road Sign</span>
-                <span className={`as-badge ${rsSignInfo?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
-                  {rsSignInfo ? "Detected" : "Scanning"}
-                </span>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <button
+                    onClick={() => setRsSignAudioEnabled(!rsSignAudioEnabled)}
+                    style={{
+                      padding:"2px 8px",
+                      borderRadius:6,
+                      fontSize:"0.7rem",
+                      fontWeight:600,
+                      border:"1px solid #334155",
+                      background:rsSignAudioEnabled?"#0b5fff22":"#475569",
+                      color:rsSignAudioEnabled?"#0b5fff":"#94a3b8",
+                      cursor:"pointer",
+                      transition:"all 0.2s"
+                    }}
+                    title={rsSignAudioEnabled ? "Audio alerts enabled" : "Audio alerts disabled"}
+                  >
+                    {rsSignAudioEnabled ? "🔊" : "🔇"}
+                  </button>
+                  <span className={`as-badge ${rsSignInfo?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
+                    {rsSignInfo ? "Detected" : "Scanning"}
+                  </span>
+                </div>
               </div>
               {cam2Error && <div className="as-cam-error">{cam2Error}</div>}
               <div className="as-cam-wrap">
@@ -1621,13 +1735,18 @@ export default function ActiveShiftPage() {
                 {rsSignInfo ? (() => {
                   const instr = getSignInstruction(rsSignInfo.class_name);
                   const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                  const confColor = rsSignInfo.confidence < 0.3 ? "#22c55e" : rsSignInfo.confidence < 0.6 ? "#f59e0b" : "#ef4444";
+                  const distStr = formatDistance(rsSignInfo.estimated_distance_m);
                   return (
                     <div className="as-rsign-detection" style={pc ? {background:pc.bg, borderColor:pc.border} : {}}>
                       <div className="as-rsign-det-head">
                         <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
                         <div>
                           <div className="as-rsign-det-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
-                          <div className="as-rsign-det-conf">{(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}</div>
+                          <div className="as-rsign-det-conf" style={{color:confColor}}>
+                            {(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}
+                            {distStr !== "—" && <span style={{marginLeft:8,color:"#f1f5f9"}}>📏 {distStr}</span>}
+                          </div>
                         </div>
                         {instr && (
                           <span className="as-rsign-priority" style={{background:pc?.badge}}>
@@ -1652,13 +1771,18 @@ export default function ActiveShiftPage() {
                 {rsSignLog.length > 0 && (
                   <div className="as-rsign-log">
                     <div className="as-rsign-log-title">Recent Detections</div>
-                    {rsSignLog.slice(0,5).map((entry,i) => (
-                      <div key={i} className="as-rsign-log-row">
-                        <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
-                        <span className="as-rsign-log-conf">{(entry.confidence*100).toFixed(0)}%</span>
-                        <span className="as-rsign-log-time">{entry.time}</span>
-                      </div>
-                    ))}
+                    {rsSignLog.slice(0,5).map((entry,i) => {
+                      const entryConfColor = entry.confidence < 0.3 ? "#22c55e" : entry.confidence < 0.6 ? "#f59e0b" : "#ef4444";
+                      const entryDist = formatDistance(entry.estimated_distance_m);
+                      return (
+                        <div key={i} className="as-rsign-log-row">
+                          <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
+                          <span className="as-rsign-log-conf" style={{color:entryConfColor}}>{(entry.confidence*100).toFixed(0)}%</span>
+                          {entryDist !== "—" && <span style={{fontSize:"0.7rem",color:"#94a3b8"}}>{entryDist}</span>}
+                          <span className="as-rsign-log-time">{entry.time}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
