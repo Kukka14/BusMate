@@ -48,6 +48,28 @@ const CONSECUTIVE_THRESHOLD = 5;
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Helper components ─────────────────────────────────────────────────────────
 
+// Large confidence gauge (matches DrowsinessMonitorPage style)
+function DwConfGauge({ value, label, color }) {
+  const cx = 60, cy = 60, r = 50;
+  const circ = 2 * Math.PI * r;
+  const pct  = value != null ? Math.min(1, Math.max(0, value)) : 0;
+  return (
+    <svg width="120" height="120" viewBox="0 0 120 120">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e293b" strokeWidth="9"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color || "#64748b"} strokeWidth="9"
+        strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)} strokeLinecap="round"
+        transform={`rotate(-90 ${cx} ${cy})`}
+        style={{ transition: "stroke-dashoffset 0.4s ease, stroke 0.3s" }}/>
+      <text x={cx} y={cy - 5} textAnchor="middle" fill="#f1f5f9" fontSize="18" fontWeight="700" fontFamily="Inter,sans-serif">
+        {value != null ? `${Math.round(value * 100)}%` : "—"}
+      </text>
+      <text x={cx} y={cy + 13} textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="Inter,sans-serif">
+        {label ?? "Waiting"}
+      </text>
+    </svg>
+  );
+}
+
 function MiniGauge({ value, label, color, size = 80 }) {
   const cx = size/2, cy = size/2, r = size/2-6;
   const circ = 2*Math.PI*r;
@@ -1350,33 +1372,85 @@ export default function ActiveShiftPage() {
               <div className="as-cam-wrap">
                 <video ref={videoRefDrowsinessDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
               </div>
-              {/* Full Drowsiness analysis panel (duplicated) */}
-              <div className="as-dw-body" style={{marginTop:"0.5rem"}}>
-                <div className="as-dw-gauge-row">
-                  <MiniGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)} size={70}/>
-                  <div className="as-dw-right" style={{marginLeft:12}}>
-                    <div className="as-dw-streak-label">Alert Streak</div>
-                    <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
+              {/* Drowsiness analysis — DrowsinessMonitor style */}
+              <div style={{marginTop:"0.5rem",display:"flex",flexDirection:"column",gap:"0.5rem"}}>
+
+                {/* Confidence gauge row */}
+                <div style={{background:"#0d1f35",borderRadius:10,padding:"0.6rem 0.75rem",border:"1px solid #1e3a5f"}}>
+                  <div style={{fontSize:"0.62rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>
+                    Drowsiness Confidence
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <DwConfGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:"1.6rem",fontWeight:800,color:verdictColor(dwVerdict),lineHeight:1}}>
+                        {dwConf!=null?`${Math.round(dwConf*100)}%`:"—"}
+                      </div>
+                      <div style={{fontSize:"0.65rem",color:"#64748b",marginBottom:8}}>Drowsy probability</div>
+                      <div style={{fontSize:"0.65rem",color:"#94a3b8",fontWeight:600,marginBottom:3}}>Alert Streak</div>
+                      <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
+                    </div>
                   </div>
                 </div>
 
-                <div className="as-probs" style={{marginTop:8}}>
-                  <ModelBar name="M1 EffNet"  weight="10%" prob={dwResult?.models?.m1?.drowsy_prob} color={confColor(dwResult?.models?.m1?.drowsy_prob)}/>
-                  <ModelBar name="M2 LSTM"    weight="35%" prob={dwResult?.models?.m2?.drowsy_prob} color={confColor(dwResult?.models?.m2?.drowsy_prob)}/>
-                  <ModelBar name="M3 Fusion"  weight="25%" prob={dwResult?.models?.m3?.drowsy_prob} color={confColor(dwResult?.models?.m3?.drowsy_prob)}/>
-                  <ModelBar name="M4 Trans"   weight="15%" prob={dwResult?.models?.m4?.drowsy_prob} color={confColor(dwResult?.models?.m4?.drowsy_prob)}/>
-                  <ModelBar name="M5 TCN"     weight="15%" prob={dwResult?.models?.m5?.drowsy_prob} color={confColor(dwResult?.models?.m5?.drowsy_prob)}/>
+                {/* Facial features grid */}
+                <div style={{background:"#0d1f35",borderRadius:10,padding:"0.6rem 0.75rem",border:"1px solid #1e3a5f"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <span style={{fontSize:"0.62rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase"}}>Facial Features</span>
+                    {dwResult?.face_detected!=null&&(
+                      <span style={{fontSize:"0.6rem",padding:"1px 6px",borderRadius:8,fontWeight:600,
+                        background:dwResult.face_detected?"#16a34a22":"#dc262622",
+                        color:dwResult.face_detected?"#22c55e":"#ef4444",
+                        border:`1px solid ${dwResult.face_detected?"#22c55e44":"#ef444444"}`}}>
+                        {dwResult.face_detected?"Face OK":"No Face"}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:"0.3rem"}}>
+                    {[
+                      {label:"EAR",       val:dwFeatures.ear?.toFixed(3),        unit:"",  warn:dwFeatures.ear!=null&&dwFeatures.ear<0.25},
+                      {label:"MAR",       val:dwFeatures.mar?.toFixed(3),        unit:"",  warn:dwFeatures.mar!=null&&dwFeatures.mar>0.60},
+                      {label:"Pitch",     val:dwFeatures.pitch?.toFixed(1),      unit:"°", warn:dwFeatures.pitch!=null&&Math.abs(dwFeatures.pitch)>20},
+                      {label:"Yaw",       val:dwFeatures.yaw?.toFixed(1),        unit:"°", warn:dwFeatures.yaw!=null&&Math.abs(dwFeatures.yaw)>30},
+                      {label:"Eye Blink", val:dwFeatures.eye_closure?.toFixed(2),unit:"",  warn:dwFeatures.eye_closure!=null&&dwFeatures.eye_closure>0.45},
+                      {label:"PERCLOS",   val:dwFeatures.perclos!=null?`${Math.round(dwFeatures.perclos*100)}`:null, unit:"%", warn:dwFeatures.perclos!=null&&dwFeatures.perclos>0.30},
+                      {label:"Yawn",      val:dwFeatures.yawn_freq!=null?`${Math.round(dwFeatures.yawn_freq*100)}`:null, unit:"%", warn:dwFeatures.yawn_freq!=null&&dwFeatures.yawn_freq>0.20},
+                    ].map(({label,val,unit,warn})=>(
+                      <div key={label} style={{background:warn?"#7f1d1d22":"#071828",borderRadius:6,padding:"0.3rem 0.5rem",border:`1px solid ${warn?"#ef444433":"#1e293b"}`}}>
+                        <div style={{fontSize:"0.58rem",color:warn?"#f87171":"#64748b",fontWeight:600,letterSpacing:"0.04em"}}>{label}</div>
+                        <div style={{fontSize:"0.78rem",fontWeight:700,color:warn?"#ef4444":"#e2e8f0"}}>{val!=null?`${val}${unit}`:"—"}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="as-feat-row" style={{marginTop:8, flexWrap:"wrap", gap:"0.35rem"}}>
-                  <FeatChip label="EAR"       value={dwFeatures.ear?.toFixed(3)}       unit=""  warn={dwFeatures.ear!=null && dwFeatures.ear<0.25}/>
-                  <FeatChip label="MAR"       value={dwFeatures.mar?.toFixed(3)}       unit=""  warn={dwFeatures.mar!=null && dwFeatures.mar>0.60}/>
-                  <FeatChip label="Pitch"     value={dwFeatures.pitch?.toFixed(1)}     unit="°" warn={dwFeatures.pitch!=null && Math.abs(dwFeatures.pitch)>20}/>
-                  <FeatChip label="Yaw"       value={dwFeatures.yaw?.toFixed(1)}       unit="°" warn={dwFeatures.yaw!=null && Math.abs(dwFeatures.yaw)>30}/>
-                  <FeatChip label="Eye Blink" value={dwFeatures.eye_closure?.toFixed(2)} unit="" warn={dwFeatures.eye_closure!=null && dwFeatures.eye_closure>0.45}/>
-                  <FeatChip label="PERCLOS"   value={dwFeatures.perclos!=null ? String(Math.round(dwFeatures.perclos*100)) : null} unit="%" warn={dwFeatures.perclos!=null && dwFeatures.perclos>0.30}/>
-                  <FeatChip label="Yawn"      value={dwFeatures.yawn_freq!=null ? String(Math.round(dwFeatures.yawn_freq*100)) : null} unit="%" warn={dwFeatures.yawn_freq!=null && dwFeatures.yawn_freq>0.20}/>
+                {/* Model bars */}
+                <div style={{background:"#0d1f35",borderRadius:10,padding:"0.6rem 0.75rem",border:"1px solid #1e3a5f"}}>
+                  <div style={{fontSize:"0.62rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>Model Ensemble</div>
+                  {[
+                    {name:"M1 EffNet",  w:"10%",key:"m1"},
+                    {name:"M2 LSTM",    w:"35%",key:"m2"},
+                    {name:"M3 Fusion",  w:"25%",key:"m3"},
+                    {name:"M4 Trans",   w:"15%",key:"m4"},
+                    {name:"M5 TCN",     w:"15%",key:"m5"},
+                  ].map(({name,w,key})=>{
+                    const prob=dwResult?.models?.[key]?.drowsy_prob;
+                    const pct=prob!=null?Math.round(prob*100):null;
+                    const col=prob==null?null:prob>0.6?"#ef4444":prob>0.4?"#f59e0b":"#22c55e";
+                    return(
+                      <div key={key} style={{marginBottom:5}}>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:"0.65rem",marginBottom:2}}>
+                          <span style={{color:"#94a3b8"}}>{name} <span style={{color:"#475569"}}>·{w}</span></span>
+                          <span style={{color:col??"#475569",fontWeight:700}}>{pct!=null?`${pct}%`:"—"}</span>
+                        </div>
+                        <div style={{height:4,background:"#1e293b",borderRadius:2,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${pct??0}%`,background:col??"#334155",borderRadius:2,transition:"width 0.4s ease"}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+
               </div>
             </div>
 
@@ -1542,29 +1616,127 @@ export default function ActiveShiftPage() {
               <div className={`as-panel as-dw-panel ${activePanel!=="all"?"wide":""}`}>
                 <div className="as-panel-head">
                   <span className="as-panel-title">😴 Drowsiness Monitor</span>
-                  {dwVerdict && (
-                    <span className="as-verdict-pill" style={{color:verdictColor(dwVerdict),borderColor:verdictColor(dwVerdict)}}>
-                      {dwVerdict}
-                    </span>
-                  )}
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    {dwResult?.face_detected != null && (
+                      <span style={{padding:"2px 8px",borderRadius:10,fontSize:"0.68rem",fontWeight:600,
+                        background: dwResult.face_detected?"#16a34a22":"#dc262622",
+                        color: dwResult.face_detected?"#22c55e":"#ef4444",
+                        border:`1px solid ${dwResult.face_detected?"#22c55e55":"#ef444455"}`}}>
+                        {dwResult.face_detected?"Face OK":"No Face"}
+                      </span>
+                    )}
+                    {dwVerdict && (
+                      <span className="as-verdict-pill" style={{color:verdictColor(dwVerdict),borderColor:verdictColor(dwVerdict)+"55"}}>
+                        {dwVerdict}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="as-dw-body">
-                  {/* Conf gauge + streak */}
-                  <div className="as-dw-gauge-row">
-                    <MiniGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)} size={90}/>
-                    <div className="as-dw-right">
-                      <div className="as-dw-streak-label">Alert Streak</div>
-                      <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
+                <div className="as-dw-body" style={{display:"flex",flexDirection:"column",gap:"0.75rem"}}>
+
+                  {/* ── Confidence gauge + streak ── */}
+                  <div style={{background:"#0d1f35",borderRadius:10,padding:"0.75rem",border:"1px solid #1e3a5f"}}>
+                    <div style={{fontSize:"0.7rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>
+                      Drowsiness Confidence
+                      <span style={{marginLeft:6,color:"#475569",fontWeight:400,textTransform:"none",letterSpacing:0}}>
+                        M1(10%) · M2(35%) · M3(25%) · M4(15%) · M5(15%)
+                      </span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:16}}>
+                      <DwConfGauge value={dwConf} label={dwVerdict||"Waiting"} color={verdictColor(dwVerdict)}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:"2rem",fontWeight:800,color:verdictColor(dwVerdict),lineHeight:1}}>
+                          {dwConf!=null ? `${Math.round(dwConf*100)}%` : "—"}
+                        </div>
+                        <div style={{fontSize:"0.7rem",color:"#64748b",marginBottom:10}}>Drowsy probability</div>
+                        <div style={{fontSize:"0.7rem",color:"#94a3b8",fontWeight:600,marginBottom:4}}>Alert Streak</div>
+                        <StreakBar count={dwStreak} threshold={CONSECUTIVE_THRESHOLD}/>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Feature chips */}
-                  <div className="as-feat-row">
-                    <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
-                    <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>
-                    <FeatChip label="Pitch" value={dwFeatures.pitch?.toFixed(1)} unit="°" warn={Math.abs(dwFeatures.pitch||0)>25}/>
+                  {/* ── Session analytics (solo tab only) ── */}
+                  {activePanel==="drowsiness" && <div style={{background:"#0d1f35",borderRadius:10,padding:"0.75rem",border:"1px solid #1e3a5f"}}>
+                    <div style={{fontSize:"0.7rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>
+                      Session Analytics
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.5rem"}}>
+                      {[
+                        {label:"Frames Analyzed", val: dwFrames>0?dwFrames:"—", color:"#f1f5f9"},
+                        {label:"Drowsy Frames",   val: dwFrames>0?`${dwDrowsyFrames} (${Math.round(dwDrowsyFrames/Math.max(1,dwFrames)*100)}%)`:"—", color: dwDrowsyFrames>0?"#f59e0b":"#22c55e"},
+                        {label:"Alerts Triggered",val: shiftActive?dwAlerts:"—", color: dwAlerts>0?"#ef4444":"#22c55e"},
+                        {label:"Verdict",          val: dwVerdict||"—", color: verdictColor(dwVerdict)},
+                      ].map(({label,val,color})=>(
+                        <div key={label} style={{background:"#071828",borderRadius:7,padding:"0.4rem 0.6rem",border:"1px solid #1e293b"}}>
+                          <div style={{fontSize:"0.62rem",color:"#64748b",marginBottom:2}}>{label}</div>
+                          <div style={{fontSize:"0.85rem",fontWeight:700,color}}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>}
+
+                  {/* ── Facial features ── */}
+                  <div style={{background:"#0d1f35",borderRadius:10,padding:"0.75rem",border:"1px solid #1e3a5f"}}>
+                    <div style={{fontSize:"0.7rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>
+                      Facial Features
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:"0.35rem"}}>
+                      {[
+                        {label:"EAR",       val:dwFeatures.ear?.toFixed(3),       unit:"",  warn:dwFeatures.ear!=null&&dwFeatures.ear<0.25},
+                        {label:"MAR",       val:dwFeatures.mar?.toFixed(3),       unit:"",  warn:dwFeatures.mar!=null&&dwFeatures.mar>0.60},
+                        {label:"Pitch",     val:dwFeatures.pitch?.toFixed(1),     unit:"°", warn:dwFeatures.pitch!=null&&Math.abs(dwFeatures.pitch)>20},
+                        {label:"Yaw",       val:dwFeatures.yaw?.toFixed(1),       unit:"°", warn:dwFeatures.yaw!=null&&Math.abs(dwFeatures.yaw)>30},
+                        {label:"Eye Blink", val:dwFeatures.eye_closure?.toFixed(2),unit:"", warn:dwFeatures.eye_closure!=null&&dwFeatures.eye_closure>0.45},
+                        {label:"PERCLOS",   val:dwFeatures.perclos!=null?`${Math.round(dwFeatures.perclos*100)}`:null, unit:"%", warn:dwFeatures.perclos!=null&&dwFeatures.perclos>0.30},
+                        {label:"Yawn",      val:dwFeatures.yawn_freq!=null?`${Math.round(dwFeatures.yawn_freq*100)}`:null, unit:"%", warn:dwFeatures.yawn_freq!=null&&dwFeatures.yawn_freq>0.20},
+                      ].map(({label,val,unit,warn})=>(
+                        <div key={label} style={{background: warn?"#7f1d1d22":"#071828", borderRadius:7,padding:"0.35rem 0.6rem",
+                          border:`1px solid ${warn?"#ef444444":"#1e293b"}`}}>
+                          <div style={{fontSize:"0.6rem",color:warn?"#f87171":"#64748b",fontWeight:600,letterSpacing:"0.04em"}}>{label}</div>
+                          <div style={{fontSize:"0.82rem",fontWeight:700,color:warn?"#ef4444":"#e2e8f0"}}>
+                            {val!=null?`${val}${unit}`:"—"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{marginTop:6,fontSize:"0.62rem",color:"#475569",display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <span>EAR &lt;0.25 → closing</span>
+                      <span>PERCLOS &gt;30% → sustained</span>
+                      <span>Yawn &gt;20% → frequent</span>
+                    </div>
                   </div>
+
+                  {/* ── Model probability bars ── */}
+                  <div style={{background:"#0d1f35",borderRadius:10,padding:"0.75rem",border:"1px solid #1e3a5f"}}>
+                    <div style={{fontSize:"0.7rem",color:"#64748b",fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>
+                      Model Ensemble
+                    </div>
+                    {[
+                      {name:"M1 EfficientNet-B0", weight:"10%", key:"m1"},
+                      {name:"M2 CNN + LSTM",       weight:"35%", key:"m2"},
+                      {name:"M3 Reliability Fusion",weight:"25%",key:"m3"},
+                      {name:"M4 CNN + Transformer",weight:"15%", key:"m4"},
+                      {name:"M5 CNN + MS-TCN",     weight:"15%", key:"m5"},
+                    ].map(({name,weight,key})=>{
+                      const prob = dwResult?.models?.[key]?.drowsy_prob;
+                      const avail = dwResult?.models?.[key]?.available;
+                      const pct = prob!=null ? Math.round(prob*100) : null;
+                      const col = prob==null?null : prob>0.6?"#ef4444":prob>0.4?"#f59e0b":"#22c55e";
+                      return (
+                        <div key={key} style={{marginBottom:6}}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:"0.68rem",marginBottom:2}}>
+                            <span style={{color:"#94a3b8"}}>{name} <span style={{color:"#475569"}}>({weight})</span></span>
+                            <span style={{color:col??"#475569",fontWeight:600}}>{pct!=null?`${pct}%`:avail===false?"—":"…"}</span>
+                          </div>
+                          <div style={{height:4,background:"#1e293b",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct??0}%`,background:col??"#334155",borderRadius:2,transition:"width 0.4s ease"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
                 </div>
               </div>
             )}
