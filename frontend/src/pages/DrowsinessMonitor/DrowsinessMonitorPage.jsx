@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import Sidebar from "../../components/common/Sidebar";
@@ -104,10 +104,12 @@ export default function DrowsinessMonitorPage() {
   const videoRef   = useRef(null);
   const captureRef = useRef(null);   // hidden canvas for frame capture
   const overlayRef = useRef(null);   // visible bbox canvas
+  const streamRef  = useRef(null);
   const socketRef   = useRef(null);
   const sendIvRef   = useRef(null);
   const rafRef      = useRef(null);
   const inFlightRef = useRef(false);  // true while server is processing a frame
+  const autoStartedRef = useRef(false);
 
   const user  = JSON.parse(localStorage.getItem("user")  || "{}");
   const token = localStorage.getItem("token");
@@ -117,6 +119,10 @@ export default function DrowsinessMonitorPage() {
   const [result,         setResult]         = useState(null);
   const [fps,            setFps]            = useState(10);
   const [camError,       setCamError]       = useState("");
+  const [cameraDevices,  setCameraDevices]  = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
+  const [cameraStatus,   setCameraStatus]   = useState("Loading cameras...");
+  const [sensitivity,    setSensitivity]    = useState("very_strict");
 
   // session
   const [sessionId,      setSessionId]      = useState(null);
@@ -146,24 +152,112 @@ export default function DrowsinessMonitorPage() {
     navigate("/login");
   }
 
-  // ── Webcam ────────────────────────────────────────────────────────────────
+  const stopCurrentStream = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const loadAvailableCameras = useCallback(async (preferredId = "") => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setCameraStatus("Camera selection is not supported in this browser.");
+      return;
+    }
+
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const cameras = list.filter((d) => d.kind === "videoinput");
+    setCameraDevices(cameras);
+
+    setSelectedCameraId((currentId) => {
+      if (currentId && cameras.some((cam) => cam.deviceId === currentId)) {
+        return currentId;
+      }
+      if (preferredId && cameras.some((cam) => cam.deviceId === preferredId)) {
+        return preferredId;
+      }
+      return cameras[0]?.deviceId || "";
+    });
+
+    setCameraStatus(
+      cameras.length
+        ? `${cameras.length} camera${cameras.length === 1 ? "" : "s"} detected`
+        : "No cameras detected"
+    );
+  }, []);
+
+  // ── Camera list ───────────────────────────────────────────────────────────
   useEffect(() => {
-    let stream;
+    loadAvailableCameras().catch(() => {
+      setCamError("Unable to load cameras.");
+      setCameraStatus("Unable to load cameras");
+    });
+
+    const onDeviceChange = () => {
+      loadAvailableCameras(selectedCameraId).catch(() => {});
+    };
+
+    navigator.mediaDevices?.addEventListener?.("devicechange", onDeviceChange);
+
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.("devicechange", onDeviceChange);
+    };
+  }, [loadAvailableCameras, selectedCameraId]);
+
+  // ── Webcam stream ─────────────────────────────────────────────────────────
+  useEffect(() => {
     let active = true;
-    navigator.mediaDevices
-      .getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false })
-      .then(s => {
-        if (!active) { s.getTracks().forEach(t => t.stop()); return; }
-        stream = s;
-        if (videoRef.current) videoRef.current.srcObject = s;
-      })
-      .catch(() => setCamError("Camera permission denied or not available."));
+
+    const startCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCamError("Camera API is not supported in this browser.");
+        return;
+      }
+
+      try {
+        setCamError("");
+
+        const baseVideo = { width: { ideal: 1280 }, height: { ideal: 720 } };
+        const videoConstraint = selectedCameraId
+          ? { ...baseVideo, deviceId: { exact: selectedCameraId } }
+          : { ...baseVideo, facingMode: "user" };
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+
+        if (!active) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        stopCurrentStream();
+        streamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+
+        const actualId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+        setCameraStatus("Camera ready");
+        await loadAvailableCameras(actualId || selectedCameraId);
+      } catch {
+        if (active) {
+          setCamError("Camera permission denied or not available.");
+          setCameraStatus("Unable to start selected camera");
+        }
+      }
+    };
+
+    startCamera();
+
     return () => {
       active = false;
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
+      stopCurrentStream();
     };
-  }, []);
+  }, [loadAvailableCameras, selectedCameraId, stopCurrentStream]);
 
   // ── Socket.IO ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -216,6 +310,7 @@ export default function DrowsinessMonitorPage() {
       socket.emit("drowsiness_frame", {
         image:     dataUrl,
         session_id: sessionId,
+        sensitivity,
         client_ts: Date.now(),
       });
     }, ms);
@@ -223,7 +318,7 @@ export default function DrowsinessMonitorPage() {
       clearInterval(sendIvRef.current);
       inFlightRef.current = false;
     };
-  }, [fps, sessionId]);
+  }, [fps, sessionId, sensitivity]);
 
   // ── Bounding-box overlay rAF loop ─────────────────────────────────────────
   useEffect(() => {
@@ -253,6 +348,7 @@ export default function DrowsinessMonitorPage() {
 
   // ── Session management ────────────────────────────────────────────────────
   async function startSession() {
+    if (sessionBusy || sessionId) return;
     setSessionBusy(true); setSessionSummary(null); setAlertLog([]);
     try {
       const r = await fetch(`${API}/api/driver/session/start`, {
@@ -271,6 +367,14 @@ export default function DrowsinessMonitorPage() {
     } catch (e) { console.error(e); }
     finally { setSessionBusy(false); }
   }
+
+  // Auto-start a monitoring session when page opens.
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    startSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function stopSession() {
     setSessionBusy(true);
@@ -356,7 +460,7 @@ export default function DrowsinessMonitorPage() {
   const verdict    = result?.verdict;
   const confidence = result?.confidence;
   const isAlert    = result?.alert;
-  const streak     = result?.consecutive_frames ?? 0;
+  const streak     = Math.min(result?.consecutive_frames ?? 0, CONSECUTIVE_THRESHOLD);
   const models     = result?.models    ?? {};
   const features   = result?.features  ?? {};
   const faceOk     = result?.face_detected;
@@ -420,56 +524,83 @@ export default function DrowsinessMonitorPage() {
           {/* ══════════════════ LIVE TAB ══════════════════════ */}
           {activeTab === "live" && (<>
 
-            {/* Drowsiness alert banner */}
-            {isAlert && (
-              <div className="dw-alert-banner">
-                <IcoAlert />
-                <strong>DROWSINESS ALERT</strong>&nbsp;— Sustained drowsiness detected! Pull over safely.
+            {/* Compact summary cards */}
+            <div className={`dw-summary-grid ${sessionId ? "active" : ""}`}>
+              <div className="dw-summary-card dw-summary-session">
+                <span className="dw-summary-kicker">Session</span>
+                <div className="dw-summary-main">
+                  {sessionId ? "Active" : "Initializing..."}
+                </div>
+                <div className="dw-summary-meta">
+                  <span>⏱ {elapsed}</span>
+                  <span>📸 {sessionFrames} frames</span>
+                  <span>🚨 {sessionAlerts} alerts</span>
+                  <span>ID: {sessionId ? sessionId.slice(-8) : "—"}</span>
+                </div>
               </div>
-            )}
 
-            {/* Session banner */}
-            <div className={`dw-session-banner ${sessionId ? "active" : ""}`}>
-              <div className="dw-session-left">
-                {sessionId ? (
-                  <>
-                    <div className="dw-session-title">Session Active — AI monitoring every frame in real-time</div>
-                    <div className="dw-session-meta">
-                      <span>⏱ {elapsed}</span>
-                      <span>📸 {sessionFrames} frames</span>
-                      <span>🚨 {sessionAlerts} alerts</span>
-                      <span className="dw-session-id">ID: {sessionId.slice(-8)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="dw-session-title">Start a Drowsiness Monitoring Session</div>
-                )}
-              </div>
-              <div className="dw-session-controls">
-                <label className="dw-fps-label">
-                  FPS
-                  <input type="number" min={1} max={10} value={fps}
-                    onChange={e => setFps(Math.max(1, Math.min(10, Number(e.target.value) || 10)))}
-                    className="dw-fps-input"/>
-                </label>
-                <button
-                  className={`dw-session-btn ${sessionId ? "stop" : "start"}`}
-                  onClick={sessionId ? stopSession : startSession}
-                  disabled={sessionBusy}>
-                  {sessionBusy
-                    ? <span className="dw-spinner-sm"/>
-                    : sessionId
-                      ? <><IcoStop/> STOP SESSION</>
-                      : <><IcoCam/> START SESSION</>}
-                </button>
-              </div>
+              <label className="dw-summary-card dw-summary-control">
+                <span className="dw-summary-kicker">Camera</span>
+                <div className="dw-cam-select-wrap dw-summary-control-row">
+                  <select
+                    className="dw-cam-select dw-summary-control-input"
+                    value={selectedCameraId}
+                    onChange={(e) => setSelectedCameraId(e.target.value)}
+                    disabled={cameraDevices.length === 0}
+                  >
+                    {cameraDevices.length === 0 ? (
+                      <option value="">No cameras</option>
+                    ) : (
+                      cameraDevices.map((cam, idx) => (
+                        <option key={cam.deviceId} value={cam.deviceId}>
+                          {cam.label || `Camera ${idx + 1}`}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    className="dw-cam-refresh-btn"
+                    onClick={() => loadAvailableCameras(selectedCameraId).catch(() => {})}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </label>
+
+              <label className="dw-summary-card dw-summary-control">
+                <span className="dw-summary-kicker">FPS</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={fps}
+                  onChange={e => setFps(Math.max(1, Math.min(10, Number(e.target.value) || 10)))}
+                  className="dw-fps-input dw-summary-control-input"
+                />
+              </label>
+
+              <label className="dw-summary-card dw-summary-control">
+                <span className="dw-summary-kicker">Sensitivity</span>
+                <select
+                  className="dw-sense-select dw-summary-control-input"
+                  value={sensitivity}
+                  onChange={(e) => setSensitivity(e.target.value)}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="strict">Strict</option>
+                  <option value="very_strict">Very Strict</option>
+                </select>
+              </label>
             </div>
+            {cameraStatus && <div className="dw-cam-status">{cameraStatus}</div>}
 
             {/* Main 2-col grid */}
             <div className="dw-grid">
 
-              {/* ── Left: Camera feed ── */}
-              <div className="dw-card dw-cam-card">
+              {/* ── Left column: Camera feed + alert log ── */}
+              <div className="dw-left-col">
+                <div className="dw-card dw-cam-card">
                 <div className="dw-card-head">
                   <div>
                     <span className="dw-card-title">Camera Feed</span>
@@ -514,7 +645,7 @@ export default function DrowsinessMonitorPage() {
                         <ellipse cx="60" cy="65" rx="40" ry="52" fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 4"/>
                       </svg>
                       <p style={{ marginTop: "-40px", color: "#94a3b8", fontSize: "0.78rem", textAlign: "center" }}>
-                        Press <strong style={{ color: "#f1f5f9" }}>Start Session</strong><br/>and centre your face
+                        Session is starting automatically...<br/>please centre your face
                       </p>
                     </div>
                   )}
@@ -536,6 +667,97 @@ export default function DrowsinessMonitorPage() {
                     {isAlert ? "⚠ ALERT ACTIVE" : sessionId ? "✓ Monitoring" : "— Not started"}
                   </span>
                 </div>
+                </div>
+
+                {/* Alert log */}
+                {alertLog.length > 0 && (
+                  <div className="dw-card dw-alert-log-card">
+                    <div className="dw-card-head">
+                      <span className="dw-card-title">Alert Log — This Session</span>
+                      <span className="dw-card-badge red">{alertLog.length} Alerts</span>
+                    </div>
+                    <div className="dw-alert-log">
+                      {alertLog.map((a, i) => (
+                        <div key={i} className="dw-alert-log-row">
+                          <span className="dw-al-time">{a.time}</span>
+                          <span className="dw-al-conf" style={{ color: "#ef4444" }}>
+                            {Math.round((a.confidence ?? 0) * 100)}% drowsy
+                          </span>
+                          {a.ear != null && (
+                            <span className="dw-al-ear">EAR: {a.ear.toFixed(3)}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Live Driver Alertness Score ── */}
+                {liveDAS && (
+                  <div className="dw-card dw-das-live-card">
+                    <div className="dw-card-head">
+                      <div>
+                        <span className="dw-card-title">Driver Alertness Score</span>
+                        <span className="dw-card-hint">Updates every frame · Resets on new session</span>
+                      </div>
+                      <span className="dw-card-badge" style={{
+                        background: liveDAS.tierColor + "22",
+                        color: liveDAS.tierColor,
+                        border: `1px solid ${liveDAS.tierColor}44`,
+                      }}>{liveDAS.tier}</span>
+                    </div>
+
+                    {/* Big score */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: "0.3rem", margin: "0.2rem 0" }}>
+                      <span style={{ fontSize: "1.85rem", fontWeight: 800, lineHeight: 1, color: liveDAS.tierColor,
+                                     transition: "color 0.4s" }}>
+                        {liveDAS.das}
+                      </span>
+                      <span style={{ fontSize: "0.82rem", color: "#64748b", marginBottom: "3px" }}>/ 100</span>
+                    </div>
+
+                    {/* Score breakdown bars */}
+                    {[{label: "Alertness (drowsy rate)", pts: liveDAS.alertPts, max: 50,
+                        hint: `${Math.round(liveDAS.dPct * 100)}% drowsy frames`,
+                        color: liveDAS.alertPts >= 40 ? "#22c55e" : liveDAS.alertPts >= 20 ? "#f59e0b" : "#ef4444"},
+                      {label: "Sustained Alertness",   pts: liveDAS.sustainPts, max: 50,
+                        hint: `${sessionAlerts} alert event${sessionAlerts !== 1 ? "s" : ""}`,
+                        color: liveDAS.sustainPts >= 40 ? "#22c55e" : liveDAS.sustainPts >= 20 ? "#f59e0b" : "#ef4444"}
+                    ].map(b => (
+                      <div key={b.label} style={{ marginBottom: "0.3rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between",
+                                      fontSize: "0.63rem", marginBottom: "2px" }}>
+                          <span style={{ color: "#94a3b8" }}>{b.label}</span>
+                          <span style={{ color: b.color, fontWeight: 700 }}>{b.pts}<span style={{ color: "#475569", fontWeight: 400 }}>/{b.max}</span>
+                            <span style={{ color: "#475569", marginLeft: "6px" }}>{b.hint}</span>
+                          </span>
+                        </div>
+                        <div style={{ height: "4px", background: "#1e293b", borderRadius: "3px" }}>
+                          <div style={{ width: `${(b.pts / b.max) * 100}%`, height: "100%",
+                                        background: b.color, borderRadius: "3px",
+                                        transition: "width 0.5s ease" }}/>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* 5-tier bar */}
+                    <div style={{ display: "flex", gap: "2px", marginTop: "0.25rem" }}>
+                      {["High Risk","At Risk","Needs Attention","Safe","Elite"]
+                        .map((t, idx) => {
+                          const c = ["#ef4444", "#f97316", "#f59e0b", "#38bdf8", "#22c55e"][idx];
+                          return (
+                            <div key={t} style={{ flex: 1, height: "4px", borderRadius: "3px",
+                                                 background: liveDAS.tier === t ? c : c + "33",
+                                                 transition: "background 0.4s" }}/>
+                          );
+                        })}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                                  fontSize: "0.52rem", color: "#475569", marginTop: "1px" }}>
+                      <span>High</span><span>Risk</span><span>Attention</span><span>Safe</span><span>Elite</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
 
@@ -557,6 +779,12 @@ export default function DrowsinessMonitorPage() {
                       </span>
                     )}
                   </div>
+                    {isAlert && (
+                      <div className="dw-alert-banner dw-alert-banner-inline">
+                        <IcoAlert />
+                        <strong>DROWSINESS ALERT</strong>&nbsp;— Sustained drowsiness detected! Pull over safely.
+                      </div>
+                    )}
                   <div className="dw-conf-body">
                     <ConfGauge value={confidence} label={verdict} color={vColor}/>
                     <div className="dw-conf-right">
@@ -630,7 +858,7 @@ export default function DrowsinessMonitorPage() {
                 </div>
 
                 {/* Facial features */}
-                <div className="dw-card">
+                <div className="dw-card dw-features-card">
                   <div className="dw-card-head">
                     <div>
                       <span className="dw-card-title">Facial Features</span>
@@ -658,95 +886,8 @@ export default function DrowsinessMonitorPage() {
                   </div>
                 </div>
 
-                {/* ── Live Driver Alertness Score ── */}
-                {liveDAS && (
-                  <div className="dw-card dw-das-live-card">
-                    <div className="dw-card-head">
-                      <div>
-                        <span className="dw-card-title">Driver Alertness Score</span>
-                        <span className="dw-card-hint">Updates every frame · Resets on new session</span>
-                      </div>
-                      <span className="dw-card-badge" style={{
-                        background: liveDAS.tierColor + "22",
-                        color: liveDAS.tierColor,
-                        border: `1px solid ${liveDAS.tierColor}44`,
-                      }}>{liveDAS.tier}</span>
-                    </div>
-
-                    {/* Big score */}
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: "0.4rem", margin: "0.6rem 0" }}>
-                      <span style={{ fontSize: "2.8rem", fontWeight: 800, lineHeight: 1, color: liveDAS.tierColor,
-                                     transition: "color 0.4s" }}>
-                        {liveDAS.das}
-                      </span>
-                      <span style={{ fontSize: "1.1rem", color: "#64748b", marginBottom: "6px" }}>/ 100</span>
-                    </div>
-
-                    {/* Score breakdown bars */}
-                    {[{label: "Alertness (drowsy rate)", pts: liveDAS.alertPts, max: 50,
-                        hint: `${Math.round(liveDAS.dPct * 100)}% drowsy frames`,
-                        color: liveDAS.alertPts >= 40 ? "#22c55e" : liveDAS.alertPts >= 20 ? "#f59e0b" : "#ef4444"},
-                      {label: "Sustained Alertness",   pts: liveDAS.sustainPts, max: 50,
-                        hint: `${sessionAlerts} alert event${sessionAlerts !== 1 ? "s" : ""}`,
-                        color: liveDAS.sustainPts >= 40 ? "#22c55e" : liveDAS.sustainPts >= 20 ? "#f59e0b" : "#ef4444"}
-                    ].map(b => (
-                      <div key={b.label} style={{ marginBottom: "0.7rem" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between",
-                                      fontSize: "0.68rem", marginBottom: "4px" }}>
-                          <span style={{ color: "#94a3b8" }}>{b.label}</span>
-                          <span style={{ color: b.color, fontWeight: 700 }}>{b.pts}<span style={{ color: "#475569", fontWeight: 400 }}>/{b.max}</span>
-                            <span style={{ color: "#475569", marginLeft: "6px" }}>{b.hint}</span>
-                          </span>
-                        </div>
-                        <div style={{ height: "6px", background: "#1e293b", borderRadius: "3px" }}>
-                          <div style={{ width: `${(b.pts / b.max) * 100}%`, height: "100%",
-                                        background: b.color, borderRadius: "3px",
-                                        transition: "width 0.5s ease" }}/>
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* 5-tier bar */}
-                    <div style={{ display: "flex", gap: "2px", marginTop: "0.6rem" }}>
-                      {[["High Risk","#ef4444"],["At Risk","#f97316"],["Needs Attention","#f59e0b"],["Safe","#38bdf8"],["Elite","#22c55e"]]
-                        .map(([t, c]) => (
-                          <div key={t} style={{ flex: 1, height: "6px", borderRadius: "3px",
-                                               background: liveDAS.tier === t ? c : c + "33",
-                                               transition: "background 0.4s" }}/>
-                        ))}
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between",
-                                  fontSize: "0.58rem", color: "#475569", marginTop: "3px" }}>
-                      <span>High Risk</span><span>At Risk</span><span>Needs Attention</span><span>Safe</span><span>Elite</span>
-                    </div>
-                  </div>
-                )}
-
               </div>{/* end analysis col */}
             </div>{/* end grid */}
-
-            {/* Alert log */}
-            {alertLog.length > 0 && (
-              <div className="dw-card dw-alert-log-card">
-                <div className="dw-card-head">
-                  <span className="dw-card-title">Alert Log — This Session</span>
-                  <span className="dw-card-badge red">{alertLog.length} Alerts</span>
-                </div>
-                <div className="dw-alert-log">
-                  {alertLog.map((a, i) => (
-                    <div key={i} className="dw-alert-log-row">
-                      <span className="dw-al-time">{a.time}</span>
-                      <span className="dw-al-conf" style={{ color: "#ef4444" }}>
-                        {Math.round((a.confidence ?? 0) * 100)}% drowsy
-                      </span>
-                      {a.ear != null && (
-                        <span className="dw-al-ear">EAR: {a.ear.toFixed(3)}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Session result (shown after stopping) */}
             {sessionSummary && (() => {

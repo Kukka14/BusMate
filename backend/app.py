@@ -3000,8 +3000,11 @@ def on_drowsiness_frame(data):
     """
     try:
         img_data   = data.get("image")
-        # Use Socket.IO socket-ID as session key — unique per browser tab.
-        session_id = request.sid
+        sensitivity = str(data.get("sensitivity") or "strict").strip().lower()
+        # Prefer client session_id so state follows UI session lifecycle.
+        # Fall back to socket-id when client session is not yet available.
+        client_sid = str(data.get("session_id") or "").strip()
+        session_id = client_sid or request.sid
 
         img = decode_base64_image(img_data)
         if img is None:
@@ -3115,7 +3118,7 @@ def on_drowsiness_frame(data):
         }
 
         # ── 2. Local ensemble inference ───────────────────────────────────────
-        result = _dw_engine.process_frame(img, session_id=session_id)
+        result = _dw_engine.process_frame(img, session_id=session_id, sensitivity=sensitivity)
 
         # Merge computed features/bbox into the result (prefer computed values)
         result_features = result.get("features") or {}

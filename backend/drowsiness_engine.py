@@ -63,9 +63,37 @@ _STD  = [0.229, 0.224, 0.225]
 _W = {"m1": 0.10, "m2": 0.35, "m3": 0.25, "m4": 0.15, "m5": 0.15}
 
 # ─── Decision thresholds ───────────────────────────────────────────────────────
-_DROWSY_LABEL_THR = 0.5   # ensemble score > 0.5  →  "Drowsy"
-_ALERT_CONF_THR   = 0.6   # consecutive counter increments only above this
+_DROWSY_LABEL_THR = 0.72  # default/fallback threshold
+_ALERT_CONF_THR   = 0.82  # default/fallback alert increment threshold
 _CONSECUTIVE_THR  = 5     # alert fires after N consecutive confident frames
+
+# Runtime sensitivity profiles for live tuning from the frontend.
+_SENSITIVITY_PROFILES = {
+    "normal": {
+        "drowsy_thr": 0.70,
+        "alert_thr": 0.80,
+        "eye_closure": 0.50,
+        "perclos": 0.35,
+        "mar": 0.64,
+        "yawn_freq": 0.22,
+    },
+    "strict": {
+        "drowsy_thr": 0.78,
+        "alert_thr": 0.86,
+        "eye_closure": 0.55,
+        "perclos": 0.40,
+        "mar": 0.68,
+        "yawn_freq": 0.25,
+    },
+    "very_strict": {
+        "drowsy_thr": 0.84,
+        "alert_thr": 0.90,
+        "eye_closure": 0.60,
+        "perclos": 0.48,
+        "mar": 0.74,
+        "yawn_freq": 0.30,
+    },
+}
 
 
 # =============================================================================
@@ -642,6 +670,7 @@ class DrowsinessEngine:
         self,
         img_bgr: np.ndarray,
         session_id: str = "default",
+        sensitivity: str = "strict",
     ) -> Dict[str, Any]:
         """
         Analyse a single BGR video frame.
@@ -656,11 +685,32 @@ class DrowsinessEngine:
         state = self._session(session_id)
         feats = self._extract_features(img_bgr, state)
         probs = self._infer(img_bgr, state)
-        score = self._ensemble(probs)
+        raw_score = self._ensemble(probs)
+        face_detected = len(feats) > 2
+        temporal_ready = any(probs[k] is not None for k in ("m2", "m3", "m4", "m5"))
+        profile_key = (sensitivity or "strict").strip().lower()
+        profile = _SENSITIVITY_PROFILES.get(profile_key, _SENSITIVITY_PROFILES["strict"])
+        drowsy_thr = float(profile.get("drowsy_thr", _DROWSY_LABEL_THR))
+        alert_thr = float(profile.get("alert_thr", _ALERT_CONF_THR))
 
-        verdict = "Drowsy" if score > _DROWSY_LABEL_THR else "Alert"
+        # Guard rails for webcam noise: avoid drowsy verdicts when face is unstable
+        # or before temporal models have enough frames to infer reliably.
+        score = raw_score if (face_detected and temporal_ready) else min(raw_score, drowsy_thr - 0.01)
 
-        if verdict == "Drowsy" and score > _ALERT_CONF_THR:
+        eye_closure = feats.get("eye_closure")
+        perclos = feats.get("perclos")
+        mar = feats.get("mar")
+        yawn_freq = feats.get("yawn_freq")
+        drowsy_feature_evidence = (
+            (eye_closure is not None and eye_closure >= float(profile.get("eye_closure", 0.55))) or
+            (perclos is not None and perclos >= float(profile.get("perclos", 0.40))) or
+            (mar is not None and mar >= float(profile.get("mar", 0.68))) or
+            (yawn_freq is not None and yawn_freq >= float(profile.get("yawn_freq", 0.25)))
+        )
+
+        verdict = "Drowsy" if (score > drowsy_thr and drowsy_feature_evidence) else "Alert"
+
+        if verdict == "Drowsy" and score > alert_thr and face_detected and drowsy_feature_evidence:
             state["consec"] += 1
         else:
             state["consec"] = 0
@@ -672,9 +722,10 @@ class DrowsinessEngine:
 
         return {
             "ok":                 True,
-            "face_detected":      len(feats) > 2,
+            "face_detected":      face_detected,
             "verdict":            verdict,
             "confidence":         round(score, 4),
+            "sensitivity":        profile_key,
             "alert":              state["consec"] >= _CONSECUTIVE_THR,
             "consecutive_frames": state["consec"],
             "models": {
