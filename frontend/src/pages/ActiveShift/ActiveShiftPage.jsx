@@ -1361,15 +1361,21 @@ export default function ActiveShiftPage() {
                 </div>
 
                 <div className="as-probs" style={{marginTop:8}}>
-                  <ModelBar name="LSTM" weight="0.60" prob={dwModels.lstm} color={confColor(dwModels.lstm)}/>
-                  <ModelBar name="RGB CNN" weight="0.25" prob={dwModels.rgb} color={confColor(dwModels.rgb)}/>
-                  <ModelBar name="IR CNN" weight="0.15" prob={dwModels.ir} color={confColor(dwModels.ir)}/>
+                  <ModelBar name="M1 EffNet"  weight="10%" prob={dwResult?.models?.m1?.drowsy_prob} color={confColor(dwResult?.models?.m1?.drowsy_prob)}/>
+                  <ModelBar name="M2 LSTM"    weight="35%" prob={dwResult?.models?.m2?.drowsy_prob} color={confColor(dwResult?.models?.m2?.drowsy_prob)}/>
+                  <ModelBar name="M3 Fusion"  weight="25%" prob={dwResult?.models?.m3?.drowsy_prob} color={confColor(dwResult?.models?.m3?.drowsy_prob)}/>
+                  <ModelBar name="M4 Trans"   weight="15%" prob={dwResult?.models?.m4?.drowsy_prob} color={confColor(dwResult?.models?.m4?.drowsy_prob)}/>
+                  <ModelBar name="M5 TCN"     weight="15%" prob={dwResult?.models?.m5?.drowsy_prob} color={confColor(dwResult?.models?.m5?.drowsy_prob)}/>
                 </div>
 
-                <div className="as-feat-row" style={{marginTop:8}}>
-                  <FeatChip label="EAR" value={dwFeatures.ear?.toFixed(2)} unit="" warn={dwFeatures.ear<0.22}/>
-                  <FeatChip label="MAR" value={dwFeatures.mar?.toFixed(2)} unit="" warn={dwFeatures.mar>0.65}/>
-                  <FeatChip label="Pitch" value={dwFeatures.pitch?.toFixed(1)} unit="°" warn={Math.abs(dwFeatures.pitch||0)>25}/>
+                <div className="as-feat-row" style={{marginTop:8, flexWrap:"wrap", gap:"0.35rem"}}>
+                  <FeatChip label="EAR"       value={dwFeatures.ear?.toFixed(3)}       unit=""  warn={dwFeatures.ear!=null && dwFeatures.ear<0.25}/>
+                  <FeatChip label="MAR"       value={dwFeatures.mar?.toFixed(3)}       unit=""  warn={dwFeatures.mar!=null && dwFeatures.mar>0.60}/>
+                  <FeatChip label="Pitch"     value={dwFeatures.pitch?.toFixed(1)}     unit="°" warn={dwFeatures.pitch!=null && Math.abs(dwFeatures.pitch)>20}/>
+                  <FeatChip label="Yaw"       value={dwFeatures.yaw?.toFixed(1)}       unit="°" warn={dwFeatures.yaw!=null && Math.abs(dwFeatures.yaw)>30}/>
+                  <FeatChip label="Eye Blink" value={dwFeatures.eye_closure?.toFixed(2)} unit="" warn={dwFeatures.eye_closure!=null && dwFeatures.eye_closure>0.45}/>
+                  <FeatChip label="PERCLOS"   value={dwFeatures.perclos!=null ? String(Math.round(dwFeatures.perclos*100)) : null} unit="%" warn={dwFeatures.perclos!=null && dwFeatures.perclos>0.30}/>
+                  <FeatChip label="Yawn"      value={dwFeatures.yawn_freq!=null ? String(Math.round(dwFeatures.yawn_freq*100)) : null} unit="%" warn={dwFeatures.yawn_freq!=null && dwFeatures.yawn_freq>0.20}/>
                 </div>
               </div>
             </div>
