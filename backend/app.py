@@ -1,5 +1,10 @@
 import os
 import json
+# Reduce TensorFlow noisy logs and disable oneDNN optimizations that
+# cause platform-dependent float-rounding warnings on Windows.
+# These must be set before importing TensorFlow modules.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 import tempfile
 import base64
 import uuid
@@ -30,6 +35,13 @@ load_dotenv()
 from Emotion_Shift_Profile import register_user_management
 from Emotion_Shift_Profile.config import Config
 from drowsiness_engine import DrowsinessEngine
+# Optional MediaPipe for facial landmarks / feature extraction
+_mp_available = False
+try:
+    import mediapipe as mp
+    _mp_available = True
+except Exception:
+    mp = None
 # GPS routes and listener (lazy-start in __main__)
 from routes.gps_routes import gps_bp
 from routes.drowsiness_analytics import drowsiness_bp
@@ -3003,8 +3015,125 @@ def on_drowsiness_frame(data):
             })
             return
 
-        # ── 1. Local ensemble inference ───────────────────────────────────────
+        # ── 1. Optional facial-feature extraction via MediaPipe ───────────
+        features = {}
+        bbox = None
+        if _mp_available:
+            try:
+                # lightweight single-frame mesh: detect landmarks
+                with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as fm:
+                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    res = fm.process(img_rgb)
+                    if res.multi_face_landmarks:
+                        lm = res.multi_face_landmarks[0]
+                        h, w = img.shape[:2]
+                        pts = [(int(p.x * w), int(p.y * h)) for p in lm.landmark]
+
+                        # landmarks indices for mediapipe face mesh (typical mappings)
+                        L_EYE = [33, 160, 158, 133, 153, 144]
+                        R_EYE = [362, 385, 387, 263, 373, 380]
+                        L_MOUTH_VERT = (13, 14)
+                        MOUTH_LEFT = 78
+                        MOUTH_RIGHT = 308
+
+                        def _dist(a, b):
+                            return float(((a[0]-b[0])**2 + (a[1]-b[1])**2) ** 0.5)
+
+                        # EAR calculation
+                        try:
+                            l = pts
+                            left_ear = (_dist(l[L_EYE[1]], l[L_EYE[5]]) + _dist(l[L_EYE[2]], l[L_EYE[4]])) / (2.0 * _dist(l[L_EYE[0]], l[L_EYE[3]]))
+                            right_ear = (_dist(l[R_EYE[1]], l[R_EYE[5]]) + _dist(l[R_EYE[2]], l[R_EYE[4]])) / (2.0 * _dist(l[R_EYE[0]], l[R_EYE[3]]))
+                            ear = (left_ear + right_ear) / 2.0
+                        except Exception:
+                            ear = None
+
+                        # MAR (mouth aspect ratio) simple proxy
+                        try:
+                            top = pts[L_MOUTH_VERT[0]]
+                            bot = pts[L_MOUTH_VERT[1]]
+                            left = pts[MOUTH_LEFT]
+                            right = pts[MOUTH_RIGHT]
+                            mar = _dist(top, bot) / max(1.0, _dist(left, right))
+                        except Exception:
+                            mar = None
+
+                        # estimate yaw/pitch from nose vs eye midpoints
+                        try:
+                            left_eye_cx = sum(pts[i][0] for i in L_EYE) / len(L_EYE)
+                            right_eye_cx = sum(pts[i][0] for i in R_EYE) / len(R_EYE)
+                            mid_eye_x = (left_eye_cx + right_eye_cx) / 2.0
+                            nose_idx = 1 if len(pts) > 1 else 4
+                            nose = pts[nose_idx]
+                            face_w = _dist(pts[10], pts[152]) if len(pts) > 152 else max(1.0, abs(right_eye_cx - left_eye_cx))
+                            yaw = (nose[0] - mid_eye_x) / max(1.0, face_w)
+                            # pitch: positive when nose below eye-line
+                            eye_mid_y = (sum(pts[i][1] for i in L_EYE) + sum(pts[i][1] for i in R_EYE)) / (len(L_EYE) + len(R_EYE))
+                            face_h = h
+                            pitch = (nose[1] - eye_mid_y) / max(1.0, face_h)
+                        except Exception:
+                            yaw = None
+                            pitch = None
+
+                        # eye closure boolean / perclos proxy
+                        eye_closed = None
+                        perclos = None
+                        try:
+                            if ear is not None:
+                                eye_closed = ear < 0.20
+                                perclos = 1.0 if eye_closed else 0.0
+                        except Exception:
+                            pass
+
+                        # bounding box from landmarks
+                        xs = [p[0] for p in pts]
+                        ys = [p[1] for p in pts]
+                        x1, y1, x2, y2 = max(0, min(xs)), max(0, min(ys)), min(w, max(xs)), min(h, max(ys))
+                        bbox = {"xmin": int(x1), "ymin": int(y1), "xmax": int(x2), "ymax": int(y2)}
+
+                        # Convert to frontend-friendly {x,y,w,h}
+                        bbox = {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)}
+
+                        features = {
+                            "ear": round(ear, 4) if ear is not None else None,
+                            "mar": round(mar, 4) if mar is not None else None,
+                            "pitch": round(float(pitch), 4) if pitch is not None else None,
+                            "yaw": round(float(yaw), 4) if yaw is not None else None,
+                            "eye_closure": bool(eye_closed) if eye_closed is not None else None,
+                            "perclos": round(float(perclos), 4) if perclos is not None else None,
+                            "yawn_freq": None,
+                        }
+                        app.logger.debug("MediaPipe: extracted facial features: %s, bbox=%s", features, bbox)
+
+            except Exception:
+                features = {}
+
+        # Ensure result.features contains keys even when MediaPipe unavailable
+        default_features = {
+            "ear": None, "mar": None, "pitch": None, "yaw": None,
+            "eye_closure": None, "perclos": None, "yawn_freq": None,
+        }
+
+        # ── 2. Local ensemble inference ───────────────────────────────────────
         result = _dw_engine.process_frame(img, session_id=session_id)
+
+        # Merge computed features/bbox into the result (prefer computed values)
+        result_features = result.get("features") or {}
+        # Start from defaults then overlay detected features
+        result_features = {**default_features, **(result_features or {})}
+        if features:
+            result_features.update({
+                "ear": features.get("ear"),
+                "mar": features.get("mar"),
+                "pitch": features.get("pitch"),
+                "yaw": features.get("yaw"),
+                "eye_closure": features.get("eye_closure"),
+                "perclos": features.get("perclos"),
+                "yawn_freq": features.get("yawn_freq"),
+            })
+        result["features"] = result_features
+        if bbox is not None:
+            result["bbox"] = bbox
 
         emit("drowsiness_result", result)
 

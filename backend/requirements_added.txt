@@ -1,2 +1,10 @@
 # Add this to backend/requirements.txt
 pynmea2
+# Optional/extra packages required to enable full feature set
+# Install these if you want drowsiness, FER, object-detection and RSA models
+# pip install -r backend/requirements_added.txt
+timm
+fer
+ultralytics
+transformers
+safetensors
