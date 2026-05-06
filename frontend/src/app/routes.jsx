@@ -18,6 +18,7 @@ import { Road_sign_VideoResultsPage } from "../pages/Road_sign_VideoResults";
 import { RoadSceneUploadPage } from "../pages/Road_scene_Upload";
 import { RoadSceneResultsPage } from "../pages/Road_scene_Results";
 import { RoadSceneVideoResultsPage } from "../pages/Road_scene_VideoResults";
+import RoadSceneFusionPage from "../pages/RoadSceneFusion";
 import HazardAnalyserPage from "../pages/HazardAnalyser";
 import DriverStatsPage from "../pages/DriverStats/DriverStatsPage";
 import DrowsinessMonitorPage from "../pages/DrowsinessMonitor/DrowsinessMonitorPage";
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
   { path: "/road-scene",               element: <RoadSceneUploadPage />       },
   { path: "/road-scene/results",       element: <RoadSceneResultsPage />      },
   { path: "/road-scene/video-results", element: <RoadSceneVideoResultsPage /> },
+  { path: "/road-scene/fusion",        element: <RoadSceneFusionPage />       },
   { path: "/road-scene/hazard",        element: <HazardAnalyserPage />        },
 
   // Inner app — shared MainLayout
