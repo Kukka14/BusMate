@@ -792,61 +792,20 @@
 }
 .hud-exit-btn:hover { background: #334155; color: #f1f5f9; }
 
-/* ── HUD Body ── */
-.hud-body {
-  flex: 1; display: flex; overflow: hidden;
+/* ── HUD Alerts Bar ── */
+.hud-alerts-bar {
+  display: flex; gap: 0.5rem; padding: 0.3rem 0.8rem;
+  background: rgba(239,68,68,0.08); border-bottom: 1px solid #ef444433;
+  flex-shrink: 0;
 }
-
-/* ── HUD Map ── */
-.hud-map-area {
-  flex: 1; position: relative; display: flex; flex-direction: column;
-}
-.hud-map {
-  flex: 1; width: 100%; background: #0a0e1a;
-}
-.hud-hz-cards {
-  position: absolute; bottom: 12px; left: 12px; right: 290px;
-  z-index: 500; pointer-events: none;
-}
-.hud-hz-cards .as-hz-cards {
-  pointer-events: auto;
-  background: rgba(10, 14, 26, 0.85);
-  backdrop-filter: blur(6px);
-  border-radius: 10px; padding: 0.4rem;
-}
-.hud-hz-cards .as-hz-card {
-  background: rgba(10, 14, 26, 0.7);
-}
-
-/* ── HUD Sidebar ── */
-.hud-sidebar {
-  width: 270px; flex-shrink: 0;
-  display: flex; flex-direction: column; gap: 0.5rem;
-  padding: 0.6rem;
-  background: rgba(15, 22, 35, 0.95);
-  border-left: 1px solid #1e293b;
-  overflow-y: auto;
-}
-
-/* ── HUD Camera PIP ── */
-.hud-cam {
-  border-radius: 8px; overflow: hidden;
-  border: 2px solid #1e293b; background: #0a0e1a;
-}
-.hud-cam-video {
-  width: 100%; height: auto; display: block;
-  max-height: 160px; object-fit: cover;
-}
-
-/* ── HUD Alerts ── */
 .hud-alert {
   display: flex; align-items: center; gap: 0.35rem;
-  padding: 0.55rem 0.7rem; border-radius: 8px;
-  font-size: 0.75rem; font-weight: 700;
+  padding: 0.35rem 0.6rem; border-radius: 6px;
+  font-size: 0.72rem; font-weight: 700;
   animation: hudAlertPulse 0.8s ease infinite;
 }
 .hud-alert.red {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239,68,68,0.15);
   color: #f87171; border: 1px solid #ef444488;
 }
 @keyframes hudAlertPulse {
@@ -854,71 +813,161 @@
   50% { opacity: 0.65; }
 }
 
-/* ── HUD Status Cards ── */
-.hud-status-card {
-  background: #111827; border: 1px solid #1e293b;
-  border-radius: 8px; padding: 0.55rem 0.65rem;
+/* ── HUD Body — 3-column layout ── */
+.hud-body {
+  flex: 1; display: flex; overflow: hidden; min-height: 0;
 }
-.hud-status-head {
-  font-size: 0.72rem; font-weight: 700; color: #f1f5f9;
-  margin-bottom: 0.35rem; border-bottom: 1px solid #1e293b;
-  padding-bottom: 0.25rem;
-}
-.hud-status-row {
-  display: flex; justify-content: space-between;
-  font-size: 0.7rem; padding: 0.15rem 0;
-}
-.hud-status-row span:first-child { color: #64748b; }
-.hud-status-row span:last-child  { color: #f1f5f9; }
 
-/* ── HUD Road Sign Card ── */
-.hud-sign-card {
-  background: #111827; border: 1px solid #1e293b;
-  border-radius: 8px; padding: 0.55rem 0.65rem;
-  transition: all 0.3s;
+/* ── LEFT: Webcam column ── */
+.hud-left-col {
+  width: 220px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(10,14,26,0.97);
+  border-right: 1px solid #1e293b;
+  overflow-y: auto;
 }
-.hud-sign-head {
-  display: flex; align-items: center; gap: 0.45rem;
+
+/* ── Camera wrapper ── */
+.hud-cam-wrap {
+  position: relative; border-radius: 8px; overflow: hidden;
+  border: 1.5px solid #1e293b; background: #060c18;
+  flex-shrink: 0;
 }
-.hud-sign-icon { font-size: 1.2rem; }
-.hud-sign-name {
-  font-size: 0.78rem; font-weight: 700; color: #f1f5f9;
-  text-transform: capitalize;
+.hud-cam-label {
+  position: absolute; top: 5px; left: 6px; z-index: 2;
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.6rem; font-weight: 700; color: #cbd5e1;
+  background: rgba(6,12,24,0.75); padding: 2px 6px;
+  border-radius: 4px; backdrop-filter: blur(3px);
 }
-.hud-sign-conf { font-size: 0.62rem; color: #94a3b8; }
-.hud-sign-priority {
-  margin-left: auto; padding: 0.12rem 0.4rem; border-radius: 4px;
-  font-size: 0.58rem; font-weight: 700; color: #fff; text-transform: uppercase;
+.hud-cam-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  animation: as-pulse 1.5s infinite;
 }
-.hud-sign-instructions {
-  list-style: none; padding: 0; margin: 0.35rem 0 0;
+.hud-cam-badge {
+  position: absolute; bottom: 5px; right: 6px; z-index: 2;
+  font-size: 0.58rem; font-weight: 700;
+  background: rgba(6,12,24,0.80); padding: 2px 6px;
+  border-radius: 4px; backdrop-filter: blur(3px);
 }
-.hud-sign-instructions li {
-  font-size: 0.68rem; color: #cbd5e1; padding: 0.15rem 0;
-  border-bottom: 1px solid #1e293b15;
+.hud-cam-video {
+  width: 100%; display: block; object-fit: cover;
+  max-height: 150px;
 }
+
+/* ── HUD Map ── */
+.hud-map-area {
+  flex: 1; position: relative; display: flex; flex-direction: column;
+  min-width: 0;
+}
+.hud-map {
+  flex: 1; width: 100%; background: #0a0e1a;
+}
+.hud-hz-cards {
+  position: absolute; bottom: 12px; left: 8px; right: 8px;
+  z-index: 500; pointer-events: none;
+}
+.hud-hz-cards .as-hz-cards {
+  pointer-events: auto;
+  background: rgba(10,14,26,0.88);
+  backdrop-filter: blur(6px);
+  border-radius: 10px; padding: 0.4rem;
+}
+.hud-hz-cards .as-hz-card {
+  background: rgba(10,14,26,0.7);
+}
+
+/* ── RIGHT: Analysis column ── */
+.hud-right-col {
+  width: 260px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 0.45rem;
+  padding: 0.55rem;
+  background: rgba(10,14,26,0.97);
+  border-left: 1px solid #1e293b;
+  overflow-y: auto;
+}
+
+/* ── Analysis card ── */
+.hud-analysis-card {
+  background: #0d1624; border: 1px solid #1e2d44;
+  border-radius: 8px; padding: 0.5rem 0.6rem;
+  flex-shrink: 0;
+}
+.hud-analysis-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.7rem; font-weight: 700; color: #f1f5f9;
+  border-bottom: 1px solid #1e2d44; padding-bottom: 0.25rem; margin-bottom: 0.3rem;
+}
+.hud-verdict-pill {
+  font-size: 0.58rem; font-weight: 700; border: 1px solid;
+  padding: 1px 6px; border-radius: 10px; text-transform: uppercase;
+}
+.hud-analysis-rows { display: flex; flex-direction: column; gap: 0.1rem; margin-bottom: 0.35rem; }
+.hud-analysis-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.68rem; padding: 0.1rem 0;
+}
+.hud-analysis-row span:first-child { color: #64748b; }
+.hud-analysis-row span:last-child  { color: #e2e8f0; }
+
+/* ── Feature chips grid ── */
+.hud-feats-grid {
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 0.25rem;
+}
+.hud-feat-chip {
+  background: #071828; border: 1px solid #1e293b;
+  border-radius: 5px; padding: 0.22rem 0.3rem;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.hud-feat-chip.warn {
+  background: #7f1d1d22; border-color: #ef444433;
+}
+.hud-feat-label { font-size: 0.52rem; color: #64748b; font-weight: 600; letter-spacing: 0.04em; }
+.hud-feat-chip.warn .hud-feat-label { color: #f87171; }
+.hud-feat-val { font-size: 0.68rem; font-weight: 700; color: #e2e8f0; }
+.hud-feat-chip.warn .hud-feat-val { color: #ef4444; }
+
+/* ── Scene image ── */
+.hud-scene-img-wrap {
+  position: relative; border-radius: 6px; overflow: hidden;
+  border: 1px solid #1e2d44; margin-bottom: 0.3rem;
+}
+.hud-scene-img { width: 100%; display: block; object-fit: cover; max-height: 110px; }
+.hud-scene-hazard-badge {
+  position: absolute; bottom: 4px; right: 5px;
+  font-size: 0.58rem; font-weight: 700;
+  background: rgba(6,12,24,0.80); padding: 2px 6px;
+  border-radius: 4px;
+}
+.hud-scene-segs { display: flex; flex-direction: column; gap: 3px; }
+.hud-scene-seg { display: flex; align-items: center; gap: 6px; font-size: 0.64rem; color: #94a3b8; }
+.hud-scene-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
 /* ── HUD ESC Hint ── */
 .hud-esc-hint {
-  margin-top: auto; text-align: center;
-  font-size: 0.65rem; color: #475569; padding: 0.3rem;
+  text-align: center;
+  font-size: 0.62rem; color: #334155; padding: 0.3rem;
 }
 .hud-esc-hint kbd {
-  padding: 1px 6px; border-radius: 3px;
+  padding: 1px 5px; border-radius: 3px;
   background: #1e293b; border: 1px solid #334155;
-  font-size: 0.62rem; color: #94a3b8;
+  font-size: 0.6rem; color: #64748b;
 }
 
 /* ── HUD Responsive ── */
+@media (max-width: 1100px) {
+  .hud-left-col { width: 180px; }
+  .hud-right-col { width: 220px; }
+}
 @media (max-width: 800px) {
-  .hud-sidebar { width: 220px; }
-  .hud-hz-cards { right: 230px; }
+  .hud-left-col { display: none; }
+  .hud-right-col { width: 200px; }
 }
 @media (max-width: 600px) {
   .hud-body { flex-direction: column; }
-  .hud-sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; border-left: none; border-top: 1px solid #1e293b; max-height: 40vh; }
-  .hud-cam { max-width: 160px; }
-  .hud-hz-cards { right: 12px; }
+  .hud-right-col { width: 100%; flex-direction: row; flex-wrap: wrap; border-left: none; border-top: 1px solid #1e293b; }
+  .hud-hz-cards { position: static; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */

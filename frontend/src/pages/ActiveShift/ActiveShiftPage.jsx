@@ -2108,7 +2108,8 @@ export default function ActiveShiftPage() {
       {/* ── DRIVING MODE HUD ──────────────────────────────────────── */}
       {drivingMode && shiftActive && (
         <div className="hud-overlay">
-          {/* HUD Top Bar */}
+
+          {/* ── Top Bar ── */}
           <div className="hud-topbar">
             <div className="hud-topbar-left">
               <span className="hud-live-dot"/>
@@ -2123,99 +2124,204 @@ export default function ActiveShiftPage() {
             </div>
           </div>
 
-          {/* HUD Main Area */}
+          {/* ── Alerts bar ── */}
+          {(cheating || dwResult?.alert) && (
+            <div className="hud-alerts-bar">
+              {dwResult?.alert && (
+                <div className="hud-alert red"><IcoAlert/> DROWSINESS — Pull over immediately!</div>
+              )}
+              {cheating && (
+                <div className="hud-alert red"><IcoAlert/> DISTRACTION: {emResult?.objects?.labels?.join(", ")}</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Body: Left cams | Map | Right panels ── */}
           <div className="hud-body">
-            {/* Large Map */}
+
+            {/* ── LEFT: Two webcam feeds ── */}
+            <div className="hud-left-col">
+              <div className="hud-cam-wrap">
+                <span className="hud-cam-label">
+                  <span className="hud-cam-dot" style={{background: dwConnected ? "#22c55e" : "#64748b"}}/>
+                  Driver
+                </span>
+                <video
+                  ref={el => { if (el && streamRef.current && !el.srcObject) el.srcObject = streamRef.current; }}
+                  autoPlay playsInline muted
+                  className="hud-cam-video"
+                  style={{transform:"scaleX(-1)"}}
+                />
+                {dwResult?.face_detected != null && (
+                  <span className="hud-cam-badge" style={{color: dwResult.face_detected?"#22c55e":"#ef4444"}}>
+                    {dwResult.face_detected ? "Face OK" : "No Face"}
+                  </span>
+                )}
+              </div>
+
+              <div className="hud-cam-wrap">
+                <span className="hud-cam-label">
+                  <span className="hud-cam-dot" style={{background:"#3b82f6"}}/>
+                  Road
+                </span>
+                <video
+                  ref={el => { if (el && streamRef2.current && !el.srcObject) el.srcObject = streamRef2.current; }}
+                  autoPlay playsInline muted
+                  className="hud-cam-video"
+                />
+                {activeSceneFrame && (
+                  <span className="hud-cam-badge" style={{color: hazardColor(rsHazardLevel)}}>
+                    {rsHazardLevel || "Clear"}
+                  </span>
+                )}
+              </div>
+
+              <div className="hud-esc-hint" style={{marginTop:"auto"}}>Press <kbd>ESC</kbd> to exit</div>
+            </div>
+
+            {/* ── CENTER: Map + Hazard cards ── */}
             <div className="hud-map-area">
               <div ref={hudMapRef} className="hud-map"/>
-              {/* Hazard dashboard cards overlay on map */}
               <div className="hud-hz-cards">
                 <HazardDashPanel currentPoint={hzPoint} nextPoints={pd?.slice(hzIdx)} isFinished={hzFinished} totalDistance={pd?.length ? pd[pd.length-1].distance : 0}/>
               </div>
             </div>
 
-            {/* Right sidebar — camera + alerts */}
-            <div className="hud-sidebar">
-              {/* PIP Camera */}
-              <div className="hud-cam">
-                <video ref={el => { if (el && streamRef.current) el.srcObject = streamRef.current; }} autoPlay playsInline muted className="hud-cam-video" style={{transform:"scaleX(-1)"}}/>
-              </div>
+            {/* ── RIGHT: Analysis panels ── */}
+            <div className="hud-right-col">
 
-              {/* Alert banners */}
-              {cheating && (
-                <div className="hud-alert red">
-                  <IcoAlert/> DISTRACTION: {emResult?.objects?.labels?.join(", ")}
+              {/* Drowsiness */}
+              <div className="hud-analysis-card">
+                <div className="hud-analysis-head">
+                  😴 Drowsiness
+                  {dwVerdict && (
+                    <span className="hud-verdict-pill" style={{color: verdictColor(dwVerdict), borderColor: verdictColor(dwVerdict)+"55"}}>
+                      {dwVerdict}
+                    </span>
+                  )}
                 </div>
-              )}
-              {dwResult?.alert && (
-                <div className="hud-alert red">
-                  <IcoAlert/> DROWSINESS — Pull over!
-                </div>
-              )}
-
-              {/* Drowsiness quick status */}
-              <div className="hud-status-card">
-                <div className="hud-status-head">😴 Drowsiness</div>
-                <div className="hud-status-row">
-                  <span>Status</span>
-                  <span style={{color: verdictColor(dwVerdict), fontWeight: 700}}>{dwVerdict || "Waiting"}</span>
-                </div>
-                <div className="hud-status-row">
-                  <span>Confidence</span>
-                  <span>{dwConf != null ? `${(dwConf*100).toFixed(0)}%` : "—"}</span>
-                </div>
-                <div className="hud-status-row">
-                  <span>Alert Streak</span>
-                  <span style={{color: dwStreak >= CONSECUTIVE_THRESHOLD ? "#ef4444" : "#94a3b8"}}>{dwStreak}/{CONSECUTIVE_THRESHOLD}</span>
-                </div>
-              </div>
-
-              {/* Emotion quick status */}
-              <div className="hud-status-card">
-                <div className="hud-status-head">😊 Emotion</div>
-                <div className="hud-status-row">
-                  <span>Current</span>
-                  <span style={{color: emoColor, fontWeight: 700}}>{emotion ? emotion.toUpperCase() : "—"}</span>
-                </div>
-                <div className="hud-status-row">
-                  <span>BVI</span>
-                  <span style={{color: bviColor(bviScore)}}>{bviScore?.toFixed(3) ?? "—"}</span>
-                </div>
-              </div>
-
-              {/* Road sign detection */}
-              {rsSignInfo && (() => {
-                const instr = getSignInstruction(rsSignInfo.class_name);
-                const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
-                return (
-                  <div className="hud-sign-card" style={pc ? {borderColor: pc.border, background: pc.bg} : {}}>
-                    <div className="hud-sign-head">
-                      <span className="hud-sign-icon">{instr?.icon || "🔍"}</span>
-                      <div>
-                        <div className="hud-sign-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
-                        <div className="hud-sign-conf">{(rsSignInfo.confidence*100).toFixed(0)}%</div>
-                      </div>
-                      {instr && <span className="hud-sign-priority" style={{background: pc?.badge}}>{instr.priorityLabel}</span>}
-                    </div>
-                    {instr?.instructions && (
-                      <ul className="hud-sign-instructions">
-                        {instr.instructions.slice(0,2).map((ins,i) => <li key={i}>{ins}</li>)}
-                      </ul>
-                    )}
+                <div className="hud-analysis-rows">
+                  <div className="hud-analysis-row"><span>Confidence</span><span>{dwConf!=null?`${(dwConf*100).toFixed(0)}%`:"—"}</span></div>
+                  <div className="hud-analysis-row">
+                    <span>Alert Streak</span>
+                    <span style={{color: dwStreak>=CONSECUTIVE_THRESHOLD?"#ef4444":"#94a3b8"}}>{dwStreak}/{CONSECUTIVE_THRESHOLD}</span>
                   </div>
-                );
-              })()}
-              {!rsSignInfo && (
-                <div className="hud-status-card" style={{textAlign:"center", color:"#475569"}}>
-                  <div className="hud-status-head">🚦 Road Signs</div>
-                  <p style={{margin:"0.3rem 0 0",fontSize:"0.72rem"}}>Scanning…</p>
                 </div>
-              )}
+                <div className="hud-feats-grid">
+                  {[
+                    {label:"EAR",   val:dwFeatures.ear!=null?dwFeatures.ear.toFixed(3):null,      warn:dwFeatures.ear!=null&&dwFeatures.ear<0.25},
+                    {label:"MAR",   val:dwFeatures.mar!=null?dwFeatures.mar.toFixed(3):null,      warn:dwFeatures.mar!=null&&dwFeatures.mar>0.60},
+                    {label:"PERCLOS",val:dwFeatures.perclos!=null?`${Math.round(dwFeatures.perclos*100)}%`:null, warn:dwFeatures.perclos!=null&&dwFeatures.perclos>0.30},
+                    {label:"YAWN",  val:dwFeatures.yawn_freq!=null?`${Math.round(dwFeatures.yawn_freq*100)}%`:null, warn:dwFeatures.yawn_freq!=null&&dwFeatures.yawn_freq>0.20},
+                    {label:"PITCH", val:dwFeatures.pitch!=null?`${dwFeatures.pitch.toFixed(1)}°`:null, warn:dwFeatures.pitch!=null&&Math.abs(dwFeatures.pitch)>20},
+                    {label:"YAW",   val:dwFeatures.yaw!=null?`${dwFeatures.yaw.toFixed(1)}°`:null,   warn:dwFeatures.yaw!=null&&Math.abs(dwFeatures.yaw)>30},
+                  ].map(({label,val,warn})=>(
+                    <div key={label} className={`hud-feat-chip${warn?" warn":""}`}>
+                      <span className="hud-feat-label">{label}</span>
+                      <span className="hud-feat-val">{val??"—"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-              {/* ESC hint */}
-              <div className="hud-esc-hint">Press <kbd>ESC</kbd> to exit</div>
-            </div>
-          </div>
+              {/* Emotion */}
+              <div className="hud-analysis-card">
+                <div className="hud-analysis-head">
+                  😊 Emotion
+                  {emotion && (
+                    <span className="hud-verdict-pill" style={{color: emoColor, borderColor: emoColor+"55"}}>
+                      {emotion.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <div className="hud-analysis-rows">
+                  <div className="hud-analysis-row">
+                    <span>Status</span>
+                    <span style={{color: emoColor, fontWeight:700}}>{emotion?emotion.toUpperCase():"NO FACE DETECTED"}</span>
+                  </div>
+                  <div className="hud-analysis-row">
+                    <span>BVI Score</span>
+                    <span style={{color: bviColor(bviScore)}}>{bviScore?.toFixed(3)??"—"}</span>
+                  </div>
+                  {cheating && (
+                    <div className="hud-analysis-row" style={{color:"#ef4444"}}>
+                      <span>Distraction</span>
+                      <span>{emResult?.objects?.labels?.join(", ")}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Road Sign */}
+              <div className="hud-analysis-card">
+                <div className="hud-analysis-head">🚦 Road Sign</div>
+                {rsSignInfo ? (()=>{
+                  const instr = getSignInstruction(rsSignInfo.class_name);
+                  const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+                  return (
+                    <div style={{border:`1px solid ${pc?.border||"#1e293b"}`, borderRadius:6, background:pc?.bg||"transparent", padding:"0.35rem 0.4rem", marginTop:"0.3rem"}}>
+                      <div style={{display:"flex", alignItems:"center", gap:6}}>
+                        <span style={{fontSize:"1.3rem"}}>{instr?.icon||"🔍"}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:"0.72rem",fontWeight:700,color:"#f1f5f9",textTransform:"capitalize"}}>{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                          <div style={{fontSize:"0.6rem",color:"#94a3b8"}}>{(rsSignInfo.confidence*100).toFixed(0)}% confidence</div>
+                        </div>
+                        {instr && <span style={{padding:"2px 6px",borderRadius:3,fontSize:"0.55rem",fontWeight:700,color:"#fff",background:pc?.badge,textTransform:"uppercase"}}>{instr.priorityLabel}</span>}
+                      </div>
+                      {instr?.instructions && (
+                        <ul style={{listStyle:"none",margin:"0.3rem 0 0",padding:0}}>
+                          {instr.instructions.slice(0,2).map((ins,i)=>(
+                            <li key={i} style={{fontSize:"0.65rem",color:"#cbd5e1",padding:"0.1rem 0",borderBottom:"1px solid #1e293b22"}}>{ins}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })() : (
+                  <div style={{textAlign:"center",color:"#475569",fontSize:"0.7rem",padding:"0.5rem 0"}}>
+                    Scanning for road signs…
+                  </div>
+                )}
+              </div>
+
+              {/* Road Scene Analysis */}
+              <div className="hud-analysis-card">
+                <div className="hud-analysis-head">
+                  🎬 Road Scene
+                  {rsHazardLevel && (
+                    <span className="hud-verdict-pill" style={{color: hazardColor(rsHazardLevel), borderColor: hazardColor(rsHazardLevel)+"55"}}>
+                      {rsHazardLevel}
+                    </span>
+                  )}
+                </div>
+                {activeSceneFrame ? (
+                  <>
+                    <div className="hud-scene-img-wrap">
+                      <img src={activeSceneFrame.overlay} alt="scene" className="hud-scene-img"/>
+                      {activeSceneFrame.hazard?.score != null && (
+                        <span className="hud-scene-hazard-badge" style={{color: hazardColor(rsHazardLevel)}}>
+                          {activeSceneFrame.hazard.score.toFixed(1)} — {rsHazardLevel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="hud-scene-segs">
+                      {activeSceneFrame.segments?.slice(0,5).map(seg=>(
+                        <div key={seg.id} className="hud-scene-seg">
+                          <span className="hud-scene-dot" style={{background:seg.color}}/>
+                          <span className="hud-scene-seg-label">{seg.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{textAlign:"center",color:"#475569",fontSize:"0.7rem",padding:"0.5rem 0"}}>
+                    Analysing road scene…
+                  </div>
+                )}
+              </div>
+
+            </div>{/* end hud-right-col */}
+          </div>{/* end hud-body */}
         </div>
       )}
 

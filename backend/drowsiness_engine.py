@@ -408,6 +408,11 @@ class DrowsinessEngine:
         self._lock      = threading.Lock()   # guards model inference
         self._sessions: Dict[str, Dict] = {}
         self._sess_lock = threading.Lock()
+        # Haar cascades for feature extraction (bundled with OpenCV)
+        self._face_cas = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self._eye_cas  = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_eye.xml")
         self._load()
 
     # ── Initialisation ─────────────────────────────────────────────────────────
@@ -462,6 +467,8 @@ class DrowsinessEngine:
                 self._sessions[sid] = {
                     "frame_buf": deque(maxlen=_SEQ_LEN),  # (3,112,112) tensors
                     "eye_buf":   deque(maxlen=_SEQ_LEN),  # (3,64,64)   tensors
+                    "eye_hist":  deque(maxlen=30),         # for PERCLOS
+                    "yawn_hist": deque(maxlen=30),         # for yawn frequency
                     "consec":    0,
                 }
             return self._sessions[sid]
@@ -564,6 +571,67 @@ class DrowsinessEngine:
                 total_w += w
         return 0.0 if total_w < 1e-9 else total_p / total_w
 
+    # ── Feature extraction ─────────────────────────────────────────────────────
+
+    def _extract_features(self, img_bgr: np.ndarray, state: Dict) -> Dict[str, Any]:
+        """Extract facial features using Haar cascades for the UI metrics panel."""
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        # Equalize histogram to handle backlit / low-contrast webcam frames
+        gray = cv2.equalizeHist(gray)
+        h_img, w_img = gray.shape[:2]
+
+        faces = self._face_cas.detectMultiScale(
+            gray, scaleFactor=1.05, minNeighbors=3, minSize=(30, 30))
+
+        feats: Dict[str, Any] = {}
+
+        if len(faces) == 0:
+            state["eye_hist"].append(1)
+            state["yawn_hist"].append(0)
+            feats["perclos"]   = round(sum(state["eye_hist"])  / max(len(state["eye_hist"]),  1), 3)
+            feats["yawn_freq"] = round(sum(state["yawn_hist"]) / max(len(state["yawn_hist"]), 1), 3)
+            return feats
+
+        fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+        fcx = fx + fw / 2
+        fcy = fy + fh / 2
+
+        feats["pitch"] = round((fcy / h_img - 0.5) * 80, 1)
+        feats["yaw"]   = round((fcx / w_img - 0.5) * 80, 1)
+
+        eye_roi = gray[fy: fy + int(fh * 0.55), fx: fx + fw]
+        eyes = self._eye_cas.detectMultiScale(
+            eye_roi, scaleFactor=1.05, minNeighbors=2, minSize=(10, 10))
+
+        if len(eyes) >= 2:
+            eyes_s = sorted(eyes, key=lambda e: e[0])[:2]
+            ear_vals = [e[3] / max(e[2], 1) for e in eyes_s]
+            ear = round(sum(ear_vals) / 2, 3)
+        elif len(eyes) == 1:
+            ear = round(eyes[0][3] / max(eyes[0][2], 1), 3)
+        else:
+            ear = 0.30  # neutral — eyes likely open but not detected clearly
+
+        feats["ear"]         = ear
+        feats["eye_closure"] = round(max(0.0, 1.0 - ear / 0.40), 2)
+        eye_closed           = ear < 0.22
+
+        mouth_roi = gray[fy + int(fh * 0.6): fy + fh, fx: fx + fw]
+        if mouth_roi.size > 0:
+            m_std = float(np.std(mouth_roi))
+            mar   = round(min(1.0, m_std / 60.0), 3)
+            feats["mar"] = mar
+            yawning = mar > 0.60
+        else:
+            yawning = False
+
+        state["eye_hist"].append(1 if eye_closed else 0)
+        state["yawn_hist"].append(1 if yawning else 0)
+        feats["perclos"]   = round(sum(state["eye_hist"])  / max(len(state["eye_hist"]),  1), 3)
+        feats["yawn_freq"] = round(sum(state["yawn_hist"]) / max(len(state["yawn_hist"]), 1), 3)
+
+        return feats
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     @property
@@ -586,6 +654,7 @@ class DrowsinessEngine:
             return {"ok": False, "error": "Drowsiness engine not loaded"}
 
         state = self._session(session_id)
+        feats = self._extract_features(img_bgr, state)
         probs = self._infer(img_bgr, state)
         score = self._ensemble(probs)
 
@@ -603,7 +672,7 @@ class DrowsinessEngine:
 
         return {
             "ok":                 True,
-            "face_detected":      True,
+            "face_detected":      len(feats) > 2,
             "verdict":            verdict,
             "confidence":         round(score, 4),
             "alert":              state["consec"] >= _CONSECUTIVE_THR,
@@ -615,8 +684,8 @@ class DrowsinessEngine:
                 "m4": _fmt(probs["m4"]),
                 "m5": _fmt(probs["m5"]),
             },
-            "features": {},   # feature engineering removed — raw pixels used
-            "bbox":     None, # face bounding box removed (no MediaPipe)
+            "features": feats,
+            "bbox":     None,
         }
 
     def process_video(
