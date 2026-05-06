@@ -162,6 +162,7 @@
 /* ── Panels layout ── */
 .as-panels {
   padding: 0.9rem 1.5rem 2rem;
+  flex-shrink: 0;
 }
 .as-panels.grid {
   display: grid;
@@ -206,6 +207,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
   padding: 0 1.5rem 1rem;
+  flex-shrink: 0;
 }
 .as-camera-panel {
   min-height: 0;
