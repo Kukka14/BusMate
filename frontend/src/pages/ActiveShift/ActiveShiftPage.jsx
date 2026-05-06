@@ -967,7 +967,7 @@ export default function ActiveShiftPage() {
 
                 // Play audio alert if enabled
                 if (rsSignAudioEnabledRef.current) {
-                  const name = data.class_name.replace(/_/g, " ");
+                  const name = formatLabel(data.class_name);
                   playBeep(880, 0.2, 0.35);
                   setTimeout(() => speakText(`Road sign detected: ${name}`), 250);
                 }
@@ -1413,6 +1413,7 @@ export default function ActiveShiftPage() {
   const dwConf     = dwResult?.confidence;
   const dwFeatures = dwResult?.features||{};
   const dwStreak   = dwResult?.consecutive_frames??0;
+  const formatLabel = (value) => (typeof value === "string" ? value.replace(/_/g, " ") : (value == null ? "—" : String(value).replace(/_/g, " ")));
 
   const rsFrame = rsResult?.frames?.[rsActiveIdx];
   const liveSceneFrame = rsResult?.scene_latest
@@ -1724,7 +1725,7 @@ export default function ActiveShiftPage() {
                     {rsSignInfo?.class_name && (
                       <div style={{position:"absolute",top:8,right:8,display:"flex",gap:6,alignItems:"center",background:"rgba(0,0,0,0.7)",padding:"4px 10px",borderRadius:6}}>
                         <span style={{fontSize:"0.65rem",color:"#22c55e",fontWeight:600}}>● LIVE</span>
-                        <span style={{fontSize:"0.75rem",color:"#f1f5f9"}}>{rsSignInfo.class_name.replace(/_/g," ")}</span>
+                        <span style={{fontSize:"0.75rem",color:"#f1f5f9"}}>{formatLabel(rsSignInfo?.class_name)}</span>
                         <span style={{fontSize:"0.75rem",color:"#94a3b8"}}>{(rsSignInfo.confidence*100).toFixed(0)}%</span>
                       </div>
                     )}
@@ -1742,7 +1743,7 @@ export default function ActiveShiftPage() {
                       <div className="as-rsign-det-head">
                         <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
                         <div>
-                          <div className="as-rsign-det-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                          <div className="as-rsign-det-name">{formatLabel(rsSignInfo?.class_name)}</div>
                           <div className="as-rsign-det-conf" style={{color:confColor}}>
                             {(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}
                             {distStr !== "—" && <span style={{marginLeft:8,color:"#f1f5f9"}}>📏 {distStr}</span>}
@@ -1776,7 +1777,7 @@ export default function ActiveShiftPage() {
                       const entryDist = formatDistance(entry.estimated_distance_m);
                       return (
                         <div key={i} className="as-rsign-log-row">
-                          <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
+                          <span className="as-rsign-log-name">{formatLabel(entry?.class_name)}</span>
                           <span className="as-rsign-log-conf" style={{color:entryConfColor}}>{(entry.confidence*100).toFixed(0)}%</span>
                           {entryDist !== "—" && <span style={{fontSize:"0.7rem",color:"#94a3b8"}}>{entryDist}</span>}
                           <span className="as-rsign-log-time">{entry.time}</span>
@@ -2040,7 +2041,7 @@ export default function ActiveShiftPage() {
                         <div className="as-rsign-det-head">
                           <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
                           <div>
-                            <div className="as-rsign-det-name">{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                            <div className="as-rsign-det-name">{formatLabel(rsSignInfo?.class_name)}</div>
                             <div className="as-rsign-det-conf">
                               {(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}
                             </div>
@@ -2071,7 +2072,7 @@ export default function ActiveShiftPage() {
                       <div className="as-rsign-log-title">Recent Detections</div>
                       {rsSignLog.slice(0,5).map((entry,i) => (
                         <div key={i} className="as-rsign-log-row">
-                          <span className="as-rsign-log-name">{entry.class_name.replace(/_/g," ")}</span>
+                          <span className="as-rsign-log-name">{formatLabel(entry?.class_name)}</span>
                           <span className="as-rsign-log-conf">{(entry.confidence*100).toFixed(0)}%</span>
                           <span className="as-rsign-log-time">{entry.time}</span>
                         </div>
@@ -2387,7 +2388,7 @@ export default function ActiveShiftPage() {
                       <div style={{display:"flex", alignItems:"center", gap:6}}>
                         <span style={{fontSize:"1.3rem"}}>{instr?.icon||"🔍"}</span>
                         <div style={{flex:1}}>
-                          <div style={{fontSize:"0.72rem",fontWeight:700,color:"#f1f5f9",textTransform:"capitalize"}}>{rsSignInfo.class_name.replace(/_/g," ")}</div>
+                          <div style={{fontSize:"0.72rem",fontWeight:700,color:"#f1f5f9",textTransform:"capitalize"}}>{formatLabel(rsSignInfo?.class_name)}</div>
                           <div style={{fontSize:"0.6rem",color:"#94a3b8"}}>{(rsSignInfo.confidence*100).toFixed(0)}% confidence</div>
                         </div>
                         {instr && <span style={{padding:"2px 6px",borderRadius:3,fontSize:"0.55rem",fontWeight:700,color:"#fff",background:pc?.badge,textTransform:"uppercase"}}>{instr.priorityLabel}</span>}
