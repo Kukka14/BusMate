@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import PageShell from "../../app/layout/PageShell";
+import Sidebar from "../../components/common/Sidebar";
 import VideoPanel from "../../components/video/VideoPanel";
 import ResultsPanel from "../../components/results/ResultsPanel";
 import { useSocket } from "../../services/socket/useSocket";
@@ -84,74 +85,79 @@ export default function LiveMonitorPage() {
       : null);
 
   return (
-    <PageShell title={isRoadScene ? "Road Scene Live" : "Live Monitor"}>
-      {isRoadScene ? (
-        <div className="live-monitor-layout live-monitor-roadscene-unified">
-          <section className="live-monitor-card live-monitor-unified-card">
-            <div className="live-monitor-card-head">
-              <div>
-                <div className="live-monitor-card-title">Live Road Camera & Analysis</div>
-                <div className="live-monitor-card-subtitle">Real-time road scene segmentation</div>
-              </div>
-              <div className="live-monitor-pill is-connected">
-                Analyzing
-              </div>
-            </div>
+    <div className="dd-root">
+      <Sidebar activeKey="monitor" />
+      <main className="dd-page-main">
+        <PageShell title={isRoadScene ? "Road Scene Live" : "Live Monitor"}>
+          {isRoadScene ? (
+            <div className="live-monitor-layout live-monitor-roadscene-unified">
+              <section className="live-monitor-card live-monitor-unified-card">
+                <div className="live-monitor-card-head">
+                  <div>
+                    <div className="live-monitor-card-title">Live Road Camera & Analysis</div>
+                    <div className="live-monitor-card-subtitle">Real-time road scene segmentation</div>
+                  </div>
+                  <div className="live-monitor-pill is-connected">
+                    Analyzing
+                  </div>
+                </div>
 
-            <div className="live-monitor-unified-content">
-              <div className="live-monitor-camera-section">
-                <VideoPanel
-                  mode={module}
-                  connected={true}
-                  enableSocketCapture={false}
-                  onReady={setRoadSceneVideo}
-                />
-              </div>
-              
-              <div className="live-monitor-analysis-section">
-                {liveSceneFrame?.overlay && (
-                  <div className="overlay-wrapper">
-                    <img src={liveSceneFrame.overlay} alt="RSA overlay" className="overlay-image" />
-                    <div className="overlay-badge-live">● Live road camera</div>
-                    <div className="overlay-badge-hazard" style={{
-                      color: liveSceneFrame.hazard?.level === "High" ? "#ef4444" : 
-                             liveSceneFrame.hazard?.level === "Medium" ? "#f59e0b" : "#22c55e",
-                      borderColor: liveSceneFrame.hazard?.level === "High" ? "#ef4444" : 
-                                   liveSceneFrame.hazard?.level === "Medium" ? "#f59e0b" : "#22c55e"
-                    }}>
-                      Risk: {liveSceneFrame.hazard?.score !== undefined ? liveSceneFrame.hazard.score.toFixed(1) : "0.0"} — {liveSceneFrame.hazard?.level || "Low"}
-                    </div>
+                <div className="live-monitor-unified-content">
+                  <div className="live-monitor-camera-section">
+                    <VideoPanel
+                      mode={module}
+                      connected={true}
+                      enableSocketCapture={false}
+                      onReady={setRoadSceneVideo}
+                    />
                   </div>
-                )}
-              </div>
-              
-              <div className="live-monitor-detects-section">
-                {liveSceneFrame?.segments && liveSceneFrame.segments.length > 0 && (
-                  <div className="live-monitor-detects">
-                    <div className="live-monitor-detects-title">Detects</div>
-                    <ul className="live-monitor-detects-list">
-                      {liveSceneFrame.segments.slice(0, 8).map((seg, i) => (
-                        <li key={i} className="live-monitor-detect-item">
-                          <div className="detect-label">
-                            <span className="detect-swatch" style={{ background: seg.color || "#999" }} />
-                            <span>{seg.label || seg.name || `Class ${seg.id ?? i}`}</span>
-                          </div>
-                          <div className="detect-pct">{(seg.pixel_pct ?? 0).toFixed(1)}%</div>
-                        </li>
-                      ))}
-                    </ul>
+                  
+                  <div className="live-monitor-analysis-section">
+                    {liveSceneFrame?.overlay && (
+                      <div className="overlay-wrapper">
+                        <img src={liveSceneFrame.overlay} alt="RSA overlay" className="overlay-image" />
+                        <div className="overlay-badge-live">● Live road camera</div>
+                        <div className="overlay-badge-hazard" style={{
+                          color: liveSceneFrame.hazard?.level === "High" ? "#ef4444" : 
+                                 liveSceneFrame.hazard?.level === "Medium" ? "#f59e0b" : "#22c55e",
+                          borderColor: liveSceneFrame.hazard?.level === "High" ? "#ef4444" : 
+                                       liveSceneFrame.hazard?.level === "Medium" ? "#f59e0b" : "#22c55e"
+                        }}>
+                          Risk: {liveSceneFrame.hazard?.score !== undefined ? liveSceneFrame.hazard.score.toFixed(1) : "0.0"} — {liveSceneFrame.hazard?.level || "Low"}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                  
+                  <div className="live-monitor-detects-section">
+                    {liveSceneFrame?.segments && liveSceneFrame.segments.length > 0 && (
+                      <div className="live-monitor-detects">
+                        <div className="live-monitor-detects-title">Detects</div>
+                        <ul className="live-monitor-detects-list">
+                          {liveSceneFrame.segments.slice(0, 8).map((seg, i) => (
+                            <li key={i} className="live-monitor-detect-item">
+                              <div className="detect-label">
+                                <span className="detect-swatch" style={{ background: seg.color || "#999" }} />
+                                <span>{seg.label || seg.name || `Class ${seg.id ?? i}`}</span>
+                              </div>
+                              <div className="detect-pct">{(seg.pixel_pct ?? 0).toFixed(1)}%</div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
             </div>
-          </section>
-        </div>
-      ) : (
-        <div className="live-monitor-layout">
-          <VideoPanel onFrame={sendFrame} connected={connected} mode={module} />
-          <ResultsPanel results={results} mode={module} sceneFrame={liveSceneFrame} />
-        </div>
-      )}
-    </PageShell>
+          ) : (
+            <div className="live-monitor-layout">
+              <VideoPanel onFrame={sendFrame} connected={connected} mode={module} />
+              <ResultsPanel results={results} mode={module} sceneFrame={liveSceneFrame} />
+            </div>
+          )}
+        </PageShell>
+      </main>
+    </div>
   );
 }

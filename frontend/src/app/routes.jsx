@@ -1,5 +1,6 @@
 import React from "react";
 import { createBrowserRouter } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import MainLayout from "./layout/MainLayout";
 import { HomePage } from "../pages/Home";
 import { LoginPage } from "../pages/Login";
@@ -55,6 +56,7 @@ export const router = createBrowserRouter([
 
   // Road Scene Analysis & Hazard Assessment
   { path: "/road-scene",               element: <RoadSceneUploadPage />       },
+  { path: "/road-scene/live",          element: <LiveMonitorPage />           },
   { path: "/road-scene/results",       element: <RoadSceneResultsPage />      },
   { path: "/road-scene/video-results", element: <RoadSceneVideoResultsPage /> },
   { path: "/road-scene/fusion",        element: <RoadSceneFusionPage />       },
@@ -65,7 +67,7 @@ export const router = createBrowserRouter([
     path: "/",
     element: <MainLayout />,
     children: [
-      { path: "live", element: <LiveMonitorPage /> },
+      { path: "live", element: <Navigate to="/road-scene/live" replace /> },
       { path: "*",    element: <NotFoundPage />    },
     ],
   },

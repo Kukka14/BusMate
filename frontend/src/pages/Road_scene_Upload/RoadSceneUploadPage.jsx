@@ -163,7 +163,7 @@ export default function RoadSceneUploadPage() {
               <button
                 type="button"
                 className="rsa-btn"
-                onClick={() => window.location.assign('/live?module=roadscene')}
+                onClick={() => window.location.assign('/road-scene/live?module=roadscene')}
                 style={{ background: '#f59e0b22', borderColor: '#f59e0b66', color: '#f59e0b' }}
               >
                 📷 Live Road Camera

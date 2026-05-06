@@ -97,7 +97,7 @@ const FEATURES = [
     sub: [
       { label: "🖼 Image",   path: "/road-scene?mode=image" },
       { label: "🎥 Video",   path: "/road-scene?mode=video" },
-      { label: "📷 Live",    path: "/live?module=roadscene"   },
+      { label: "📷 Live",    path: "/road-scene/live?module=roadscene" },
       { label: "🧠 Fusion",  path: "/road-scene/fusion"      },
       { label: "🗺 Hazard",  path: "/road-scene/hazard"     },
     ],
