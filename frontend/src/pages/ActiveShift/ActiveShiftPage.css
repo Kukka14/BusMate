@@ -1,14 +1,36 @@
 /* ─── Active Shift Page ────────────────────────────────────────────────────── */
 .as-main {
-  flex: 1; min-width: 0;
-  display: flex; flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(circle at top left, rgba(34,197,94,0.08), transparent 28%),
     radial-gradient(circle at top right, rgba(56,189,248,0.08), transparent 24%),
     linear-gradient(180deg, #09101d 0%, #070b14 100%);
   color: #e2e8f0;
   overflow-y: auto;
-  height: 100vh;
+  overflow-x: hidden;
+  min-height: 100vh;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for main container */
+.as-main::-webkit-scrollbar {
+  width: 10px;
+}
+
+.as-main::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.as-main::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 5px;
+}
+
+.as-main::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 /* ── Top bar ── */
@@ -163,6 +185,7 @@
 .as-panels {
   padding: 0.9rem 1.5rem 2rem;
   flex-shrink: 0;
+  width: 100%;
 }
 .as-panels.grid {
   display: grid;
@@ -206,12 +229,45 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
-  padding: 0 1.5rem 1rem;
+  padding: 0.75rem 1.5rem 1rem;
+  width: 100%;
   flex-shrink: 0;
 }
 .as-camera-panel {
   min-height: 0;
   padding: 0.85rem !important;
+  display: flex;
+  flex-direction: column;
+  max-height: 720px;
+}
+.as-camera-panel > .as-panel-head {
+  flex-shrink: 0;
+}
+.as-camera-panel > .as-cam-wrap {
+  flex-shrink: 0;
+}
+/* Scrollable content container for drowsiness/emotion analysis */
+.as-camera-panel > div:last-child {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.as-camera-panel > div:last-child::-webkit-scrollbar {
+  width: 6px;
+}
+.as-camera-panel > div:last-child::-webkit-scrollbar-track {
+  background: transparent;
+}
+.as-camera-panel > div:last-child::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+.as-camera-panel > div:last-child::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 .as-camera-panel .as-panel-head {
   padding: 0 0 0.7rem;
@@ -228,10 +284,12 @@
 }
 .as-cam-video {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: auto;
+  aspect-ratio: 16 / 12;
   display: block;
   object-fit: cover;
   background: #04070d;
+  border-radius: 0.5rem;
 }
 .as-cam-error {
   margin-bottom: 0.6rem;

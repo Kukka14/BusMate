@@ -699,15 +699,37 @@ export default function ActiveShiftPage() {
     }
   }, [streamRef2.current]);
 
+  // Ensure all video elements play when stream is assigned
+  useEffect(() => {
+    const playVideos = () => {
+      const videos = [videoRef, videoRef2, videoRefEmotionDisplay, videoRefDrowsinessDisplay, videoRefRoadSignDisplay, videoRefRoadSceneDisplay];
+      videos.forEach(ref => {
+        if (ref?.current && ref.current.srcObject && ref.current.paused) {
+          console.log("[Video] Playing video:", ref.current.className || ref.current.id || "video");
+          ref.current.play().catch(err => {
+            // Autoplay might be blocked by browser policy - this is normal
+            console.warn("[Video] Autoplay blocked (browser policy):", err.message);
+          });
+        }
+      });
+    };
+    
+    // Try to play immediately and periodically
+    playVideos();
+    const timer = setInterval(playVideos, 1000);
+    return () => clearInterval(timer);
+  }, [shiftActive]);
+
   // ═══════════════════════════════════════════════════════════════════════
   // ── EMOTION Socket ─────────────────────────────────────────────────────
   useEffect(() => {
     const socket = io(SOCKET_URL, {transports:["polling","websocket"]});
     emSocketRef.current = socket;
-    socket.on("connect",    ()=>setEmConnected(true));
-    socket.on("disconnect", ()=>setEmConnected(false));
+    socket.on("connect",    ()=>{setEmConnected(true); console.log("[Emotion] Socket connected");});
+    socket.on("disconnect", ()=>{setEmConnected(false); console.log("[Emotion] Socket disconnected");});
     socket.on("prediction", payload => {
-      if (payload?.ok===false) return;
+      console.log("[Emotion] Received prediction:", payload);
+      if (payload?.ok===false) { console.warn("[Emotion] Error response:", payload.error); return; }
       setEmResult(payload);
       setEmFrames(c=>c+1);
       // Accumulate BVI for scoring
@@ -720,6 +742,7 @@ export default function ActiveShiftPage() {
         cheatCountRef.current += 1;
       }
     });
+    socket.on("error", (err) => console.error("[Emotion] Socket error:", err));
     return () => { if(emSendIvRef.current) clearInterval(emSendIvRef.current); socket.disconnect(); };
   }, []);
 
@@ -728,10 +751,15 @@ export default function ActiveShiftPage() {
     if (!shiftActive) { if(emSendIvRef.current) clearInterval(emSendIvRef.current); return; }
     emSendIvRef.current = setInterval(()=>{
       const v=videoRef.current, c=captureRef.current, s=emSocketRef.current;
-      if(!v||!c||!s||v.readyState<2) return;
+      if(!v||!c||!s||!s.connected||v.readyState<2) {
+        if (s && !s.connected) console.log("[Emotion] Socket not connected, skipping frame");
+        if (v && v.readyState < 2) console.log("[Emotion] Video not ready, skipping frame");
+        return;
+      }
       const ctx=c.getContext("2d"); c.width=320; c.height=240;
       ctx.drawImage(v,0,0,320,240);
       s.emit("frame",{driver_id:driverId,image:c.toDataURL("image/jpeg",0.70),client_ts:Date.now()});
+      console.log("[Emotion] Frame sent to server");
     }, 300);
     return () => clearInterval(emSendIvRef.current);
   }, [shiftActive, driverId]);
@@ -741,16 +769,18 @@ export default function ActiveShiftPage() {
   useEffect(() => {
     const socket = io(SOCKET_URL, {transports:["polling","websocket"]});
     dwSocketRef.current = socket;
-    socket.on("connect",    ()=>setDwConnected(true));
-    socket.on("disconnect", ()=>setDwConnected(false));
+    socket.on("connect",    ()=>{setDwConnected(true); console.log("[Drowsiness] Socket connected");});
+    socket.on("disconnect", ()=>{setDwConnected(false); console.log("[Drowsiness] Socket disconnected");});
     socket.on("drowsiness_result", payload => {
+      console.log("[Drowsiness] Received result:", payload);
       dwInFlight.current = false;
-      if (!payload?.ok) return;
+      if (!payload?.ok) { console.warn("[Drowsiness] Error response:", payload.error); return; }
       setDwResult(payload);
       setDwFrames(c=>c+1);
       if (payload.verdict==="Drowsy") setDwDrowsyFrames(c=>c+1);
       if (payload.alert) setDwAlerts(c=>c+1);
     });
+    socket.on("error", (err) => console.error("[Drowsiness] Socket error:", err));
     return () => { if(dwSendIvRef.current) clearInterval(dwSendIvRef.current); socket.disconnect(); };
   }, []);
 
@@ -759,12 +789,20 @@ export default function ActiveShiftPage() {
     if (!shiftActive) { if(dwSendIvRef.current) clearInterval(dwSendIvRef.current); return; }
     dwSendIvRef.current = setInterval(()=>{
       const v=videoRef.current, c=captureRef.current, s=dwSocketRef.current;
-      if(!v||!c||!s||!s.connected||v.readyState<2) return;
-      if (dwInFlight.current) return;
+      if(!v||!c||!s||!s.connected||v.readyState<2) {
+        if (s && !s.connected) console.log("[Drowsiness] Socket not connected, skipping frame");
+        if (v && v.readyState < 2) console.log("[Drowsiness] Video not ready, skipping frame");
+        return;
+      }
+      if (dwInFlight.current) {
+        console.log("[Drowsiness] Frame already in flight, skipping");
+        return;
+      }
       const ctx=c.getContext("2d"); c.width=640; c.height=480;
       ctx.drawImage(v,0,0,640,480);
       dwInFlight.current = true;
       s.emit("drowsiness_frame",{image:c.toDataURL("image/jpeg",0.80),session_id:dwSessionId,client_ts:Date.now()});
+      console.log("[Drowsiness] Frame sent to server");
     }, 200);
     return () => { clearInterval(dwSendIvRef.current); dwInFlight.current=false; };
   }, [shiftActive, dwSessionId]);
@@ -812,37 +850,63 @@ export default function ActiveShiftPage() {
     let iv = null;
     const sendFrame = async () => {
       const v = videoRef2.current, c = captureRef2.current;
-      if (!v || !c || v.readyState < 2) return;
+      if (!v || !c || v.readyState < 2) {
+        if (v && v.readyState < 2) console.log("[Road] Video not ready, skipping frame");
+        return;
+      }
       c.width = 640; c.height = 480;
       const ctx = c.getContext("2d");
       ctx.drawImage(v, 0, 0, c.width, c.height);
       const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.8));
-      if (!blob) return;
+      if (!blob) {
+        console.warn("[Road] Blob creation failed");
+        return;
+      }
       try {
         const form = new FormData();
         form.append("file", blob, "frame.jpg");
         // Send to RSA analyse (scene analysis)
-        fetch(`${API}/rsa/analyse`, { method: "POST", body: form }).then(r=>r.json()).then(data=>{
-          if (data && !data.error) {
-            const mappedFrame = {
-              original: data.original,
-              overlay: data.overlay,
-              segments: data.segments || [],
-              hazard: data.hazard || null,
-            };
-            setRsResult({ scene_latest: mappedFrame, frames: [mappedFrame] });
-          }
-        }).catch(()=>{});
-        // Send to road-sign upload endpoint (if exists)
-        fetch(`${API}/upload`, { method: "POST", body: form }).then(r=>r.json()).then(data=>{
-          if (data && !data.error) {
-            setRsSignInfo(data.class_name ? data : null);
-            if (data.class_name && data.status === "Normal") {
-              setRsSignLog(prev => [ { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() }, ...prev.slice(0,19) ]);
+        fetch(`${API}/rsa/analyse`, { method: "POST", body: form })
+          .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
+          .then(data => {
+            if (data && !data.error) {
+              console.log("[RSA] Received scene data:", data);
+              const mappedFrame = {
+                original: data.original,
+                overlay: data.overlay,
+                segments: data.segments || [],
+                hazard: data.hazard || null,
+              };
+              setRsResult({ scene_latest: mappedFrame, frames: [mappedFrame] });
+            } else {
+              console.warn("[RSA] Error response:", data?.error || "unknown");
             }
-          }
-        }).catch(()=>{});
-      } catch (e) {}
+          })
+          .catch(err => console.warn("[RSA] Fetch error:", err.message));
+        // Send to road-sign upload endpoint
+        fetch("/road-sign/upload", { method: "POST", body: form })
+          .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
+          .then(data => {
+            if (data && !data.error) {
+              console.log("[Road Sign] Received detection:", data);
+              setRsSignInfo(data.class_name ? data : null);
+              if (data.class_name && data.status === "Normal") {
+                setRsSignLog(prev => [ { class_name: data.class_name, confidence: data.confidence, status: data.status, time: new Date().toLocaleTimeString() }, ...prev.slice(0,19) ]);
+              }
+            } else {
+              console.log("[Road Sign] No detection or error:", data?.error || "none");
+            }
+          })
+          .catch(err => console.warn("[Road Sign] Fetch error:", err.message));
+      } catch (e) {
+        console.error("[Road] Frame processing error:", e);
+      }
     };
     iv = setInterval(sendFrame, 1500);
     return () => clearInterval(iv);
@@ -856,9 +920,13 @@ export default function ActiveShiftPage() {
       return;
     }
     rsSignPollRef.current = setInterval(() => {
-      fetch(`${API}/get_detection_info`)
-        .then(r => r.json())
+      fetch("/road-sign/get_detection_info")
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then(data => {
+          console.log("[Road Sign Poll] Received:", data);
           const hasSign = data?.class_name;
           setRsSignInfo(hasSign ? data : null);
           if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
@@ -871,7 +939,7 @@ export default function ActiveShiftPage() {
             rsSignLastRef.current = null;
           }
         })
-        .catch(() => {});
+        .catch(err => console.warn("[Road Sign Poll] Error:", err.message));
     }, 400);
 
     return () => {
@@ -1312,6 +1380,32 @@ export default function ActiveShiftPage() {
           </div>
         </header>
 
+        {/* ── Debug Status Bar ──────────────────────────────── */}
+        {shiftActive && (
+          <div style={{display:"flex",gap:12,alignItems:"center",padding:"0.5rem 1.25rem",background:"#0d1f35",borderBottom:"1px solid #1e3a5f",fontSize:"0.75rem",color:"#94a3b8",overflow:"auto"}}>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <span style={{color:"#64748b",fontWeight:600}}>📊 Status:</span>
+            </div>
+            <div style={{display:"flex",gap:12,alignItems:"center",marginLeft:8}}>
+              {[
+                {label:"Emotion",label2:"Em",connected:emConnected,hasData:!!emResult},
+                {label:"Drowsiness",label2:"Dw",connected:dwConnected,hasData:!!dwResult},
+                {label:"Road Scene",label2:"RS",connected:true,hasData:!!activeSceneFrame},
+                {label:"Road Sign",label2:"RSi",connected:true,hasData:!!rsSignInfo},
+              ].map(({label,label2,connected,hasData})=>(
+                <div key={label} style={{display:"flex",gap:4,alignItems:"center",padding:"2px 8px",background:connected?"#16a34a22":"#dc262622",border:`1px solid ${connected?"#22c55e55":"#ef444455"}`,borderRadius:4}}>
+                  <span style={{color:connected?"#22c55e":"#ef4444",fontSize:"0.7rem",fontWeight:600}}>●</span>
+                  <span style={{color:connected?"#22c55e":"#ef4444",fontSize:"0.7rem"}}>{label2}</span>
+                  {hasData && <span style={{marginLeft:2,color:"#22c55e",fontSize:"0.65rem"}}>✓ data</span>}
+                </div>
+              ))}
+              <div style={{marginLeft:12,paddingLeft:12,borderLeft:"1px solid #334155",color:"#64748b",fontSize:"0.7rem"}}>
+                Em: {emFrames} frames | Dw: {dwFrames} frames | Road: {rsResult?"analyzing":"waiting"}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Shift control banner ─────────────────────────────── */}
         {!shiftActive ? (
           <div className="as-start-banner">
@@ -1507,10 +1601,21 @@ export default function ActiveShiftPage() {
               {/* Full Road Sign analysis panel (duplicated) */}
               <div className="as-rsign-body" style={{marginTop:"0.5rem"}}>
                 <div className="as-rsign-stream-wrap">
-                  <div className="as-rsign-no-stream">
-                    <p>Live road feed is shown above</p>
-                    <p style={{fontSize:"0.7rem",color:"#475569"}}>Road sign detection uses the road camera feed in the top row</p>
+                  <div className="as-rsign-stream" style={{position:"relative",background:"#060913",borderRadius:"0.5rem",overflow:"hidden"}}>
+                    <img 
+                      src="/road-sign/video_feed" 
+                      alt="Live YOLO detection feed" 
+                      style={{width:"100%",height:"auto",aspectRatio:"16/10",objectFit:"cover",display:"block"}}
+                    />
+                    {rsSignInfo?.class_name && (
+                      <div style={{position:"absolute",top:8,right:8,display:"flex",gap:6,alignItems:"center",background:"rgba(0,0,0,0.7)",padding:"4px 10px",borderRadius:6}}>
+                        <span style={{fontSize:"0.65rem",color:"#22c55e",fontWeight:600}}>● LIVE</span>
+                        <span style={{fontSize:"0.75rem",color:"#f1f5f9"}}>{rsSignInfo.class_name.replace(/_/g," ")}</span>
+                        <span style={{fontSize:"0.75rem",color:"#94a3b8"}}>{(rsSignInfo.confidence*100).toFixed(0)}%</span>
+                      </div>
+                    )}
                   </div>
+                  <p style={{fontSize:"0.7rem",color:"#475569",marginTop:6}}>Live road feed — detects road signs in real-time</p>
                 </div>
 
                 {rsSignInfo ? (() => {

@@ -8,3 +8,4 @@ fer
 ultralytics
 transformers
 safetensors
+mediapipe
