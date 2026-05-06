@@ -98,10 +98,11 @@ export default function ResultsPanel({ results, mode, sceneFrame }) {
                   ))}
                 </ul>
 
-                <div style={{ marginTop: 12 }}>
-                  <MetricCard label="Objects Detected" value={results?.objects?.length ?? 0} />
-                  <AlertsList alerts={results?.alerts ?? []} />
-                </div>
+                {(results?.alerts ?? []).length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <AlertsList alerts={results?.alerts ?? []} />
+                  </div>
+                )}
               </div>
             </div>
           )}

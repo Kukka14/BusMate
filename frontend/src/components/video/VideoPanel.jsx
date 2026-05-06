@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import FrameSender from "./FrameSender";
 
-export default function VideoPanel({ onFrame, connected, mode }) {
+export default function VideoPanel({ onFrame, connected, mode, enableSocketCapture = true, onReady }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -9,14 +9,21 @@ export default function VideoPanel({ onFrame, connected, mode }) {
       .getUserMedia({ video: true })
       .then((stream) => {
         if (videoRef.current) videoRef.current.srcObject = stream;
+        onReady?.(videoRef.current);
       })
       .catch(console.error);
-  }, []);
+    return () => {
+      const stream = videoRef.current?.srcObject;
+      if (stream && typeof stream.getTracks === "function") {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [onReady]);
 
   return (
     <div className="video-panel">
       <video ref={videoRef} autoPlay muted playsInline />
-      <FrameSender videoRef={videoRef} onFrame={onFrame} active={connected} />
+      <FrameSender videoRef={videoRef} onFrame={onFrame} active={enableSocketCapture && connected} />
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         {mode === "roadscene" && (
           <div style={{
