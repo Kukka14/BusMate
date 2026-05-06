@@ -238,6 +238,7 @@ export default function ActiveShiftPage() {
   // ── Shift state ─────────────────────────────────────────────────────────
   const [shiftActive, setShiftActive] = useState(false);
   const [shiftStart, setShiftStart]   = useState(null);
+  const [shiftLogId, setShiftLogId]   = useState(null);  // UUID for drowsiness analytics
   const [elapsed, setElapsed]         = useState("00:00");
   const [activePanel, setActivePanel] = useState("all"); // "all"|"emotion"|"drowsiness"|"roadscene"|"hazard"
   const [drivingMode, setDrivingMode] = useState(false);
@@ -768,6 +769,42 @@ export default function ActiveShiftPage() {
     return () => { clearInterval(dwSendIvRef.current); dwInFlight.current=false; };
   }, [shiftActive, dwSessionId]);
 
+  // ── Periodic drowsiness analytics logging (every 30 s) ──────────────────
+  useEffect(() => {
+    if (!shiftActive || !shiftLogId) return;
+    const iv = setInterval(() => {
+      const result = dwResult;
+      if (!result || result.confidence == null) return;
+      const elapsed = shiftStart ? Math.floor((Date.now() - shiftStart) / 1000) : 0;
+      fetch(`${API}/api/drowsiness/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          shift_id:              shiftLogId,
+          driver_id:             driverId,
+          schedule_id:           scheduleId,
+          route_name:            routeName,
+          start_town:            startTown,
+          end_town:              endTown,
+          shift_elapsed_seconds: elapsed,
+          drowsy_prob:           result.confidence,
+          verdict:               result.verdict || "Alert",
+          alert_triggered:       result.verdict === "Drowsy" && result.confidence > 0.6,
+          face_detected:         result.face_detected ?? true,
+          features:              result.features || {},
+          models: {
+            m1: result.models?.m1?.drowsy_prob,
+            m2: result.models?.m2?.drowsy_prob,
+            m3: result.models?.m3?.drowsy_prob,
+            m4: result.models?.m4?.drowsy_prob,
+            m5: result.models?.m5?.drowsy_prob,
+          },
+        }),
+      }).catch(() => {});
+    }, 30000);
+    return () => clearInterval(iv);
+  }, [shiftActive, shiftLogId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ═══════════════════════════════════════════════════════════════════════
   // ── ROAD CAMERA: send frames to RSA and Road-Sign upload endpoints ──────
   useEffect(() => {
@@ -1124,6 +1161,7 @@ export default function ActiveShiftPage() {
     setShiftActive(true);
     setActivePanel("hazard");
     setShiftStart(Date.now());
+    setShiftLogId(crypto.randomUUID());
     setEmFrames(0); setDwFrames(0); setDwAlerts(0); setDwDrowsyFrames(0);
     bviSumRef.current = 0; bviCountRef.current = 0; cheatCountRef.current = 0;
     setShiftScore(null);
@@ -1187,7 +1225,7 @@ export default function ActiveShiftPage() {
       await fetch(`${API}/api/driver/shift/stop`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     } catch {}
     // Stop demo video
-    setShiftActive(false); setShiftStart(null);
+    setShiftActive(false); setShiftStart(null); setShiftLogId(null);
     setEmResult(null); setDwResult(null);
     setRsSignInfo(null); setRsSignLog([]);
     setHzPlaying(false);

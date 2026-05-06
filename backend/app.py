@@ -32,6 +32,7 @@ from Emotion_Shift_Profile.config import Config
 from drowsiness_engine import DrowsinessEngine
 # GPS routes and listener (lazy-start in __main__)
 from routes.gps_routes import gps_bp
+from routes.drowsiness_analytics import drowsiness_bp
 
 
 app = Flask(__name__)
@@ -54,6 +55,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 register_user_management(app)
 # Register GPS routes
 app.register_blueprint(gps_bp)
+app.register_blueprint(drowsiness_bp)
 
 
 # ── Auto-seed the hard-coded admin account ───────────────────────────────────

@@ -24,8 +24,9 @@ import DrowsinessMonitorPage from "../pages/DrowsinessMonitor/DrowsinessMonitorP
 import SchedulePage from "../pages/Schedule/SchedulePage";
 import ActiveShiftPage from "../pages/ActiveShift/ActiveShiftPage";
 import AdminDriversPage from "../pages/AdminDrivers/AdminDriversPage";
-import AdminDriverDetailPage from "../pages/AdminDriverDetail/AdminDriverDetailPage";
 import AdminSchedulePage from "../pages/AdminSchedule/AdminSchedulePage";
+
+const AdminDriverDetailPage = React.lazy(() => import("../pages/AdminDriverDetail/AdminDriverDetailPage"));
 
 export const router = createBrowserRouter([
   // Standalone full-page routes (own layout)
@@ -34,7 +35,7 @@ export const router = createBrowserRouter([
   { path: "/signup",            element: <SignUpPage />         },
   { path: "/admin/dashboard",   element: <AdminDashboard />     },
   { path: "/admin/drivers",        element: <AdminDriversPage />      },
-  { path: "/admin/drivers/:id",    element: <AdminDriverDetailPage /> },
+  { path: "/admin/drivers/:id",    element: <React.Suspense fallback={null}><AdminDriverDetailPage /></React.Suspense> },
   { path: "/admin/schedules",   element: <AdminSchedulePage />  },
   { path: "/driver/dashboard",        element: <DriverDashboard />    },
   { path: "/driver/monitor",           element: <MonitorHubPage />     },

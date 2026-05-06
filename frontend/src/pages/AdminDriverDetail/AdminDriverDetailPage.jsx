@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  AreaChart, Area, ReferenceLine,
+} from "recharts";
 import AdminSidebar from "../../components/AdminSidebar/AdminSidebar";
 import "./AdminDriverDetailPage.css";
 
@@ -96,6 +100,13 @@ export default function AdminDriverDetailPage() {
   /* expanded shift index */
   const [expandedIdx,   setExpandedIdx  ] = useState(null);
 
+  /* drowsiness analytics */
+  const [dwAnalysis,    setDwAnalysis   ] = useState(null);
+  const [dwLoading,     setDwLoading    ] = useState(false);
+  const [selShiftId,    setSelShiftId   ] = useState(null);
+  const [timeline,      setTimeline     ] = useState(null);
+  const [tlLoading,     setTlLoading    ] = useState(false);
+
   /* auth guard */
   useEffect(() => {
     if (!token || admin.role !== "admin") navigate("/login", { replace: true });
@@ -143,6 +154,33 @@ export default function AdminDriverDetailPage() {
   }
 
   useEffect(() => { loadScores(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadDwAnalysis() {
+    if (!id || !token) return;
+    setDwLoading(true);
+    fetch(`${API}/api/drowsiness/driver/${id}/analysis`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setDwAnalysis(data))
+      .catch(() => {})
+      .finally(() => setDwLoading(false));
+  }
+
+  function loadTimeline(shiftId) {
+    setSelShiftId(shiftId);
+    setTimeline(null);
+    setTlLoading(true);
+    fetch(`${API}/api/drowsiness/shift/${shiftId}/timeline`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setTimeline(Array.isArray(data) ? data : []))
+      .catch(() => setTimeline([]))
+      .finally(() => setTlLoading(false));
+  }
+
+  useEffect(() => { loadDwAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── loading skeleton ── */
   if (driverLoading || !driver) {
@@ -388,10 +426,232 @@ export default function AdminDriverDetailPage() {
                 </div>
               )}
             </div>
+            {/* ── Drowsiness Analytics ── */}
+            <div className="dd-card" style={{marginTop:"1rem"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+                <p className="dd-card-title" style={{margin:0}}>😴 Drowsiness Analytics</p>
+                <button className="dd-retry-btn" onClick={loadDwAnalysis} style={{fontSize:"0.72rem"}}>
+                  ↺ Refresh
+                </button>
+              </div>
+
+              {dwLoading && (
+                <div className="dd-shift-loading"><div className="dd-spinner"/><span>Loading analytics…</span></div>
+              )}
+
+              {!dwLoading && dwAnalysis && (
+                <>
+                  {/* Hourly pattern chart */}
+                  {dwAnalysis.hourly?.length > 0 ? (
+                    <div style={{marginBottom:"1.25rem"}}>
+                      <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                        Drowsiness by Hour of Day
+                        <span style={{fontWeight:400,textTransform:"none",letterSpacing:0,color:"#475569",marginLeft:6}}>
+                          (avg drowsy probability)
+                        </span>
+                      </p>
+                      <ResponsiveContainer width="100%" height={140}>
+                        <BarChart data={buildHourly(dwAnalysis.hourly)} barSize={14} margin={{top:4,right:4,left:-20,bottom:0}}>
+                          <XAxis dataKey="label" tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false}/>
+                          <YAxis tickFormatter={v=>`${v}%`} tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false} domain={[0,100]}/>
+                          <Tooltip
+                            formatter={(v,n,p) => [`${v}% avg · ${p.payload.alerts} alerts`, p.payload.label]}
+                            contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.75rem"}}
+                            labelStyle={{display:"none"}}
+                          />
+                          <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1}/>
+                          <ReferenceLine y={60} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1}/>
+                          <Bar dataKey="prob" radius={[3,3,0,0]}>
+                            {buildHourly(dwAnalysis.hourly).map((entry, i) => (
+                              <Cell key={i} fill={entry.prob >= 60 ? "#ef4444" : entry.prob >= 30 ? "#f59e0b" : "#22c55e"}/>
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      <div style={{display:"flex",gap:"1rem",fontSize:"0.65rem",color:"#475569",marginTop:2,justifyContent:"flex-end"}}>
+                        <span style={{color:"#22c55e"}}>■ Alert (&lt;30%)</span>
+                        <span style={{color:"#f59e0b"}}>■ Caution (30–60%)</span>
+                        <span style={{color:"#ef4444"}}>■ Drowsy (&gt;60%)</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p style={{fontSize:"0.78rem",color:"#334155",margin:"0 0 1rem"}}>
+                      No hourly data yet — data appears after the driver completes shifts.
+                    </p>
+                  )}
+
+                  {/* Per-shift drowsiness table */}
+                  {dwAnalysis.shifts?.length > 0 && (
+                    <div>
+                      <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                        Shift-level Drowsiness History
+                      </p>
+                      <div style={{display:"flex",flexDirection:"column",gap:"0.5rem"}}>
+                        {dwAnalysis.shifts.map(sh => {
+                          const isOpen = selShiftId === sh.shift_id;
+                          const alertColor = sh.alert_count > 5 ? "#ef4444" : sh.alert_count > 2 ? "#f59e0b" : "#22c55e";
+                          const probColor  = sh.avg_prob * 100 >= 60 ? "#ef4444" : sh.avg_prob * 100 >= 30 ? "#f59e0b" : "#22c55e";
+                          return (
+                            <div key={sh.shift_id} style={{background:"#0d1b2e",border:"1px solid #1e3a5f",borderRadius:10,overflow:"hidden"}}>
+                              <div
+                                onClick={() => isOpen ? setSelShiftId(null) : loadTimeline(sh.shift_id)}
+                                style={{display:"flex",alignItems:"center",gap:"0.75rem",padding:"0.6rem 0.85rem",cursor:"pointer"}}
+                              >
+                                {/* Drowsy % ring */}
+                                <DwRing prob={sh.avg_prob}/>
+                                {/* Info */}
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:"0.82rem",fontWeight:600,color:"#f1f5f9",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                                    {sh.route_name || "—"}
+                                  </div>
+                                  <div style={{fontSize:"0.68rem",color:"#475569",marginTop:2}}>
+                                    {sh.started_at ? new Date(sh.started_at).toLocaleString() : "—"}
+                                    {sh.duration_sec > 0 && ` · ${fmtDuration(sh.duration_sec)}`}
+                                    {` · ${sh.readings} readings`}
+                                  </div>
+                                </div>
+                                {/* Stats */}
+                                <div style={{display:"flex",gap:"1rem",textAlign:"center",flexShrink:0}}>
+                                  <div>
+                                    <div style={{fontSize:"0.78rem",fontWeight:700,color:probColor}}>{Math.round(sh.avg_prob*100)}%</div>
+                                    <div style={{fontSize:"0.6rem",color:"#475569"}}>Avg</div>
+                                  </div>
+                                  <div>
+                                    <div style={{fontSize:"0.78rem",fontWeight:700,color:"#f97316"}}>{Math.round(sh.max_prob*100)}%</div>
+                                    <div style={{fontSize:"0.6rem",color:"#475569"}}>Peak</div>
+                                  </div>
+                                  <div>
+                                    <div style={{fontSize:"0.78rem",fontWeight:700,color:alertColor}}>{sh.alert_count}</div>
+                                    <div style={{fontSize:"0.6rem",color:"#475569"}}>Alerts</div>
+                                  </div>
+                                  <div style={{fontSize:"0.75rem",color:"#475569",alignSelf:"center"}}>
+                                    {isOpen ? "▲" : "▼"}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Expanded: shift timeline chart */}
+                              {isOpen && (
+                                <div style={{padding:"0 0.85rem 0.75rem",borderTop:"1px solid #1e3a5f"}}>
+                                  {tlLoading && (
+                                    <div style={{display:"flex",alignItems:"center",gap:8,padding:"0.5rem 0",color:"#64748b",fontSize:"0.75rem"}}>
+                                      <div className="dd-spinner" style={{width:14,height:14}}/>
+                                      Loading timeline…
+                                    </div>
+                                  )}
+                                  {!tlLoading && timeline?.length > 0 && (
+                                    <>
+                                      <p style={{fontSize:"0.68rem",color:"#64748b",margin:"0.5rem 0 0.35rem",fontWeight:600,letterSpacing:"0.04em",textTransform:"uppercase"}}>
+                                        Drowsiness Timeline
+                                      </p>
+                                      <ResponsiveContainer width="100%" height={120}>
+                                        <AreaChart data={timeline.map(r=>({
+                                          t:  fmtElapsed(r.shift_elapsed_seconds),
+                                          prob: Math.round((r.drowsy_prob||0)*100),
+                                          alert: r.alert_triggered ? Math.round((r.drowsy_prob||0)*100) : null,
+                                        }))} margin={{top:4,right:4,left:-22,bottom:0}}>
+                                          <defs>
+                                            <linearGradient id="dwGrad" x1="0" y1="0" x2="0" y2="1">
+                                              <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.35}/>
+                                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0.02}/>
+                                            </linearGradient>
+                                          </defs>
+                                          <XAxis dataKey="t" tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false} interval={0} minTickGap={30}/>
+                                          <YAxis tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false} domain={[0,100]} tickFormatter={v=>`${v}%`}/>
+                                          <Tooltip
+                                            formatter={v=>[`${v}%`,"Drowsy prob"]}
+                                            contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.72rem"}}
+                                          />
+                                          <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1}/>
+                                          <ReferenceLine y={60} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1}/>
+                                          <Area type="monotone" dataKey="prob" stroke="#ef4444" strokeWidth={1.5}
+                                            fill="url(#dwGrad)" dot={false}/>
+                                        </AreaChart>
+                                      </ResponsiveContainer>
+                                      <div style={{display:"flex",gap:"0.75rem",marginTop:"0.4rem",flexWrap:"wrap"}}>
+                                        {[
+                                          {label:"Peak drowsy", val:`${Math.round(sh.max_prob*100)}%`, color:"#ef4444"},
+                                          {label:"Avg drowsy",  val:`${Math.round(sh.avg_prob*100)}%`, color:"#f59e0b"},
+                                          {label:"Alerts",      val:sh.alert_count,                    color:"#f97316"},
+                                          {label:"Drowsy %",    val:`${sh.drowsy_pct}%`,               color:"#a78bfa"},
+                                        ].map(s=>(
+                                          <div key={s.label} style={{background:"#071828",borderRadius:7,padding:"0.3rem 0.6rem",border:"1px solid #1e293b"}}>
+                                            <div style={{fontSize:"0.58rem",color:"#475569"}}>{s.label}</div>
+                                            <div style={{fontSize:"0.82rem",fontWeight:700,color:s.color}}>{s.val}</div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                  {!tlLoading && timeline?.length === 0 && (
+                                    <p style={{fontSize:"0.75rem",color:"#334155",padding:"0.5rem 0",margin:0}}>
+                                      No timeline readings recorded for this shift.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {!dwLoading && dwAnalysis.shifts?.length === 0 && dwAnalysis.hourly?.length === 0 && (
+                    <div style={{textAlign:"center",padding:"1.5rem",color:"#334155"}}>
+                      <div style={{fontSize:"1.8rem",marginBottom:8}}>😴</div>
+                      <p style={{fontSize:"0.82rem",margin:0}}>No drowsiness data yet.</p>
+                      <p style={{fontSize:"0.72rem",margin:"4px 0 0",color:"#475569"}}>
+                        Data is collected automatically every 30 s during active shifts.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
           </section>
         </div>
       </main>
     </div>
+  );
+}
+
+/* ── Drowsiness helpers ──────────────────────────────────────────────────── */
+
+// Fill in missing hours with 0 so the bar chart is always 24 bars
+function buildHourly(hourlyData) {
+  const map = {};
+  for (const h of hourlyData) map[h.hour] = h;
+  return Array.from({ length: 24 }, (_, i) => ({
+    label:  `${i}h`,
+    prob:   map[i] ? Math.round(map[i].avg_prob * 100) : 0,
+    alerts: map[i]?.alert_count ?? 0,
+  }));
+}
+
+function fmtElapsed(sec) {
+  if (!sec && sec !== 0) return "—";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h > 0 ? `${h}h${m}m` : `${m}m`;
+}
+
+function DwRing({ prob }) {
+  const pct  = Math.round((prob || 0) * 100);
+  const col  = pct >= 60 ? "#ef4444" : pct >= 30 ? "#f59e0b" : "#22c55e";
+  const r    = 18, cx = 22, cy = 22;
+  const circ = 2 * Math.PI * r;
+  return (
+    <svg width="44" height="44" viewBox="0 0 44 44" style={{flexShrink:0}}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e293b" strokeWidth="5"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth="5"
+        strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
+        strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
+        style={{transition:"stroke-dashoffset 0.5s ease"}}/>
+      <text x={cx} y={cy + 4} textAnchor="middle" fill={col}
+        fontSize="9" fontWeight="700" fontFamily="Inter,sans-serif">{pct}%</text>
+    </svg>
   );
 }
 
