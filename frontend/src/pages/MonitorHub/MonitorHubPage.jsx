@@ -72,9 +72,9 @@ const FEATURES = [
       </svg>
     ),
     sub: [
-      { label: "🖼 Image",  path: "/road-sign?mode=image" },
-      { label: "🎥 Video",  path: "/road-sign?mode=video" },
-      { label: "📷 Webcam", path: "/road-sign/live"       },
+      { label: "🖼 Image",  path: "/road-sign?mode=image"          },
+      { label: "🎥 Video",  path: "/road-sign?mode=video"          },
+      { label: "📷 Webcam", path: "/driver/monitor/road-sign"      },
     ],
   },
   {
@@ -111,11 +111,6 @@ export default function MonitorHubPage() {
   const token = localStorage.getItem("token");
 
   function handleSubAction(featureKey, path) {
-    // Keep webcam/live entries on their dedicated live routes.
-    if (featureKey === "roadsign" && path === "/road-sign/live") {
-      navigate("/road-sign/live");
-      return;
-    }
     if (featureKey === "roadscene" && path.includes("/road-scene/live")) {
       navigate("/road-scene/live?module=roadscene");
       return;

@@ -1709,86 +1709,128 @@ export default function ActiveShiftPage() {
               </div>
             </div>
 
-            {/* Road Sign Camera Feed */}
-            <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>
-              <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
-                <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🚦 Road Sign</span>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <button
-                    onClick={() => setRsSignAudioEnabled(!rsSignAudioEnabled)}
-                    style={{
-                      padding:"2px 8px",
-                      borderRadius:6,
-                      fontSize:"0.7rem",
-                      fontWeight:600,
-                      border:"1px solid #334155",
-                      background:rsSignAudioEnabled?"#0b5fff22":"#475569",
-                      color:rsSignAudioEnabled?"#0b5fff":"#94a3b8",
-                      cursor:"pointer",
-                      transition:"all 0.2s"
-                    }}
-                    title={rsSignAudioEnabled ? "Audio alerts enabled" : "Audio alerts disabled"}
-                  >
-                    {rsSignAudioEnabled ? "🔊" : "🔇"}
-                  </button>
-                  <span className={`as-badge ${(rsHasSign || rsHasVehicleMeta)?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
-                    {rsHasSign ? "Detected" : rsHasVehicleMeta ? "Tracking" : "Scanning"}
-                  </span>
-                </div>
-              </div>
-              {cam2Error && <div className="as-cam-error">{cam2Error}</div>}
-              <div className="as-cam-wrap">
-                <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
-              </div>
-              {/* Full Road Sign analysis panel — simplified */}
-              <div className="as-rsign-body" style={{marginTop:"0.5rem"}}>
-                <div className="as-rsign-stream-wrap">
-                  <div className="as-rsign-stream" style={{position:"relative",background:"#060913",borderRadius:"0.5rem",overflow:"hidden"}}>
-                    <img 
-                      src="/road-sign/video_feed" 
-                      alt="Live YOLO detection feed" 
-                      onError={() => setRsSignFeedUnavailable(true)}
-                      style={{width:"100%",height:"auto",aspectRatio:"16/10",objectFit:"cover",display:"block"}}
-                    />
-                    {rsSignInfo?.class_name && (
-                      <div style={{position:"absolute",top:8,right:8,display:"flex",gap:6,alignItems:"center",background:"rgba(0,0,0,0.7)",padding:"4px 10px",borderRadius:6}}>
-                        <span style={{fontSize:"0.65rem",color:"#22c55e",fontWeight:600}}>● LIVE</span>
-                        <span style={{fontSize:"0.75rem",color:"#f1f5f9"}}>{formatLabel(rsSignInfo?.class_name)}</span>
-                        <span style={{fontSize:"0.75rem",color:"#94a3b8"}}>{(rsSignInfo.confidence*100).toFixed(0)}%</span>
+            {/* ── Road Sign — All-in-one Card ──────────────────────────── */}
+            {(() => {
+              const rsInstr    = rsHasSign ? getSignInstruction(rsSignInfo.class_name) : null;
+              const rsPc       = rsInstr ? PRIORITY_COLORS[rsInstr.priority] : null;
+              const rsRiskCol  = {"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.vehicle_collision_risk] ?? "#64748b";
+              const rsCongCol  = {"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.traffic_congestion] ?? "#64748b";
+              return (
+                <div className="as-panel as-camera-panel" style={{padding:"0.75rem", ...(rsPc ? {borderColor:rsPc.border} : {})}}>
+                  {/* card head */}
+                  <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
+                    <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🚦 Road Sign</span>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <button onClick={()=>setRsSignAudioEnabled(v=>!v)}
+                        style={{padding:"2px 8px",borderRadius:6,fontSize:"0.7rem",fontWeight:600,border:"1px solid #334155",
+                          background:rsSignAudioEnabled?"#0b5fff22":"#1e293b",color:rsSignAudioEnabled?"#60a5fa":"#94a3b8",cursor:"pointer"}}
+                        title={rsSignAudioEnabled?"Mute":"Enable audio"}>
+                        {rsSignAudioEnabled?"🔊":"🔇"}
+                      </button>
+                      <span className={`as-badge ${rsHasSign?"green":rsHasVehicleMeta?"blue":"gray"}`} style={{fontSize:"0.7rem"}}>
+                        {rsHasSign?"Detected":rsHasVehicleMeta?"Tracking":"Scanning"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* hidden camera stream for backend capture */}
+                  <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted style={{display:"none"}}/>
+
+                  {/* MJPEG stream */}
+                  <div style={{position:"relative",background:"#060913",borderRadius:"0.5rem",overflow:"hidden",aspectRatio:"16/9",marginBottom:"0.5rem"}}>
+                    <img src={`${API}/video_feed`} alt="Road sign YOLO feed"
+                      style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}
+                      onError={e=>{e.target.style.opacity="0.3";}}/>
+                    {rsHasSign && (
+                      <div style={{position:"absolute",top:6,right:6,display:"flex",gap:5,alignItems:"center",
+                        background:"rgba(0,0,0,0.75)",padding:"3px 9px",borderRadius:6}}>
+                        <span style={{fontSize:"0.6rem",color:"#22c55e",fontWeight:700}}>● LIVE</span>
+                        <span style={{fontSize:"0.72rem",color:"#f1f5f9",fontWeight:600}}>{formatLabel(rsSignInfo.class_name)}</span>
+                        <span style={{fontSize:"0.68rem",color:"#94a3b8"}}>{Math.round((rsSignInfo.confidence??0)*100)}%</span>
                       </div>
                     )}
                   </div>
-                  <p style={{fontSize:"0.7rem",color:"#475569",marginTop:6}}>Live road feed — detects road signs in real-time</p>
-                </div>
 
-                {rsHasSign ? (() => {
-                  const instr = getSignInstruction(rsSignInfo.class_name);
-                  const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
-                  return (
-                    <div className="as-rsign-detection" style={pc ? {background:pc.bg, borderColor:pc.border} : {}}>
-                      <div className="as-rsign-det-head">
-                        <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
-                        <div>
-                          <div className="as-rsign-det-name">{formatLabel(rsSignInfo?.class_name)}</div>
-                          <div className="as-rsign-det-conf" style={{color:"#cbd5e1"}}>{getRoadSignAttention(instr)}</div>
+                  {/* sign + vehicle info */}
+                  {rsHasSign ? (
+                    <div style={{display:"flex",flexDirection:"column",gap:"0.4rem"}}>
+                      {/* sign name */}
+                      <div style={{display:"flex",alignItems:"flex-start",gap:"0.55rem",padding:"0.45rem 0.6rem",
+                        background:"rgba(7,24,40,0.7)",borderRadius:9,border:`1px solid ${rsPc?.border??"#1e293b"}`}}>
+                        <span style={{fontSize:"1.35rem"}}>{rsInstr?.icon??"🔍"}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:"0.86rem",fontWeight:800,color:"#f1f5f9",marginBottom:2}}>{formatLabel(rsSignInfo.class_name)}</div>
+                          {rsInstr && <div style={{fontSize:"0.67rem",color:"#94a3b8"}}>{rsInstr.instruction}</div>}
                         </div>
-                        {instr && (
-                          <span className="as-rsign-priority" style={{background:pc?.badge}}>
-                            {instr.priorityLabel}
+                        {rsInstr && (
+                          <span style={{fontSize:"0.6rem",fontWeight:700,padding:"2px 7px",borderRadius:999,flexShrink:0,
+                            background:rsPc?.badge??"rgba(245,158,11,0.2)",color:rsPc?.text??"#f59e0b"}}>
+                            {rsInstr.priorityLabel}
                           </span>
                         )}
                       </div>
+
+                      {/* confidence bar */}
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:"0.6rem",color:"#64748b",marginBottom:3}}>
+                          <span>Confidence</span>
+                          <span style={{fontWeight:700,color:(rsSignInfo.confidence??0)>0.7?"#22c55e":(rsSignInfo.confidence??0)>0.45?"#f59e0b":"#ef4444"}}>
+                            {Math.round((rsSignInfo.confidence??0)*100)}%
+                          </span>
+                        </div>
+                        <div style={{height:5,background:"#1e293b",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${Math.round((rsSignInfo.confidence??0)*100)}%`,borderRadius:3,transition:"width 0.5s",
+                            background:(rsSignInfo.confidence??0)>0.7?"#22c55e":(rsSignInfo.confidence??0)>0.45?"#f59e0b":"#ef4444"}}/>
+                        </div>
+                      </div>
+
+                      {/* 6-metric grid */}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.3rem"}}>
+                        {[
+                          {label:"Sign Dist.",     val:formatDistance(rsSignInfo.estimated_distance_m),                    color:"#38bdf8"},
+                          {label:"Status",         val:rsSignInfo.status??"—",                                              color:rsSignInfo.status==="Normal"?"#22c55e":"#f59e0b"},
+                          {label:"Collision Risk", val:rsSignInfo.vehicle_collision_risk??"—",                              color:rsRiskCol},
+                          {label:"Vehicle Dist.",  val:formatDistance(rsSignInfo.nearest_vehicle_distance_m),              color:rsRiskCol},
+                          {label:"Vehicles",       val:rsSignInfo.vehicle_count!=null?`${rsSignInfo.vehicle_count}`:rsHasVehicleMeta?"0":"—"},
+                          {label:"Traffic",        val:rsSignInfo.traffic_congestion??"—",                                  color:rsCongCol},
+                        ].map(({label,val,color})=>(
+                          <div key={label} style={{background:"rgba(7,24,40,0.6)",borderRadius:7,padding:"0.3rem 0.5rem",border:"1px solid #1e293b"}}>
+                            <div style={{fontSize:"0.57rem",color:"#64748b",fontWeight:600,letterSpacing:"0.04em",textTransform:"uppercase"}}>{label}</div>
+                            <div style={{fontSize:"0.78rem",fontWeight:700,color:color??"#e2e8f0"}}>{val}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* recent log */}
+                      {rsSignLog.length > 0 && (
+                        <div style={{background:"rgba(7,24,40,0.5)",borderRadius:8,padding:"0.4rem 0.55rem",border:"1px solid #1e293b"}}>
+                          <div style={{fontSize:"0.58rem",color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>Recent</div>
+                          {rsSignLog.slice(0,3).map((e,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"2px 0",borderBottom:i<2?"1px solid #0e1e2f":"none"}}>
+                              <span style={{fontSize:"0.72rem"}}>{e.icon??"🔍"}</span>
+                              <span style={{flex:1,fontSize:"0.67rem",color:"#e2e8f0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600}}>{formatLabel(e.class_name??e.name)}</span>
+                              <span style={{fontSize:"0.58rem",color:"#475569"}}>{e.time}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  );
-                })() : (
-                  <div className="as-rsign-no-detect" style={{padding:"0.9rem 0.75rem"}}>
-                    <span style={{fontSize:"1.5rem"}}>👁</span>
-                    <p style={{margin:0}}>Scanning for road signs…</p>
-                    <div style={{fontSize:"0.78rem",color:"#94a3b8",marginTop:4}}>Attention: watch the road</div>
-                  </div>
-                )}
-              </div>
-            </div>
+                  ) : (
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                      gap:"0.3rem",padding:"1rem 0.75rem",color:"#475569",textAlign:"center"}}>
+                      <span style={{fontSize:"1.5rem"}}>👁</span>
+                      <p style={{margin:0,fontSize:"0.8rem",color:"#64748b"}}>Scanning for road signs…</p>
+                      {rsHasVehicleMeta && (
+                        <div style={{display:"flex",gap:10,marginTop:4}}>
+                          <span style={{fontSize:"0.7rem",color:rsRiskCol,fontWeight:700}}>🚗 {rsSignInfo?.vehicle_collision_risk??"—"} RISK</span>
+                          <span style={{fontSize:"0.7rem",color:"#64748b"}}>{rsSignInfo?.vehicle_count??0} vehicles</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Road Scene Camera Feed */}
             <div className="as-panel as-camera-panel" style={{padding:"0.75rem"}}>

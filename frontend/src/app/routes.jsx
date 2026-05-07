@@ -13,7 +13,7 @@ import { DrivingMonitorPage } from "../pages/DrivingMonitor";
 import MonitorHubPage from "../pages/MonitorHub/MonitorHubPage";
 import DriverProfilePage from "../pages/DriverProfile/DriverProfilePage";
 import { Road_sign_UploadPage } from "../pages/Road_sign_Upload";
-import { Road_sign_LivePage } from "../pages/Road_sign_Live";
+import RoadSignMonitorPage from "../pages/RoadSignMonitor";
 import { Road_sign_ResultsPage } from "../pages/Road_sign_Results";
 import { Road_sign_VideoResultsPage } from "../pages/Road_sign_VideoResults";
 import { RoadSceneUploadPage } from "../pages/Road_scene_Upload";
@@ -41,7 +41,8 @@ export const router = createBrowserRouter([
   { path: "/admin/schedules",   element: <AdminSchedulePage />  },
   { path: "/driver/dashboard",        element: <DriverDashboard />    },
   { path: "/driver/monitor",           element: <MonitorHubPage />     },
-  { path: "/driver/monitor/emotion",   element: <DrivingMonitorPage /> },
+  { path: "/driver/monitor/emotion",    element: <DrivingMonitorPage /> },
+  { path: "/driver/monitor/road-sign",  element: <RoadSignMonitorPage /> },
   { path: "/driver/profile",    element: <DriverProfilePage />  },
   { path: "/driver/drowsiness", element: <DrowsinessMonitorPage /> },
   { path: "/driver/stats",      element: <DriverStatsPage />    },
@@ -50,7 +51,6 @@ export const router = createBrowserRouter([
 
   // Road Sign Detection pages
   { path: "/road-sign",                element: <Road_sign_UploadPage />       },
-  { path: "/road-sign/live",           element: <Road_sign_LivePage />         },
   { path: "/road-sign/results",        element: <Road_sign_ResultsPage />      },
   { path: "/road-sign/video-results",  element: <Road_sign_VideoResultsPage /> },
 

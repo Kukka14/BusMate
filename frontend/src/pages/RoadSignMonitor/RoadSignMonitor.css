@@ -1,0 +1,442 @@
+/* ── Root layout ──────────────────────────────────────────────────────────── */
+.rsm-root {
+  display: flex;
+  min-height: 100vh;
+  background: #060b14;
+  color: #e2e8f0;
+  font-family: "Inter", sans-serif;
+}
+
+.rsm-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 1.5rem 2rem;
+  overflow-y: auto;
+}
+
+/* ── Topbar ───────────────────────────────────────────────────────────────── */
+.rsm-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.rsm-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.rsm-topbar-icon {
+  font-size: 1.8rem;
+}
+
+.rsm-topbar-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+}
+
+.rsm-topbar-sub {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.rsm-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.rsm-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rsm-status-label {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+/* ── Alert banner ─────────────────────────────────────────────────────────── */
+.rsm-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 0.88rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  animation: rsm-slide-in 0.25s ease;
+}
+
+.rsm-alert-banner button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+@keyframes rsm-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Body grid ────────────────────────────────────────────────────────────── */
+.rsm-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  flex: 1;
+}
+
+@media (max-width: 1024px) {
+  .rsm-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rsm-stream-col,
+.rsm-results-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.rsm-card {
+  background: rgba(13, 24, 40, 0.85);
+  border: 1px solid #1e3a5f;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+}
+
+.rsm-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.rsm-card-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Stream card ──────────────────────────────────────────────────────────── */
+.rsm-live-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #22c55e;
+  letter-spacing: 0.05em;
+}
+
+.rsm-stream-wrap {
+  position: relative;
+  background: #060913;
+  border-radius: 10px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 0.75rem;
+}
+
+.rsm-stream-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.rsm-stream-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.rsm-stream-tag {
+  font-size: 0.72rem;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.rsm-stream-conf {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.rsm-stream-idle {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 9, 19, 0.7);
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+/* ── Session controls ─────────────────────────────────────────────────────── */
+.rsm-session-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.rsm-capture-err {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: #ef4444;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.rsm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.rsm-btn-start  { background: #0b5fff; color: #fff; border-color: #0b5fff; }
+.rsm-btn-start:hover { background: #0047d9; }
+.rsm-btn-start:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.rsm-btn-stop   { background: #ef444422; color: #ef4444; border-color: #ef4444; }
+.rsm-btn-stop:hover { background: #ef444440; }
+
+.rsm-btn-capture { background: #22c55e22; color: #22c55e; border-color: #22c55e; }
+.rsm-btn-capture:hover { background: #22c55e40; }
+.rsm-btn-capture:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.rsm-btn-audio  { background: #1e293b; color: #94a3b8; border-color: #334155; font-size: 0.85rem; padding: 4px 10px; }
+.rsm-btn-audio:hover { background: #253347; }
+
+.rsm-btn-danger { background: transparent; color: #64748b; border-color: #334155; font-size: 0.72rem; }
+.rsm-btn-danger:hover { color: #ef4444; border-color: #ef4444; }
+
+/* ── Log card ─────────────────────────────────────────────────────────────── */
+.rsm-log-count {
+  font-size: 0.7rem;
+  background: #1e3a5f;
+  color: #38bdf8;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.rsm-log-empty {
+  font-size: 0.78rem;
+  color: #475569;
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.rsm-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.rsm-log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #0e1e2f;
+  font-size: 0.72rem;
+}
+
+.rsm-log-icon { font-size: 0.9rem; flex-shrink: 0; }
+.rsm-log-name { flex: 1; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rsm-log-conf { color: #22c55e; font-weight: 700; flex-shrink: 0; }
+.rsm-log-dist { color: #38bdf8; flex-shrink: 0; }
+.rsm-log-time { color: #475569; flex-shrink: 0; }
+
+/* ── Detection card ───────────────────────────────────────────────────────── */
+.rsm-priority-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: #000;
+}
+
+.rsm-detect-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.rsm-detect-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.rsm-detect-icon { font-size: 2rem; flex-shrink: 0; }
+
+.rsm-detect-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #f1f5f9;
+  margin-bottom: 3px;
+}
+
+.rsm-detect-instr {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Confidence bar */
+.rsm-conf-wrap { display: flex; flex-direction: column; gap: 4px; }
+.rsm-conf-labels { display: flex; justify-content: space-between; font-size: 0.65rem; color: #64748b; }
+.rsm-conf-track  { height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
+.rsm-conf-fill   { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+
+/* ── Metric grid ──────────────────────────────────────────────────────────── */
+.rsm-metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.rsm-metric-tile {
+  background: rgba(7, 24, 40, 0.7);
+  border: 1px solid #1e293b;
+  border-radius: 9px;
+  padding: 0.4rem 0.6rem;
+}
+
+.rsm-metric-label {
+  font-size: 0.6rem;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 3px;
+}
+
+.rsm-metric-val {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+/* Action box */
+.rsm-action-box {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rsm-action-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rsm-action-text {
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+/* No detect */
+.rsm-no-detect {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 1.5rem 0.75rem;
+  color: #475569;
+  text-align: center;
+}
+
+.rsm-no-detect-icon { font-size: 2rem; }
+.rsm-no-detect p    { margin: 0; font-size: 0.82rem; }
+
+/* ── Vehicle card ─────────────────────────────────────────────────────────── */
+.rsm-risk-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+
+.rsm-vehicle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.rsm-vehicle-tile {
+  background: rgba(7, 24, 40, 0.7);
+  border: 1px solid #1e293b;
+  border-radius: 9px;
+  padding: 0.45rem 0.65rem;
+}
+
+.rsm-vehicle-tile-label {
+  font-size: 0.6rem;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.rsm-vehicle-tile-val {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+/* ── Session card ─────────────────────────────────────────────────────────── */
+.rsm-pipeline-note {
+  margin-top: 0.65rem;
+  font-size: 0.65rem;
+  color: #334155;
+  line-height: 1.5;
+  border-top: 1px solid #1e293b;
+  padding-top: 0.5rem;
+}
