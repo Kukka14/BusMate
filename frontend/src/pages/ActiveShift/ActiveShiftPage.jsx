@@ -2472,8 +2472,8 @@ export default function ActiveShiftPage() {
                       <span className="hud-ac-icon">🚦</span>
                       <span className="hud-ac-title">Road Sign</span>
                       {instr && (
-                        <span className="hud-ac-badge" style={{background:pc?.bg||"transparent",
-                          color:"#fff", borderColor:pc?.border||"#334155", background:pc?.badge+"33"}}>
+                        <span className="hud-ac-badge" style={{background:pc?.badge ? pc.badge+"33" : "transparent",
+                          color:"#fff", borderColor:pc?.border||"#334155"}}>
                           {instr.priorityLabel}
                         </span>
                       )}
