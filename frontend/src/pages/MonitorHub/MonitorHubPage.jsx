@@ -110,6 +110,19 @@ export default function MonitorHubPage() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const token = localStorage.getItem("token");
 
+  function handleSubAction(featureKey, path) {
+    // Keep webcam/live entries on their dedicated live routes.
+    if (featureKey === "roadsign" && path === "/road-sign/live") {
+      navigate("/road-sign/live");
+      return;
+    }
+    if (featureKey === "roadscene" && path.includes("/road-scene/live")) {
+      navigate("/road-scene/live?module=roadscene");
+      return;
+    }
+    navigate(path);
+  }
+
   function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -177,7 +190,7 @@ export default function MonitorHubPage() {
                         key={s.path}
                         className="mh-sub-btn"
                         style={{ borderColor: f.accent + "55", color: f.accent }}
-                        onClick={() => navigate(s.path)}
+                        onClick={() => handleSubAction(f.key, s.path)}
                       >
                         {s.label}
                       </button>

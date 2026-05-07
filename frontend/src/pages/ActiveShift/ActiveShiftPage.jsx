@@ -1414,6 +1414,35 @@ export default function ActiveShiftPage() {
   const dwFeatures = dwResult?.features||{};
   const dwStreak   = dwResult?.consecutive_frames??0;
   const formatLabel = (value) => (typeof value === "string" ? value.replace(/_/g, " ") : (value == null ? "—" : String(value).replace(/_/g, " ")));
+  
+  const getEmotionAlert = () => {
+    if (bviScore == null) return { label: "Waiting", tone: "idle", message: "Waiting for emotion analysis." };
+    if (bviScore < 0.3) return { label: "Safe", tone: "safe", message: "Emotion is stable and looks normal." };
+    if (bviScore < 0.6) return { label: "Unsafe", tone: "warn", message: "Emotion is shifting. Keep the driver focused." };
+    return { label: "Erratic", tone: "danger", message: "Emotion is unstable. Check the driver now." };
+  };
+  
+  const getDrowsinessAlert = () => {
+    if (dwConf == null) return { label: "Waiting", tone: "idle", message: "Waiting for drowsiness analysis." };
+    if ((dwVerdict || "").toLowerCase() === "drowsy" || dwConf >= 0.75) return { label: "Warning", tone: "danger", message: "Drowsiness risk is high. Take action now." };
+    if (dwConf >= 0.45) return { label: "Warning", tone: "warn", message: "Driver attention is dropping. Stay alert." };
+    return { label: "Safe", tone: "safe", message: "Driver looks alert and stable." };
+  };
+  
+  const getRoadSignAttention = (instr) => {
+    if (!instr) return "Attention: watch the road";
+    if (instr.priorityLabel === "Critical") return "Attention: critical warning";
+    if (instr.priorityLabel === "High") return "Attention: high caution";
+    if (instr.priorityLabel === "Medium") return "Attention: moderate caution";
+    return "Attention: low caution";
+  };
+  
+  const rsHasSign = typeof rsSignInfo?.class_name === "string" && rsSignInfo.class_name.trim().length > 0;
+  const rsHasVehicleMeta =
+    rsSignInfo?.nearest_vehicle_distance_m !== undefined ||
+    rsSignInfo?.vehicle_collision_risk !== undefined ||
+    rsSignInfo?.vehicle_count !== undefined ||
+    rsSignInfo?.traffic_congestion !== undefined;
 
   const rsFrame = rsResult?.frames?.[rsActiveIdx];
   const liveSceneFrame = rsResult?.scene_latest
@@ -1470,9 +1499,7 @@ export default function ActiveShiftPage() {
                 </div>
               </div>
             </div>
-            <div style={{marginLeft:12}}>
-              <div ref={gpsMapRef} style={{width:160,height:96,borderRadius:8,overflow:'hidden',border:'1px solid #243447'}} />
-            </div>
+            {/* GPS map removed for cleaner header */}
           </div>
         </header>
 
@@ -1704,8 +1731,8 @@ export default function ActiveShiftPage() {
                   >
                     {rsSignAudioEnabled ? "🔊" : "🔇"}
                   </button>
-                  <span className={`as-badge ${rsSignInfo?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
-                    {rsSignInfo ? "Detected" : "Scanning"}
+                  <span className={`as-badge ${(rsHasSign || rsHasVehicleMeta)?"green":"gray"}`} style={{fontSize:"0.75rem"}}>
+                    {rsHasSign ? "Detected" : rsHasVehicleMeta ? "Tracking" : "Scanning"}
                   </span>
                 </div>
               </div>
@@ -1713,13 +1740,14 @@ export default function ActiveShiftPage() {
               <div className="as-cam-wrap">
                 <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted className="as-cam-video" style={{transform:"scaleX(-1)", borderRadius:"0.5rem"}}/>
               </div>
-              {/* Full Road Sign analysis panel (duplicated) */}
+              {/* Full Road Sign analysis panel — simplified */}
               <div className="as-rsign-body" style={{marginTop:"0.5rem"}}>
                 <div className="as-rsign-stream-wrap">
                   <div className="as-rsign-stream" style={{position:"relative",background:"#060913",borderRadius:"0.5rem",overflow:"hidden"}}>
                     <img 
                       src="/road-sign/video_feed" 
                       alt="Live YOLO detection feed" 
+                      onError={() => setRsSignFeedUnavailable(true)}
                       style={{width:"100%",height:"auto",aspectRatio:"16/10",objectFit:"cover",display:"block"}}
                     />
                     {rsSignInfo?.class_name && (
@@ -1733,21 +1761,16 @@ export default function ActiveShiftPage() {
                   <p style={{fontSize:"0.7rem",color:"#475569",marginTop:6}}>Live road feed — detects road signs in real-time</p>
                 </div>
 
-                {rsSignInfo ? (() => {
+                {rsHasSign ? (() => {
                   const instr = getSignInstruction(rsSignInfo.class_name);
                   const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
-                  const confColor = rsSignInfo.confidence < 0.3 ? "#22c55e" : rsSignInfo.confidence < 0.6 ? "#f59e0b" : "#ef4444";
-                  const distStr = formatDistance(rsSignInfo.estimated_distance_m);
                   return (
                     <div className="as-rsign-detection" style={pc ? {background:pc.bg, borderColor:pc.border} : {}}>
                       <div className="as-rsign-det-head">
                         <span className="as-rsign-det-icon">{instr?.icon || "🔍"}</span>
                         <div>
                           <div className="as-rsign-det-name">{formatLabel(rsSignInfo?.class_name)}</div>
-                          <div className="as-rsign-det-conf" style={{color:confColor}}>
-                            {(rsSignInfo.confidence*100).toFixed(0)}% confidence · {rsSignInfo.status}
-                            {distStr !== "—" && <span style={{marginLeft:8,color:"#f1f5f9"}}>📏 {distStr}</span>}
-                          </div>
+                          <div className="as-rsign-det-conf" style={{color:"#cbd5e1"}}>{getRoadSignAttention(instr)}</div>
                         </div>
                         {instr && (
                           <span className="as-rsign-priority" style={{background:pc?.badge}}>
@@ -1755,35 +1778,13 @@ export default function ActiveShiftPage() {
                           </span>
                         )}
                       </div>
-                      {instr?.instructions && (
-                        <ul className="as-rsign-instructions">
-                          {instr.instructions.map((ins,i) => <li key={i}>{ins}</li>)}
-                        </ul>
-                      )}
                     </div>
                   );
                 })() : (
-                  <div className="as-rsign-no-detect">
+                  <div className="as-rsign-no-detect" style={{padding:"0.9rem 0.75rem"}}>
                     <span style={{fontSize:"1.5rem"}}>👁</span>
-                    <p>Scanning for road signs…</p>
-                  </div>
-                )}
-
-                {rsSignLog.length > 0 && (
-                  <div className="as-rsign-log">
-                    <div className="as-rsign-log-title">Recent Detections</div>
-                    {rsSignLog.slice(0,5).map((entry,i) => {
-                      const entryConfColor = entry.confidence < 0.3 ? "#22c55e" : entry.confidence < 0.6 ? "#f59e0b" : "#ef4444";
-                      const entryDist = formatDistance(entry.estimated_distance_m);
-                      return (
-                        <div key={i} className="as-rsign-log-row">
-                          <span className="as-rsign-log-name">{formatLabel(entry?.class_name)}</span>
-                          <span className="as-rsign-log-conf" style={{color:entryConfColor}}>{(entry.confidence*100).toFixed(0)}%</span>
-                          {entryDist !== "—" && <span style={{fontSize:"0.7rem",color:"#94a3b8"}}>{entryDist}</span>}
-                          <span className="as-rsign-log-time">{entry.time}</span>
-                        </div>
-                      );
-                    })}
+                    <p style={{margin:0}}>Scanning for road signs…</p>
+                    <div style={{fontSize:"0.78rem",color:"#94a3b8",marginTop:4}}>Attention: watch the road</div>
                   </div>
                 )}
               </div>
