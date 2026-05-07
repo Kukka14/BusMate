@@ -661,12 +661,48 @@ def _generate_schedules(user_id):
 @driver_bp.get("/schedules")
 @token_required
 def get_schedules(current_user):
-    uid = str(current_user.id)
-    schedules = _generate_schedules(uid)
-
-    # Merge completed shifts from DB — override status & attach score
+    from datetime import timezone
     from ..database import get_db
-    db = get_db()
+    db  = get_db()
+    uid = str(current_user.id)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    docs = list(db.schedules.find({"driver_id": uid}).sort("date_iso", 1))
+
+    schedules = []
+    for doc in docs:
+        date_iso = doc.get("date_iso", "")
+        day_part = date_iso[:10] if date_iso else ""
+
+        status = doc.get("status", "Upcoming")
+        if status != "Completed":
+            if day_part == today_str:
+                status = "Today"
+            elif day_part < today_str:
+                status = "Completed"
+            else:
+                status = "Upcoming"
+
+        try:
+            from datetime import datetime as dt
+            date_label = dt.fromisoformat(date_iso).strftime("%a, %b %d") if date_iso else ""
+        except Exception:
+            date_label = date_iso
+
+        schedules.append({
+            "id":         str(doc["_id"]),
+            "date":       date_label,
+            "date_iso":   date_iso,
+            "shift_time": doc.get("shift_time", ""),
+            "start_town": doc.get("start_town", ""),
+            "end_town":   doc.get("end_town", ""),
+            "bus":        doc.get("bus", ""),
+            "route_name": doc.get("route_name", ""),
+            "status":     status,
+        })
+
+    # Merge completed shift scores
     completed = list(
         db.shift_scores.find(
             {"driver_id": uid, "status": "Completed"},
@@ -681,10 +717,10 @@ def get_schedules(current_user):
 
     for s in schedules:
         if s["id"] in completed_map:
-            s["status"] = "Completed"
-            s["score"]  = completed_map[s["id"]].get("score", {})
+            s["status"]       = "Completed"
+            s["score"]        = completed_map[s["id"]].get("score", {})
             s["duration_sec"] = completed_map[s["id"]].get("duration_sec", 0)
-            s["scored_at"] = completed_map[s["id"]].get("scored_at", "")
+            s["scored_at"]    = completed_map[s["id"]].get("scored_at", "")
 
     return jsonify({"schedules": schedules}), 200
 
