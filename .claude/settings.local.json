@@ -17,7 +17,8 @@
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model3/model3_best.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model3_best.pth\")",
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model3/model3_eye_branch.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model3_eye_branch.pth\")",
       "Bash(cp \"D:/Research Project/Drownsiness/outputs_model4/model4_best.pth\" \"D:/BusMate/BusMate/backend/Drownsiness/model4_best.pth\")",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(npm install *)"
     ]
   }
 }

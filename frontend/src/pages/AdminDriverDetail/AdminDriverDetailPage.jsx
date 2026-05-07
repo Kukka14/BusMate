@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -17,6 +17,13 @@ const IcoPhone  = () => <svg width="13" height="13" fill="none" stroke="currentC
 const IcoID     = () => <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M14 9h4M14 12h4M14 15h2"/></svg>;
 const IcoCal    = () => <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
 const IcoBuild  = () => <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="13"/><path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2"/><path d="M9 21v-5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v5"/></svg>;
+const IcoDownload = () => (
+  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+);
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 const initials = (name = "") =>
@@ -79,40 +86,81 @@ function CompBar({ label, score, max }) {
   );
 }
 
+/* ── Drowsiness helpers ─────────────────────────────────────────────────── */
+function buildHourly(hourlyData) {
+  const map = {};
+  for (const h of hourlyData) map[h.hour] = h;
+  return Array.from({ length: 24 }, (_, i) => ({
+    label:  `${i}h`,
+    prob:   map[i] ? Math.round(map[i].avg_prob * 100) : 0,
+    alerts: map[i]?.alert_count ?? 0,
+  }));
+}
+
+function fmtElapsed(sec) {
+  if (!sec && sec !== 0) return "—";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h > 0 ? `${h}h${m}m` : `${m}m`;
+}
+
+function DwRing({ prob }) {
+  const pct  = Math.round((prob || 0) * 100);
+  const col  = pct >= 60 ? "#ef4444" : pct >= 30 ? "#f59e0b" : "#22c55e";
+  const r    = 18, cx = 22, cy = 22;
+  const circ = 2 * Math.PI * r;
+  return (
+    <svg width="44" height="44" viewBox="0 0 44 44" style={{flexShrink:0}}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e293b" strokeWidth="5"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth="5"
+        strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
+        strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
+        style={{transition:"stroke-dashoffset 0.5s ease"}}/>
+      <text x={cx} y={cy + 4} textAnchor="middle" fill={col}
+        fontSize="9" fontWeight="700" fontFamily="Inter,sans-serif">{pct}%</text>
+    </svg>
+  );
+}
+
+/* ── Small info row ─────────────────────────────────────────────────────── */
+function InfoRow({ icon, label, value }) {
+  return (
+    <div className="dd-info-row">
+      <span className="dd-info-icon">{icon}</span>
+      <span className="dd-info-label">{label}</span>
+      <span className="dd-info-value">{value || "—"}</span>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════════════ */
 export default function AdminDriverDetailPage() {
   const navigate        = useNavigate();
   const { id }          = useParams();
-  const { state }       = useLocation();                     // driver passed via navigate state
+  const { state }       = useLocation();
 
   const token = localStorage.getItem("token");
   const admin = (() => { try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; } })();
 
-  /* driver profile — use passed state or re-fetch if missing */
   const [driver,        setDriver       ] = useState(state?.driver || null);
   const [driverLoading, setDriverLoading] = useState(!state?.driver);
-
-  /* shift scores */
   const [scores,        setScores       ] = useState(null);
   const [scoresLoading, setScoresLoading ] = useState(true);
   const [scoresError,   setScoresError  ] = useState("");
-
-  /* expanded shift index */
   const [expandedIdx,   setExpandedIdx  ] = useState(null);
-
-  /* drowsiness analytics */
   const [dwAnalysis,    setDwAnalysis   ] = useState(null);
   const [dwLoading,     setDwLoading    ] = useState(false);
   const [selShiftId,    setSelShiftId   ] = useState(null);
   const [timeline,      setTimeline     ] = useState(null);
   const [tlLoading,     setTlLoading    ] = useState(false);
+  const [pdfExporting,  setPdfExporting ] = useState(false);
 
   /* auth guard */
   useEffect(() => {
     if (!token || admin.role !== "admin") navigate("/login", { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* fetch driver details if not passed via state */
+  /* fetch driver details */
   useEffect(() => {
     if (driver) return;
     setDriverLoading(true);
@@ -181,6 +229,286 @@ export default function AdminDriverDetailPage() {
   }
 
   useEffect(() => { loadDwAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── PDF Export ─────────────────────────────────────────────────────────── */
+  async function exportDrowsinessPDF() {
+    if (!dwAnalysis || pdfExporting) return;
+    setPdfExporting(true);
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+      const W = 210;
+      const MARGIN = 15;
+      const CW = W - MARGIN * 2;   // content width
+      let y = 0;
+
+      /* ── helpers ── */
+      const setFont  = (size, style = "normal", color = [30, 40, 60]) => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(...color);
+      };
+      const fillRect = (x, fy, w, h, rgb) => {
+        doc.setFillColor(...rgb);
+        doc.rect(x, fy, w, h, "F");
+      };
+      const hLine = (fy, rgb = [220, 228, 240]) => {
+        doc.setDrawColor(...rgb);
+        doc.setLineWidth(0.3);
+        doc.line(MARGIN, fy, W - MARGIN, fy);
+      };
+
+      /* ══ PAGE 1 ══════════════════════════════════════════════════════════ */
+
+      /* Header banner */
+      fillRect(0, 0, W, 40, [13, 25, 55]);
+
+      /* BusMate wordmark */
+      setFont(8, "bold", [56, 189, 248]);
+      doc.text("BusMate", MARGIN, 11);
+
+      /* Report title */
+      setFont(16, "bold", [241, 245, 249]);
+      doc.text("Drowsiness Analysis Report", MARGIN, 22);
+
+      /* Driver name & ID */
+      const driverName = driver?.username || "Unknown Driver";
+      const driverId   = `BM-${id?.slice(-5).toUpperCase() || "?????"}`;
+      setFont(9, "normal", [148, 163, 184]);
+      doc.text(`Driver: ${driverName}   ·   ID: ${driverId}`, MARGIN, 30);
+      doc.text(
+        `Generated: ${new Date().toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" })}`,
+        MARGIN, 36
+      );
+
+      y = 50;
+
+      /* ── Summary stats ── */
+      const shifts     = dwAnalysis.shifts || [];
+      const hourlyData = buildHourly(dwAnalysis.hourly || []);
+
+      const totalShifts  = shifts.length;
+      const avgProb      = totalShifts > 0
+        ? Math.round(shifts.reduce((s, r) => s + r.avg_prob, 0) / totalShifts * 100)
+        : 0;
+      const totalAlerts  = shifts.reduce((s, r) => s + r.alert_count, 0);
+      const avgDrowsyPct = totalShifts > 0
+        ? Math.round(shifts.reduce((s, r) => s + r.drowsy_pct, 0) / totalShifts)
+        : 0;
+
+      const stats = [
+        { label: "Total Shifts",    value: String(totalShifts),     color: [56, 189, 248] },
+        { label: "Avg Drowsy Prob", value: `${avgProb}%`,           color: avgProb >= 60 ? [239,68,68] : avgProb >= 30 ? [245,158,11] : [34,197,94] },
+        { label: "Total Alerts",    value: String(totalAlerts),     color: totalAlerts > 10 ? [239,68,68] : [249,115,22] },
+        { label: "Avg Drowsy Rate", value: `${avgDrowsyPct}%`,      color: [167, 139, 250] },
+      ];
+
+      const boxW = (CW - 9) / 4;
+      stats.forEach((stat, i) => {
+        const bx = MARGIN + i * (boxW + 3);
+        fillRect(bx, y, boxW, 20, [13, 21, 38]);
+        doc.setDrawColor(30, 55, 95);
+        doc.setLineWidth(0.4);
+        doc.rect(bx, y, boxW, 20);
+
+        setFont(14, "bold", stat.color);
+        doc.text(stat.value, bx + boxW / 2, y + 10, { align: "center" });
+
+        setFont(6.5, "normal", [100, 116, 139]);
+        doc.text(stat.label.toUpperCase(), bx + boxW / 2, y + 16, { align: "center" });
+      });
+
+      y += 26;
+
+      /* ── Hourly drowsiness chart ── */
+      setFont(8, "bold", [100, 116, 139]);
+      doc.text("DROWSINESS BY HOUR OF DAY", MARGIN, y);
+      y += 5;
+
+      const chartH   = 42;
+      const yAxisW   = 10;
+      const chartX   = MARGIN + yAxisW;
+      const chartW   = CW - yAxisW;
+
+      /* chart background */
+      fillRect(chartX, y, chartW, chartH, [9, 14, 26]);
+      doc.setDrawColor(26, 39, 68);
+      doc.setLineWidth(0.3);
+      doc.rect(chartX, y, chartW, chartH);
+
+      /* reference lines at 30% and 60% */
+      const yAt = (pct) => y + chartH - (pct / 100) * chartH;
+
+      doc.setDrawColor(245, 158, 11);
+      doc.setLineWidth(0.25);
+      doc.setLineDashPattern([1, 1], 0);
+      doc.line(chartX, yAt(30), chartX + chartW, yAt(30));
+
+      doc.setDrawColor(239, 68, 68);
+      doc.line(chartX, yAt(60), chartX + chartW, yAt(60));
+      doc.setLineDashPattern([], 0);
+
+      /* bars */
+      const barW  = chartW / 24 - 1;
+      hourlyData.forEach((h, i) => {
+        if (h.prob === 0) return;
+        const bx   = chartX + i * (chartW / 24) + 0.5;
+        const bh   = (h.prob / 100) * chartH;
+        const by   = y + chartH - bh;
+        const rgb  = h.prob >= 60 ? [239,68,68] : h.prob >= 30 ? [245,158,11] : [34,197,94];
+        fillRect(bx, by, barW, bh, rgb);
+      });
+
+      /* x-axis hour labels (every 4 hours) */
+      setFont(6, "normal", [71, 85, 105]);
+      [0, 4, 8, 12, 16, 20, 23].forEach(hr => {
+        const lx = chartX + hr * (chartW / 24) + (chartW / 24) / 2;
+        doc.text(`${hr}h`, lx, y + chartH + 4, { align: "center" });
+      });
+
+      /* y-axis labels */
+      [0, 30, 60, 100].forEach(pct => {
+        setFont(6, "normal", [71, 85, 105]);
+        doc.text(`${pct}%`, MARGIN + yAxisW - 1, yAt(pct) + 1.5, { align: "right" });
+      });
+
+      y += chartH + 10;
+
+      /* legend */
+      const legendItems = [
+        { color: [34,197,94],   label: "Alert (<30%)"       },
+        { color: [245,158,11],  label: "Caution (30–60%)"   },
+        { color: [239,68,68],   label: "Drowsy (>60%)"      },
+        { color: [245,158,11],  label: "— 30% threshold", dash: true },
+        { color: [239,68,68],   label: "— 60% threshold", dash: true },
+      ];
+      let lx = MARGIN;
+      legendItems.forEach(item => {
+        fillRect(lx, y - 2.5, 4, 3, item.color);
+        setFont(6.5, "normal", [100, 116, 139]);
+        doc.text(item.label, lx + 5.5, y);
+        lx += doc.getTextWidth(item.label) + 10;
+        if (lx > W - MARGIN - 30) { lx = MARGIN; y += 5; }
+      });
+
+      y += 8;
+      hLine(y);
+      y += 6;
+
+      /* ══ SHIFT HISTORY TABLE ════════════════════════════════════════════ */
+      if (shifts.length > 0) {
+        setFont(8, "bold", [100, 116, 139]);
+        doc.text("SHIFT DROWSINESS HISTORY", MARGIN, y);
+        y += 5;
+
+        /* table columns */
+        const cols = [
+          { label: "Date / Time",  key: "started_at",  w: 38, fmt: v => v ? new Date(v).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—" },
+          { label: "Route",        key: "route_name",  w: 35, fmt: v => v || "—" },
+          { label: "Duration",     key: "duration_sec",w: 22, fmt: v => fmtDuration(v) },
+          { label: "Avg %",        key: "avg_prob",    w: 18, fmt: v => `${Math.round(v*100)}%` },
+          { label: "Peak %",       key: "max_prob",    w: 18, fmt: v => `${Math.round(v*100)}%` },
+          { label: "Alerts",       key: "alert_count", w: 16, fmt: v => String(v) },
+          { label: "Drowsy Rate",  key: "drowsy_pct",  w: 23, fmt: v => `${v}%` },
+        ];
+        // Ensure col widths sum to CW
+        const totalColW = cols.reduce((s, c) => s + c.w, 0);
+        const scaleF    = CW / totalColW;
+        cols.forEach(c => { c.w = c.w * scaleF; });
+
+        const ROW_H = 7;
+
+        /* header row */
+        fillRect(MARGIN, y, CW, ROW_H, [13, 25, 55]);
+        let cx2 = MARGIN;
+        cols.forEach(col => {
+          setFont(6.5, "bold", [148, 163, 184]);
+          doc.text(col.label.toUpperCase(), cx2 + col.w / 2, y + 4.5, { align: "center" });
+          cx2 += col.w;
+        });
+
+        y += ROW_H;
+
+        /* data rows */
+        shifts.forEach((sh, rowIdx) => {
+          /* page break check — leave 20mm for footer */
+          if (y + ROW_H > 277) {
+            doc.addPage();
+            y = MARGIN;
+          }
+
+          const rowBg = rowIdx % 2 === 0 ? [9, 14, 26] : [11, 18, 33];
+          fillRect(MARGIN, y, CW, ROW_H, rowBg);
+
+          cx2 = MARGIN;
+          cols.forEach(col => {
+            const raw   = sh[col.key];
+            const str   = col.fmt(raw);
+            let   color = [148, 163, 184];
+
+            /* colour-code risk columns */
+            if (col.key === "avg_prob") {
+              const pct = Math.round((raw || 0) * 100);
+              color = pct >= 60 ? [239,68,68] : pct >= 30 ? [245,158,11] : [34,197,94];
+            } else if (col.key === "max_prob") {
+              const pct = Math.round((raw || 0) * 100);
+              color = pct >= 60 ? [239,68,68] : pct >= 30 ? [249,115,22] : [148,163,184];
+            } else if (col.key === "alert_count") {
+              color = raw > 5 ? [239,68,68] : raw > 2 ? [245,158,11] : [148,163,184];
+            } else if (col.key === "drowsy_pct") {
+              color = raw >= 30 ? [167,139,250] : [148,163,184];
+            }
+
+            setFont(6.5, "normal", color);
+            /* truncate long strings */
+            const maxW = col.w - 2;
+            const fitted = doc.getTextWidth(str) > maxW
+              ? str.substring(0, Math.floor(str.length * maxW / doc.getTextWidth(str)) - 1) + "…"
+              : str;
+            doc.text(fitted, cx2 + col.w / 2, y + 4.5, { align: "center" });
+            cx2 += col.w;
+          });
+
+          /* row bottom border */
+          doc.setDrawColor(22, 35, 60);
+          doc.setLineWidth(0.2);
+          doc.line(MARGIN, y + ROW_H, MARGIN + CW, y + ROW_H);
+
+          y += ROW_H;
+        });
+
+        /* outer table border */
+        doc.setDrawColor(30, 55, 95);
+        doc.setLineWidth(0.5);
+        doc.rect(MARGIN, y - ROW_H * shifts.length - ROW_H,
+                 CW, ROW_H * (shifts.length + 1));
+
+        y += 8;
+      }
+
+      /* ══ FOOTER on every page ══════════════════════════════════════════ */
+      const totalPages = doc.getNumberOfPages();
+      for (let pg = 1; pg <= totalPages; pg++) {
+        doc.setPage(pg);
+        fillRect(0, 287, W, 10, [8, 12, 22]);
+        setFont(6.5, "normal", [71, 85, 105]);
+        doc.text("BusMate Fleet Management — Confidential", MARGIN, 293);
+        doc.text(`Page ${pg} / ${totalPages}`, W - MARGIN, 293, { align: "right" });
+      }
+
+      /* ── Save ── */
+      const safeName = (driver?.username || "driver").replace(/\s+/g, "_").toLowerCase();
+      doc.save(`drowsiness-report-${safeName}-${new Date().toISOString().slice(0,10)}.pdf`);
+
+    } catch (err) {
+      console.error("PDF export error:", err);
+      alert("Failed to generate PDF. Please try again.");
+    } finally {
+      setPdfExporting(false);
+    }
+  }
 
   /* ── loading skeleton ── */
   if (driverLoading || !driver) {
@@ -329,7 +657,6 @@ export default function AdminDriverDetailPage() {
             <div className="dd-card dd-shifts-card">
               <p className="dd-card-title">Shift History &amp; Scores</p>
 
-              {/* loading */}
               {scoresLoading && (
                 <div className="dd-shift-loading">
                   <div className="dd-spinner"/>
@@ -337,7 +664,6 @@ export default function AdminDriverDetailPage() {
                 </div>
               )}
 
-              {/* error */}
               {scoresError && !scoresLoading && (
                 <div className="dd-err-bar">
                   <span>{scoresError}</span>
@@ -345,7 +671,6 @@ export default function AdminDriverDetailPage() {
                 </div>
               )}
 
-              {/* empty */}
               {scores && !scoresLoading && scores.shifts.length === 0 && (
                 <div className="dd-empty-shifts">
                   <span style={{ fontSize: "2rem" }}>📋</span>
@@ -354,7 +679,6 @@ export default function AdminDriverDetailPage() {
                 </div>
               )}
 
-              {/* shift rows */}
               {scores && !scoresLoading && scores.shifts.length > 0 && (
                 <div className="dd-shift-list">
                   {scores.shifts.map((shift, idx) => {
@@ -362,15 +686,9 @@ export default function AdminDriverDetailPage() {
                     const isOpen = expandedIdx === idx;
                     return (
                       <div key={idx} className={`dd-shift-row ${isOpen ? "open" : ""}`}>
-
-                        {/* clickable header */}
                         <div className="dd-shift-head"
                           onClick={() => setExpandedIdx(isOpen ? null : idx)}>
-
-                          {/* score ring */}
                           <ScoreRing score={shift.total_score} size={64}/>
-
-                          {/* route + meta */}
                           <div className="dd-shift-info">
                             <div className="dd-shift-route">
                               {shift.start_town || "—"}&nbsp;→&nbsp;{shift.end_town || "—"}
@@ -385,8 +703,6 @@ export default function AdminDriverDetailPage() {
                                 <span>⏱ {fmtDuration(shift.duration_sec)}</span>}
                             </div>
                           </div>
-
-                          {/* tier badge + chevron */}
                           <div className="dd-shift-right">
                             <span className="dd-tier-badge" style={{
                               color:       tColor,
@@ -400,7 +716,6 @@ export default function AdminDriverDetailPage() {
                           </div>
                         </div>
 
-                        {/* expanded component breakdown */}
                         {isOpen && (
                           <div className="dd-shift-comps">
                             <p className="dd-comps-title">Score Breakdown</p>
@@ -426,17 +741,46 @@ export default function AdminDriverDetailPage() {
                 </div>
               )}
             </div>
+
             {/* ── Drowsiness Analytics ── */}
             <div className="dd-card" style={{marginTop:"1rem"}}>
+
+              {/* Card header with export button */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
                 <p className="dd-card-title" style={{margin:0}}>😴 Drowsiness Analytics</p>
-                <button className="dd-retry-btn" onClick={loadDwAnalysis} style={{fontSize:"0.72rem"}}>
-                  ↺ Refresh
-                </button>
+                <div style={{display:"flex",gap:"0.5rem",alignItems:"center"}}>
+                  <button className="dd-retry-btn" onClick={loadDwAnalysis}
+                    style={{fontSize:"0.72rem"}}>
+                    ↺ Refresh
+                  </button>
+                  {dwAnalysis && (dwAnalysis.shifts?.length > 0 || dwAnalysis.hourly?.length > 0) && (
+                    <button
+                      className={`dd-export-pdf-btn ${pdfExporting ? "loading" : ""}`}
+                      onClick={exportDrowsinessPDF}
+                      disabled={pdfExporting}
+                      title="Export drowsiness report as PDF"
+                    >
+                      {pdfExporting ? (
+                        <>
+                          <span className="dd-export-spin"/>
+                          Generating…
+                        </>
+                      ) : (
+                        <>
+                          <IcoDownload />
+                          Export PDF
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {dwLoading && (
-                <div className="dd-shift-loading"><div className="dd-spinner"/><span>Loading analytics…</span></div>
+                <div className="dd-shift-loading">
+                  <div className="dd-spinner"/>
+                  <span>Loading analytics…</span>
+                </div>
               )}
 
               {!dwLoading && dwAnalysis && (
@@ -497,9 +841,7 @@ export default function AdminDriverDetailPage() {
                                 onClick={() => isOpen ? setSelShiftId(null) : loadTimeline(sh.shift_id)}
                                 style={{display:"flex",alignItems:"center",gap:"0.75rem",padding:"0.6rem 0.85rem",cursor:"pointer"}}
                               >
-                                {/* Drowsy % ring */}
                                 <DwRing prob={sh.avg_prob}/>
-                                {/* Info */}
                                 <div style={{flex:1,minWidth:0}}>
                                   <div style={{fontSize:"0.82rem",fontWeight:600,color:"#f1f5f9",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                                     {sh.route_name || "—"}
@@ -510,7 +852,6 @@ export default function AdminDriverDetailPage() {
                                     {` · ${sh.readings} readings`}
                                   </div>
                                 </div>
-                                {/* Stats */}
                                 <div style={{display:"flex",gap:"1rem",textAlign:"center",flexShrink:0}}>
                                   <div>
                                     <div style={{fontSize:"0.78rem",fontWeight:700,color:probColor}}>{Math.round(sh.avg_prob*100)}%</div>
@@ -530,7 +871,6 @@ export default function AdminDriverDetailPage() {
                                 </div>
                               </div>
 
-                              {/* Expanded: shift timeline chart */}
                               {isOpen && (
                                 <div style={{padding:"0 0.85rem 0.75rem",borderTop:"1px solid #1e3a5f"}}>
                                   {tlLoading && (
@@ -546,9 +886,8 @@ export default function AdminDriverDetailPage() {
                                       </p>
                                       <ResponsiveContainer width="100%" height={120}>
                                         <AreaChart data={timeline.map(r=>({
-                                          t:  fmtElapsed(r.shift_elapsed_seconds),
+                                          t:    fmtElapsed(r.shift_elapsed_seconds),
                                           prob: Math.round((r.drowsy_prob||0)*100),
-                                          alert: r.alert_triggered ? Math.round((r.drowsy_prob||0)*100) : null,
                                         }))} margin={{top:4,right:4,left:-22,bottom:0}}>
                                           <defs>
                                             <linearGradient id="dwGrad" x1="0" y1="0" x2="0" y2="1">
@@ -613,55 +952,6 @@ export default function AdminDriverDetailPage() {
           </section>
         </div>
       </main>
-    </div>
-  );
-}
-
-/* ── Drowsiness helpers ──────────────────────────────────────────────────── */
-
-// Fill in missing hours with 0 so the bar chart is always 24 bars
-function buildHourly(hourlyData) {
-  const map = {};
-  for (const h of hourlyData) map[h.hour] = h;
-  return Array.from({ length: 24 }, (_, i) => ({
-    label:  `${i}h`,
-    prob:   map[i] ? Math.round(map[i].avg_prob * 100) : 0,
-    alerts: map[i]?.alert_count ?? 0,
-  }));
-}
-
-function fmtElapsed(sec) {
-  if (!sec && sec !== 0) return "—";
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return h > 0 ? `${h}h${m}m` : `${m}m`;
-}
-
-function DwRing({ prob }) {
-  const pct  = Math.round((prob || 0) * 100);
-  const col  = pct >= 60 ? "#ef4444" : pct >= 30 ? "#f59e0b" : "#22c55e";
-  const r    = 18, cx = 22, cy = 22;
-  const circ = 2 * Math.PI * r;
-  return (
-    <svg width="44" height="44" viewBox="0 0 44 44" style={{flexShrink:0}}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e293b" strokeWidth="5"/>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke={col} strokeWidth="5"
-        strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
-        strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
-        style={{transition:"stroke-dashoffset 0.5s ease"}}/>
-      <text x={cx} y={cy + 4} textAnchor="middle" fill={col}
-        fontSize="9" fontWeight="700" fontFamily="Inter,sans-serif">{pct}%</text>
-    </svg>
-  );
-}
-
-/* ── Small info row ────────────────────────────────────────────────────────── */
-function InfoRow({ icon, label, value }) {
-  return (
-    <div className="dd-info-row">
-      <span className="dd-info-icon">{icon}</span>
-      <span className="dd-info-label">{label}</span>
-      <span className="dd-info-value">{value || "—"}</span>
     </div>
   );
 }
