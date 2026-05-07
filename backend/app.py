@@ -478,8 +478,13 @@ def compute_bvi_for_session(session_id):
 # =============================================================================
 
 
-from sahi import AutoDetectionModel
-from sahi.predict import get_sliced_prediction
+try:
+    from sahi import AutoDetectionModel
+    from sahi.predict import get_sliced_prediction
+except ImportError:
+    AutoDetectionModel = None
+    get_sliced_prediction = None
+    print("⚠  sahi not installed — road sign SAHI detection disabled. Run: pip install sahi")
 
 
 _RS_W            = Path(__file__).resolve().parent / "Road_sign_detection" / "Weight"
@@ -597,11 +602,14 @@ def _rs_init():
 
         # SAHI wrapper for small object detection
         global _rs_sahi_model
-        _rs_sahi_model = AutoDetectionModel.from_pretrained(
-            model_type="yolov8",
-            model_path=str(det_pt),
-            confidence_threshold=0.25,
-        )
+        if AutoDetectionModel is not None:
+            _rs_sahi_model = AutoDetectionModel.from_pretrained(
+                model_type="yolov8",
+                model_path=str(det_pt),
+                confidence_threshold=0.25,
+            )
+        else:
+            _rs_sahi_model = None
 
         with open(map_json) as _f:
             _ci = json.load(_f)
@@ -916,15 +924,18 @@ def rs_process_frame(frame: np.ndarray):
     full_boxes = full_result[0].boxes
 
     # Run SAHI on sliced frame (catches small/distant signs)
-    sahi_result = get_sliced_prediction(
-        frame,
-        _rs_sahi_model,
-        slice_height=320,
-        slice_width=320,
-        overlap_height_ratio=0.2,
-        overlap_width_ratio=0.2,
-    )
-    sahi_boxes = sahi_result.object_prediction_list
+    if _rs_sahi_model is not None and get_sliced_prediction is not None:
+        sahi_result = get_sliced_prediction(
+            frame,
+            _rs_sahi_model,
+            slice_height=320,
+            slice_width=320,
+            overlap_height_ratio=0.2,
+            overlap_width_ratio=0.2,
+        )
+        sahi_boxes = sahi_result.object_prediction_list
+    else:
+        sahi_boxes = []
 
     # Build combined candidate list
     all_candidates = []
