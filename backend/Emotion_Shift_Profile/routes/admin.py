@@ -361,6 +361,163 @@ def delete_driver(current_user, driver_id):
         return jsonify({"error": str(e)}), 500
 
 
+@admin_bp.get("/drivers/<driver_id>/shift-scores")
+@token_required
+@admin_required
+def get_driver_shift_scores(current_user, driver_id):
+    """Return completed shift scores for a given driver (admin view)."""
+    try:
+        from ..database import get_db
+        db = get_db()
+
+        docs = list(
+            db.shift_scores
+            .find({"driver_id": driver_id, "status": "Completed"}, {"_id": 0, "metrics": 0})
+            .sort("scored_at", -1)
+            .limit(50)
+        )
+
+        shifts = []
+        for d in docs:
+            sc = d.get("score") or {}
+            shifts.append({
+                "total_score":   sc.get("total_score"),
+                "tier":          sc.get("tier"),
+                "tier_color":    _tier_color(sc.get("tier")),
+                "components":    sc.get("components", {}),
+                "route_name":    d.get("route_name", ""),
+                "start_town":    d.get("start_town", ""),
+                "end_town":      d.get("end_town", ""),
+                "bus":           d.get("bus", ""),
+                "date":          d.get("date", ""),
+                "shift_time":    d.get("shift_time", ""),
+                "scored_at":     d.get("scored_at", ""),
+                "duration_sec":  d.get("duration_sec", 0),
+                "schedule_id":   d.get("schedule_id", ""),
+            })
+
+        total_shifts = len(shifts)
+        scores_only  = [s["total_score"] for s in shifts if s["total_score"] is not None]
+        avg_score    = round(sum(scores_only) / len(scores_only)) if scores_only else None
+        best_score   = max(scores_only) if scores_only else None
+
+        return jsonify({
+            "total_shifts": total_shifts,
+            "avg_score":    avg_score,
+            "best_score":   best_score,
+            "shifts":       shifts,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _tier_color(tier: str) -> str:
+    return {
+        "Excellent":          "#22c55e",
+        "Good":               "#38bdf8",
+        "Average":            "#f59e0b",
+        "Needs Improvement":  "#f97316",
+        "Poor":               "#ef4444",
+    }.get(tier or "", "#64748b")
+
+
+def _tier_for_score(score) -> str:
+    if score is None: return "Unranked"
+    if score >= 85:   return "Excellent"
+    if score >= 70:   return "Good"
+    if score >= 50:   return "Average"
+    if score >= 30:   return "Needs Improvement"
+    return "Poor"
+
+
+@admin_bp.get("/drivers/rankings")
+@token_required
+@admin_required
+def get_driver_rankings(current_user):
+    """Aggregate completed shift scores to rank all drivers by average score."""
+    try:
+        from ..database import get_db
+        from bson import ObjectId
+        db = get_db()
+
+        pipeline = [
+            {"$match": {
+                "status": "Completed",
+                "score.total_score": {"$exists": True, "$ne": None},
+            }},
+            {"$group": {
+                "_id":          "$driver_id",
+                "avg_score":    {"$avg": "$score.total_score"},
+                "total_shifts": {"$sum": 1},
+                "best_score":   {"$max": "$score.total_score"},
+            }},
+            {"$sort": {"avg_score": -1}},
+        ]
+        results = list(db.shift_scores.aggregate(pipeline))
+
+        MIN_SHIFTS = 3
+        ranked_raw   = [r for r in results if r["total_shifts"] >= MIN_SHIFTS]
+        unranked_raw = [r for r in results if r["total_shifts"] <  MIN_SHIFTS]
+
+        # Fetch driver names & company in one query
+        all_ids    = [r["_id"] for r in results]
+        valid_oids = []
+        for id_str in all_ids:
+            try: valid_oids.append(ObjectId(id_str))
+            except Exception: pass
+
+        name_map = {}
+        if valid_oids:
+            for u in db.users.find(
+                {"_id": {"$in": valid_oids}},
+                {"username": 1, "company": 1, "is_active": 1},
+            ):
+                name_map[str(u["_id"])] = u
+
+        # Also include every driver (even those with zero shifts) in unranked
+        all_drivers_with_shifts = {r["_id"] for r in results}
+        driver_cursor = db.users.find({"role": "driver"}, {"username": 1, "company": 1, "is_active": 1})
+        for u in driver_cursor:
+            uid = str(u["_id"])
+            name_map.setdefault(uid, u)
+            if uid not in all_drivers_with_shifts:
+                unranked_raw.append({"_id": uid, "avg_score": None, "best_score": None, "total_shifts": 0})
+
+        def _build(r, rank=None):
+            avg  = round(r["avg_score"],  1) if r.get("avg_score")  is not None else None
+            best = round(r["best_score"], 1) if r.get("best_score") is not None else None
+            tier = _tier_for_score(avg)
+            info = name_map.get(r["_id"], {})
+            entry = {
+                "driver_id":    r["_id"],
+                "username":     info.get("username", "Unknown"),
+                "company":      info.get("company",  ""),
+                "is_active":    info.get("is_active", True),
+                "avg_score":    avg,
+                "best_score":   best,
+                "total_shifts": r["total_shifts"],
+                "tier":         tier,
+                "tier_color":   _tier_color(tier),
+            }
+            if rank is not None:
+                entry["rank"] = rank
+            return entry
+
+        ranked   = [_build(r, i + 1) for i, r in enumerate(ranked_raw)]
+        unranked = [_build(r)        for r  in unranked_raw]
+
+        return jsonify({
+            "ranked":              ranked,
+            "unranked":            unranked,
+            "total_ranked":        len(ranked),
+            "min_shifts_required": MIN_SHIFTS,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Admin own profile ─────────────────────────────────────────────────────────
 
 # ── Schedule management ───────────────────────────────────────────────────────

@@ -356,10 +356,12 @@
 
 /* ── Score cell ──────────────────────────────────────────────────────────── */
 .drv-score-cell {
-  display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
 }
-.drv-score-num   { font-size: 0.88rem; font-weight: 700; }
-.drv-score-denom { font-size: 0.65rem; color: #334155; }
+.drv-score-rank  { font-size: 0.65rem; font-weight: 700; opacity: 0.8; }
+.drv-score-num   { font-size: 0.92rem; font-weight: 800; }
+.drv-score-denom { font-size: 0.63rem; color: #334155; }
+.drv-score-hint  { font-size: 0.6rem; color: #334155; margin-left: 2px; }
 .drv-tier-badge  {
   display: inline-flex; align-items: center;
   padding: 0.2rem 0.6rem; border-radius: 999px;

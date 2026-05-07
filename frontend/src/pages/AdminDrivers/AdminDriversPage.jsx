@@ -60,13 +60,24 @@ function TierBadge({ tier, color, sm }) {
 }
 
 function ScoreCell({ rankData }) {
-  if (!rankData) return <span className="drv-na">—</span>;
-  const { avg_score, tier, tier_color } = rankData;
+  if (!rankData || rankData.avg_score == null) {
+    return (
+      <div className="drv-score-cell">
+        <span className="drv-na">No data</span>
+        {rankData?.total_shifts > 0 && (
+          <span className="drv-score-hint">{rankData.total_shifts} shift{rankData.total_shifts !== 1 ? "s" : ""}</span>
+        )}
+      </div>
+    );
+  }
+  const { avg_score, tier, tier_color, rank, total_shifts } = rankData;
   return (
     <div className="drv-score-cell">
+      {rank && <span className="drv-score-rank" style={{ color: tier_color }}>#{rank}</span>}
       <span className="drv-score-num" style={{ color: tier_color }}>{avg_score}</span>
       <span className="drv-score-denom">/100</span>
       <TierBadge tier={tier} color={tier_color} sm />
+      <span className="drv-score-hint">{total_shifts} shift{total_shifts !== 1 ? "s" : ""}</span>
     </div>
   );
 }
@@ -206,7 +217,26 @@ export default function AdminDriversPage() {
   }
 
   /* ── derived data ──────────────────────────────────────────────────────── */
-  const filtered = drivers.filter((d) => {
+
+  /* map driver_id → ranking entry — includes both ranked and unranked */
+  const rankMap = useMemo(() => {
+    if (!rankings) return {};
+    const all = [...(rankings.ranked || []), ...(rankings.unranked || [])];
+    return Object.fromEntries(all.map((r) => [r.driver_id, r]));
+  }, [rankings]);
+
+  /* sort drivers: ranked first (by rank asc), then unranked w/ score, then no-data */
+  const sortedDrivers = useMemo(() => {
+    return [...drivers].sort((a, b) => {
+      const ra = rankMap[a._id];
+      const rb = rankMap[b._id];
+      const rankA = ra?.rank ?? (ra?.avg_score != null ? 9000 : 9999);
+      const rankB = rb?.rank ?? (rb?.avg_score != null ? 9000 : 9999);
+      return rankA - rankB;
+    });
+  }, [drivers, rankMap]);
+
+  const filtered = sortedDrivers.filter((d) => {
     const q = query.toLowerCase();
     return (
       (d.username || "").toLowerCase().includes(q) ||
@@ -214,12 +244,6 @@ export default function AdminDriversPage() {
       (d.company  || "").toLowerCase().includes(q)
     );
   });
-
-  /* map driver_id → ranking entry for quick lookup in table rows */
-  const rankMap = useMemo(() => {
-    if (!rankings?.ranked) return {};
-    return Object.fromEntries(rankings.ranked.map((r) => [r.driver_id, r]));
-  }, [rankings]);
 
   /* ── render ─────────────────────────────────────────────────────────────── */
   const user = userRef.current || {};
