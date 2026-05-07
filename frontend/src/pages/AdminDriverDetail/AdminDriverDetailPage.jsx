@@ -153,7 +153,15 @@ export default function AdminDriverDetailPage() {
   const [selShiftId,    setSelShiftId   ] = useState(null);
   const [timeline,      setTimeline     ] = useState(null);
   const [tlLoading,     setTlLoading    ] = useState(false);
-  const [pdfExporting,  setPdfExporting ] = useState(false);
+  const [pdfExporting,    setPdfExporting  ] = useState(false);
+  const [bviAnalysis,     setBviAnalysis   ] = useState(null);
+  const [bviLoading,      setBviLoading    ] = useState(false);
+  const [bviPdfExporting, setBviPdfExporting] = useState(false);
+  const [rsdAnalysis,     setRsdAnalysis   ] = useState(null);
+  const [rsdLoading,      setRsdLoading    ] = useState(false);
+  const [hazardAnalysis,  setHazardAnalysis] = useState(null);
+  const [hazardLoading,   setHazardLoading ] = useState(false);
+  const [reportExporting, setReportExporting] = useState(false);
 
   /* auth guard */
   useEffect(() => {
@@ -229,6 +237,46 @@ export default function AdminDriverDetailPage() {
   }
 
   useEffect(() => { loadDwAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadBviAnalysis() {
+    if (!id || !token) return;
+    setBviLoading(true);
+    fetch(`${API}/api/admin/drivers/${id}/bvi-analysis`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setBviAnalysis(data))
+      .catch(() => {})
+      .finally(() => setBviLoading(false));
+  }
+
+  useEffect(() => { loadBviAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadRsdAnalysis() {
+    if (!id || !token) return;
+    setRsdLoading(true);
+    fetch(`${API}/api/admin/drivers/${id}/road-sign-analysis`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setRsdAnalysis(data))
+      .catch(() => {})
+      .finally(() => setRsdLoading(false));
+  }
+  useEffect(() => { loadRsdAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadHazardAnalysis() {
+    if (!id || !token) return;
+    setHazardLoading(true);
+    fetch(`${API}/api/admin/drivers/${id}/hazard-analysis`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => setHazardAnalysis(data))
+      .catch(() => {})
+      .finally(() => setHazardLoading(false));
+  }
+  useEffect(() => { loadHazardAnalysis(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── PDF Export ─────────────────────────────────────────────────────────── */
   async function exportDrowsinessPDF() {
@@ -507,6 +555,673 @@ export default function AdminDriverDetailPage() {
       alert("Failed to generate PDF. Please try again.");
     } finally {
       setPdfExporting(false);
+    }
+  }
+
+  /* ── BVI PDF Export ─────────────────────────────────────────────────────── */
+  async function exportBviPDF() {
+    if (!bviAnalysis || bviPdfExporting) return;
+    setBviPdfExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const W = 210, MARGIN = 15, CW = W - MARGIN * 2;
+      let y = 0;
+
+      const setFont = (size, style = "normal", color = [30, 40, 60]) => {
+        doc.setFontSize(size); doc.setFont("helvetica", style); doc.setTextColor(...color);
+      };
+      const fillRect = (x, fy, w, h, rgb) => {
+        doc.setFillColor(...rgb); doc.rect(x, fy, w, h, "F");
+      };
+      const hLine = (fy, rgb = [220, 228, 240]) => {
+        doc.setDrawColor(...rgb); doc.setLineWidth(0.3);
+        doc.line(MARGIN, fy, W - MARGIN, fy);
+      };
+
+      /* ── Header banner ── */
+      fillRect(0, 0, W, 40, [13, 25, 55]);
+      setFont(8, "bold", [56, 189, 248]);
+      doc.text("BusMate", MARGIN, 11);
+      setFont(16, "bold", [241, 245, 249]);
+      doc.text("BVI Analysis Report", MARGIN, 22);
+      const driverName = driver?.username || "Unknown Driver";
+      const driverId   = `BM-${id?.slice(-5).toUpperCase() || "?????"}`;
+      setFont(9, "normal", [148, 163, 184]);
+      doc.text(`Driver: ${driverName}   ·   ID: ${driverId}`, MARGIN, 30);
+      doc.text(
+        `Generated: ${new Date().toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" })}`,
+        MARGIN, 36
+      );
+      y = 50;
+
+      /* ── Summary stats ── */
+      const sc  = bviAnalysis.state_counts || {};
+      const tot = bviAnalysis.total_shifts || 1;
+      const bviColor3 = (pct) =>
+        pct == null ? [100,116,139] : pct >= 60 ? [239,68,68] : pct >= 30 ? [245,158,11] : [34,197,94];
+
+      const stats = [
+        { label: "Total Shifts",    value: String(bviAnalysis.total_shifts), color: [56,189,248] },
+        { label: "Avg BVI",         value: bviAnalysis.avg_bvi != null ? `${bviAnalysis.avg_bvi}%` : "—", color: bviColor3(bviAnalysis.avg_bvi) },
+        { label: "Stable Shifts",   value: `${sc.stable||0} (${Math.round((sc.stable||0)/tot*100)}%)`,   color: [34,197,94] },
+        { label: "Erratic Shifts",  value: `${sc.erratic||0} (${Math.round((sc.erratic||0)/tot*100)}%)`, color: [239,68,68] },
+      ];
+      const boxW = (CW - 9) / 4;
+      stats.forEach((stat, i) => {
+        const bx = MARGIN + i * (boxW + 3);
+        fillRect(bx, y, boxW, 20, [13, 21, 38]);
+        doc.setDrawColor(30, 55, 95); doc.setLineWidth(0.4); doc.rect(bx, y, boxW, 20);
+        setFont(12, "bold", stat.color);
+        doc.text(stat.value, bx + boxW / 2, y + 10, { align: "center" });
+        setFont(6.5, "normal", [100, 116, 139]);
+        doc.text(stat.label.toUpperCase(), bx + boxW / 2, y + 16, { align: "center" });
+      });
+      y += 28;
+
+      /* ── Peak hour callout ── */
+      if (bviAnalysis.peak_hour) {
+        const ph = bviAnalysis.peak_hour;
+        fillRect(MARGIN, y, CW, 10, [30, 18, 10]);
+        doc.setDrawColor(245,158,11); doc.setLineWidth(0.4); doc.rect(MARGIN, y, CW, 10);
+        setFont(8, "bold", [245,158,11]);
+        doc.text(`⚑  Peak volatility hour: ${ph.label}  —  avg BVI ${ph.avg_bvi}%`, MARGIN + 3, y + 6.5);
+        y += 14;
+      }
+
+      /* ── State distribution bar ── */
+      setFont(8, "bold", [100, 116, 139]);
+      doc.text("VOLATILITY STATE DISTRIBUTION", MARGIN, y); y += 5;
+      const barH = 8;
+      let bx2 = MARGIN;
+      [{ key:"stable",color:[34,197,94]},{key:"unstable",color:[245,158,11]},{key:"erratic",color:[239,68,68]}].forEach(({key,color}) => {
+        const pct = (sc[key]||0)/tot;
+        const bw  = CW * pct;
+        if (bw > 0) { fillRect(bx2, y, bw, barH, color); bx2 += bw; }
+      });
+      if (bx2 < MARGIN + CW) fillRect(bx2, y, MARGIN + CW - bx2, barH, [13,21,38]);
+      y += barH + 3;
+      setFont(6.5, "normal", [100,116,139]);
+      doc.text(`Stable: ${sc.stable||0}  ·  Unstable: ${sc.unstable||0}  ·  Erratic: ${sc.erratic||0}`, MARGIN, y);
+      y += 8;
+      hLine(y); y += 6;
+
+      /* ── BVI by Hour of Day ── */
+      const activeHourly = (bviAnalysis.hourly || []).filter(h => h.count > 0);
+      if (activeHourly.length > 0) {
+        setFont(8, "bold", [100,116,139]); doc.text("BVI BY HOUR OF DAY", MARGIN, y); y += 5;
+        const chartH = 40, yAxisW = 10;
+        const chartX = MARGIN + yAxisW, chartW = CW - yAxisW;
+        fillRect(chartX, y, chartW, chartH, [9,14,26]);
+        doc.setDrawColor(26,39,68); doc.setLineWidth(0.3); doc.rect(chartX, y, chartW, chartH);
+        const yAt = (pct) => y + chartH - (pct / 100) * chartH;
+        doc.setDrawColor(245,158,11); doc.setLineWidth(0.25); doc.setLineDashPattern([1,1],0);
+        doc.line(chartX, yAt(30), chartX+chartW, yAt(30));
+        doc.setDrawColor(239,68,68);
+        doc.line(chartX, yAt(60), chartX+chartW, yAt(60));
+        doc.setLineDashPattern([],0);
+        const bw24 = chartW / 24 - 1;
+        (bviAnalysis.hourly || []).forEach((h, i) => {
+          if (h.avg_bvi === 0 && h.count === 0) return;
+          const bxh = chartX + i * (chartW / 24) + 0.5;
+          const bh  = (h.avg_bvi / 100) * chartH;
+          const by  = y + chartH - bh;
+          const rgb = h.avg_bvi >= 60 ? [239,68,68] : h.avg_bvi >= 30 ? [245,158,11] : [34,197,94];
+          fillRect(bxh, by, bw24, bh, rgb);
+        });
+        setFont(6, "normal", [71,85,105]);
+        [0,4,8,12,16,20,23].forEach(hr => {
+          const lx = chartX + hr*(chartW/24)+(chartW/24)/2;
+          doc.text(`${hr}h`, lx, y+chartH+4, {align:"center"});
+        });
+        [0,30,60,100].forEach(pct => {
+          setFont(6,"normal",[71,85,105]);
+          doc.text(`${pct}%`, MARGIN+yAxisW-1, yAt(pct)+1.5, {align:"right"});
+        });
+        y += chartH + 10;
+      }
+
+      /* ── BVI by Day of Week ── */
+      const activeDow = (bviAnalysis.by_day || []).filter(d => d.count > 0);
+      if (activeDow.length > 0) {
+        hLine(y); y += 6;
+        setFont(8, "bold", [100,116,139]); doc.text("BVI BY DAY OF WEEK", MARGIN, y); y += 5;
+        const chartH2 = 35, barW2 = CW / 7 - 3;
+        fillRect(MARGIN, y, CW, chartH2, [9,14,26]);
+        doc.setDrawColor(26,39,68); doc.setLineWidth(0.3); doc.rect(MARGIN, y, CW, chartH2);
+        (bviAnalysis.by_day || []).forEach((d, i) => {
+          const bxd = MARGIN + i*(CW/7) + 2;
+          const bh  = (d.avg_bvi / 100) * chartH2;
+          const by  = y + chartH2 - bh;
+          const rgb = d.avg_bvi >= 60 ? [239,68,68] : d.avg_bvi >= 30 ? [245,158,11] : d.count > 0 ? [56,189,248] : [20,30,50];
+          fillRect(bxd, by, barW2, bh, rgb);
+          setFont(6, "normal", [71,85,105]);
+          doc.text(d.day, bxd + barW2/2, y+chartH2+4, {align:"center"});
+          if (d.avg_bvi > 0) {
+            setFont(5.5, "bold", [148,163,184]);
+            doc.text(`${d.avg_bvi}%`, bxd+barW2/2, by-1.5, {align:"center"});
+          }
+        });
+        y += chartH2 + 10;
+      }
+
+      /* ── Recent shifts table ── */
+      const shifts = bviAnalysis.shifts || [];
+      if (shifts.length > 0) {
+        if (y + 60 > 277) { doc.addPage(); y = MARGIN; }
+        hLine(y); y += 6;
+        setFont(8, "bold", [100,116,139]); doc.text("SHIFT BVI HISTORY (RECENT)", MARGIN, y); y += 5;
+        const cols = [
+          {label:"Date",     w:30, fn: s => s.date || s.scored_at?.slice(0,10) || "—"},
+          {label:"Shift",    w:28, fn: s => s.shift_time || "—"},
+          {label:"Route",    w:52, fn: s => s.route_name || "—"},
+          {label:"BVI %",    w:22, fn: s => s.bvi_pct != null ? `${s.bvi_pct}%` : "—"},
+          {label:"State",    w:22, fn: s => s.state || "—"},
+          {label:"Duration", w:26, fn: s => {
+            if (!s.duration_sec) return "—";
+            const h = Math.floor(s.duration_sec/3600), m = Math.floor((s.duration_sec%3600)/60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+          }},
+        ];
+        const scaleF2 = CW / cols.reduce((s,c)=>s+c.w,0);
+        cols.forEach(c => { c.w *= scaleF2; });
+        const ROW_H = 7;
+        fillRect(MARGIN, y, CW, ROW_H, [13,25,55]);
+        let cx3 = MARGIN;
+        cols.forEach(col => {
+          setFont(6.5,"bold",[148,163,184]);
+          doc.text(col.label.toUpperCase(), cx3+col.w/2, y+4.5, {align:"center"});
+          cx3 += col.w;
+        });
+        y += ROW_H;
+        shifts.forEach((sh, ri) => {
+          if (y + ROW_H > 277) { doc.addPage(); y = MARGIN; }
+          fillRect(MARGIN, y, CW, ROW_H, ri%2===0?[9,14,26]:[11,18,33]);
+          cx3 = MARGIN;
+          cols.forEach(col => {
+            const str = col.fn(sh);
+            let color = [148,163,184];
+            if (col.label==="BVI %" && sh.bvi_pct != null)
+              color = bviColor3(sh.bvi_pct);
+            if (col.label==="State")
+              color = sh.state==="erratic"?[239,68,68]:sh.state==="unstable"?[245,158,11]:[34,197,94];
+            setFont(6.5,"normal",color);
+            const maxW = col.w - 2;
+            const fitted = doc.getTextWidth(str) > maxW
+              ? str.substring(0, Math.floor(str.length*maxW/doc.getTextWidth(str))-1)+"…" : str;
+            doc.text(fitted, cx3+col.w/2, y+4.5, {align:"center"});
+            cx3 += col.w;
+          });
+          doc.setDrawColor(22,35,60); doc.setLineWidth(0.2);
+          doc.line(MARGIN, y+ROW_H, MARGIN+CW, y+ROW_H);
+          y += ROW_H;
+        });
+        doc.setDrawColor(30,55,95); doc.setLineWidth(0.5);
+        doc.rect(MARGIN, y-ROW_H*shifts.length-ROW_H, CW, ROW_H*(shifts.length+1));
+      }
+
+      /* ── Footer ── */
+      const totalPages = doc.getNumberOfPages();
+      for (let pg = 1; pg <= totalPages; pg++) {
+        doc.setPage(pg);
+        fillRect(0, 287, W, 10, [8,12,22]);
+        setFont(6.5,"normal",[71,85,105]);
+        doc.text("BusMate Fleet Management — Confidential", MARGIN, 293);
+        doc.text(`Page ${pg} / ${totalPages}`, W-MARGIN, 293, {align:"right"});
+      }
+
+      const safeName = (driver?.username||"driver").replace(/\s+/g,"_").toLowerCase();
+      doc.save(`bvi-report-${safeName}-${new Date().toISOString().slice(0,10)}.pdf`);
+
+    } catch (err) {
+      console.error("BVI PDF export error:", err);
+      alert("Failed to generate BVI PDF. Please try again.");
+    } finally {
+      setBviPdfExporting(false);
+    }
+  }
+
+  /* ── Overall Full Report PDF Export ─────────────────────────────────────── */
+  async function exportFullReport() {
+    if (reportExporting) return;
+    setReportExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const W = 210, MARGIN = 15, CW = W - MARGIN * 2;
+      let y = 0;
+
+      const driverName = driver?.username || "Unknown Driver";
+      const driverId   = `BM-${id?.slice(-5).toUpperCase() || "?????"}`;
+      const p          = driver?.profile || {};
+      const genDate    = new Date().toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" });
+
+      const sf = (size, style = "normal", color = [148,163,184]) => {
+        doc.setFontSize(size); doc.setFont("helvetica", style); doc.setTextColor(...color);
+      };
+      const fr = (x, fy, w, h, rgb) => { doc.setFillColor(...rgb); doc.rect(x, fy, w, h, "F"); };
+      const hl = (fy) => { doc.setDrawColor(30,55,95); doc.setLineWidth(0.3); doc.line(MARGIN, fy, W-MARGIN, fy); };
+
+      const newPage = () => { doc.addPage(); y = MARGIN; };
+      const checkY  = (need = 20) => { if (y + need > 277) newPage(); };
+
+      /* ══ COVER PAGE ═══════════════════════════════════════════════════════ */
+      fr(0, 0, W, 297, [7, 13, 28]);
+      fr(0, 0, W, 65, [13, 25, 55]);
+      sf(9, "bold", [56,189,248]);
+      doc.text("BusMate Fleet Management", MARGIN, 14);
+      sf(22, "bold", [241,245,249]);
+      doc.text("Driver Safety Report", MARGIN, 30);
+      sf(10, "normal", [148,163,184]);
+      doc.text(`Driver: ${driverName}   ·   ID: ${driverId}`, MARGIN, 40);
+      doc.text(`Generated: ${genDate}`, MARGIN, 48);
+      doc.text(`Company: ${driver?.company || "—"}`, MARGIN, 56);
+
+      /* cover info grid */
+      const infoItems = [
+        { label: "Vehicle",   val: p.vehicle || "—" },
+        { label: "Route",     val: p.route   || "—" },
+        { label: "Shift",     val: p.shift   || "—" },
+        { label: "Exp. Yrs",  val: p.experience_years ? `${p.experience_years} yrs` : "—" },
+        { label: "License",   val: p.license_number  || "—" },
+        { label: "Phone",     val: p.phone           || "—" },
+      ];
+      const colW = (CW - 5) / 3;
+      infoItems.forEach((it, i) => {
+        const bx = MARGIN + (i % 3) * (colW + 2.5);
+        const by = 74 + Math.floor(i / 3) * 22;
+        fr(bx, by, colW, 18, [13,21,38]);
+        doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, by, colW, 18);
+        sf(7, "normal", [100,116,139]);
+        doc.text(it.label.toUpperCase(), bx + colW/2, by + 6, { align: "center" });
+        sf(10, "bold", [241,245,249]);
+        const maxW = colW - 4;
+        const txt = doc.getTextWidth(it.val) > maxW
+          ? it.val.substring(0, Math.floor(it.val.length * maxW / doc.getTextWidth(it.val)) - 1) + "…"
+          : it.val;
+        doc.text(txt, bx + colW/2, by + 14, { align: "center" });
+      });
+
+      /* Sections overview */
+      y = 125;
+      sf(8, "bold", [100,116,139]);
+      doc.text("REPORT SECTIONS", MARGIN, y); y += 6;
+      const sections = [
+        { n: "1", title: "Shift Scores Summary",         color: [56,189,248]   },
+        { n: "2", title: "BVI (Behaviour Volatility Index)", color: [167,139,250]},
+        { n: "3", title: "Drowsiness Analysis",          color: [239,68,68]    },
+        { n: "4", title: "Road Sign Detection",          color: [34,197,94]    },
+        { n: "5", title: "Route Hazard Risk Prediction", color: [245,158,11]   },
+      ];
+      sections.forEach(s => {
+        fr(MARGIN, y, CW, 11, [13,21,38]);
+        doc.setDrawColor(s.color[0], s.color[1], s.color[2]); doc.setLineWidth(0.5);
+        doc.line(MARGIN, y, MARGIN + 2, y + 11);
+        sf(9, "bold", s.color);
+        doc.text(s.n, MARGIN + 6, y + 7.5);
+        sf(9, "normal", [241,245,249]);
+        doc.text(s.title, MARGIN + 14, y + 7.5);
+        y += 14;
+      });
+
+      /* footer */
+      fr(0, 287, W, 10, [8,12,22]);
+      sf(6.5, "normal", [71,85,105]);
+      doc.text("BusMate Fleet Management — Confidential", MARGIN, 293);
+      doc.text(`Page 1`, W - MARGIN, 293, { align: "right" });
+
+      /* ══ PAGE 2 — SHIFT SCORES ════════════════════════════════════════════ */
+      newPage();
+      fr(0, 0, W, 20, [13,25,55]);
+      sf(13, "bold", [241,245,249]);
+      doc.text("1. Shift Scores Summary", MARGIN, 13);
+      y = 28;
+
+      const latestScore = scores?.length ? scores[scores.length - 1] : null;
+      const avgTotal    = scores?.length
+        ? Math.round(scores.reduce((s, r) => s + (r.score?.total_score ?? 0), 0) / scores.length)
+        : null;
+      const scoreStats = [
+        { label: "Total Shifts",  val: String(scores?.length ?? 0),       color: [56,189,248] },
+        { label: "Avg Score",     val: avgTotal != null ? `${avgTotal}` : "—", color: avgTotal >= 75 ? [34,197,94] : avgTotal >= 50 ? [245,158,11] : [239,68,68] },
+        { label: "Latest Score",  val: latestScore?.score?.total_score != null ? `${Math.round(latestScore.score.total_score)}` : "—", color: [167,139,250] },
+        { label: "Latest Tier",   val: latestScore?.score?.tier || "—",   color: [249,115,22] },
+      ];
+      const bW = (CW - 9) / 4;
+      scoreStats.forEach((st, i) => {
+        const bx = MARGIN + i * (bW + 3);
+        fr(bx, y, bW, 20, [13,21,38]);
+        doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, y, bW, 20);
+        sf(13, "bold", st.color);
+        doc.text(st.val, bx + bW/2, y + 11, { align: "center" });
+        sf(6.5, "normal", [100,116,139]);
+        doc.text(st.label.toUpperCase(), bx + bW/2, y + 17, { align: "center" });
+      });
+      y += 28;
+
+      if (scores?.length) {
+        sf(8, "bold", [100,116,139]);
+        doc.text("RECENT SHIFTS (last 10)", MARGIN, y); y += 5;
+        const sCols = [
+          { label: "Date",    w: 32, fn: r => r.date || r.scored_at?.slice(0,10) || "—" },
+          { label: "Route",   w: 45, fn: r => r.route_name || "—" },
+          { label: "Score",   w: 20, fn: r => r.score?.total_score != null ? `${Math.round(r.score.total_score)}` : "—" },
+          { label: "Tier",    w: 28, fn: r => r.score?.tier || "—" },
+          { label: "Status",  w: 22, fn: r => r.status || "—" },
+          { label: "Dur.",    w: 18, fn: r => r.duration_sec ? fmtDuration(r.duration_sec) : "—" },
+          { label: "Emotion", w: 15, fn: r => r.score?.components?.emotion?.score != null ? `${Math.round(r.score.components.emotion.score)}` : "—" },
+        ];
+        const scale = CW / sCols.reduce((s, c) => s + c.w, 0);
+        sCols.forEach(c => { c.w *= scale; });
+        const RH = 7;
+        fr(MARGIN, y, CW, RH, [13,25,55]);
+        let cx = MARGIN;
+        sCols.forEach(c => {
+          sf(6, "bold", [148,163,184]);
+          doc.text(c.label.toUpperCase(), cx + c.w/2, y + 4.5, { align: "center" });
+          cx += c.w;
+        });
+        y += RH;
+        scores.slice(-10).reverse().forEach((r, ri) => {
+          checkY(RH);
+          fr(MARGIN, y, CW, RH, ri%2===0?[9,14,26]:[11,18,33]);
+          cx = MARGIN;
+          sCols.forEach(c => {
+            const str = c.fn(r);
+            sf(6.5, "normal", [148,163,184]);
+            doc.text(str.length > 12 ? str.substring(0,11)+"…" : str, cx + c.w/2, y + 4.5, { align: "center" });
+            cx += c.w;
+          });
+          doc.setDrawColor(22,35,60); doc.setLineWidth(0.2);
+          doc.line(MARGIN, y + RH, MARGIN + CW, y + RH);
+          y += RH;
+        });
+        y += 4;
+      }
+
+      /* ══ PAGE 3 — BVI ════════════════════════════════════════════════════ */
+      newPage();
+      fr(0, 0, W, 20, [13,25,55]);
+      sf(13, "bold", [241,245,249]);
+      doc.text("2. BVI Score Analysis", MARGIN, 13);
+      y = 28;
+
+      if (bviAnalysis && bviAnalysis.total_shifts > 0) {
+        const sc2  = bviAnalysis.state_counts || {};
+        const tot2 = bviAnalysis.total_shifts || 1;
+        const bviC = (pct) => pct == null ? [100,116,139] : pct >= 60 ? [239,68,68] : pct >= 30 ? [245,158,11] : [34,197,94];
+        const bviStats = [
+          { label: "Total Shifts",   val: `${bviAnalysis.total_shifts}`,                                  color: [56,189,248] },
+          { label: "Avg BVI",        val: bviAnalysis.avg_bvi != null ? `${bviAnalysis.avg_bvi}%` : "—",  color: bviC(bviAnalysis.avg_bvi) },
+          { label: "Stable Shifts",  val: `${sc2.stable||0} (${Math.round((sc2.stable||0)/tot2*100)}%)`,  color: [34,197,94] },
+          { label: "Erratic Shifts", val: `${sc2.erratic||0} (${Math.round((sc2.erratic||0)/tot2*100)}%)`, color: [239,68,68] },
+        ];
+        bviStats.forEach((st, i) => {
+          const bx = MARGIN + i * (bW + 3);
+          fr(bx, y, bW, 20, [13,21,38]);
+          doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, y, bW, 20);
+          sf(11, "bold", st.color);
+          doc.text(st.val, bx + bW/2, y + 11, { align: "center" });
+          sf(6.5, "normal", [100,116,139]);
+          doc.text(st.label.toUpperCase(), bx + bW/2, y + 17, { align: "center" });
+        });
+        y += 28;
+
+        /* state distribution bar */
+        sf(7, "bold", [100,116,139]);
+        doc.text("VOLATILITY STATE DISTRIBUTION", MARGIN, y); y += 4;
+        const barData = [
+          { key:"stable",   color:[34,197,94],   count: sc2.stable||0   },
+          { key:"unstable", color:[245,158,11],  count: sc2.unstable||0 },
+          { key:"erratic",  color:[239,68,68],   count: sc2.erratic||0  },
+        ];
+        barData.forEach(b => {
+          const pct = Math.round(b.count / tot2 * 100);
+          if (pct > 0) {
+            fr(MARGIN, y, CW * pct / 100, 6, b.color);
+            MARGIN; // keep MARGIN reference
+          }
+        });
+        let xOff = MARGIN;
+        barData.forEach(b => {
+          const pct = Math.round(b.count / tot2 * 100);
+          if (pct > 0) { xOff += CW * pct / 100; }
+        });
+        y += 10;
+        sf(6.5, "normal", [100,116,139]);
+        doc.text(`Stable: ${sc2.stable||0}  Unstable: ${sc2.unstable||0}  Erratic: ${sc2.erratic||0}`, MARGIN, y);
+        y += 8;
+        if (bviAnalysis.peak_hour) {
+          fr(MARGIN, y, CW, 10, [30,18,10]);
+          doc.setDrawColor(245,158,11); doc.setLineWidth(0.4); doc.rect(MARGIN, y, CW, 10);
+          sf(8, "bold", [245,158,11]);
+          doc.text(`Peak volatility hour: ${bviAnalysis.peak_hour.label}  —  avg BVI ${bviAnalysis.peak_hour.avg_bvi}%`, MARGIN + 4, y + 6.5);
+          y += 14;
+        }
+      } else {
+        sf(10, "normal", [100,116,139]);
+        doc.text("No BVI data available for this driver.", MARGIN, y); y += 10;
+      }
+
+      /* ══ PAGE 4 — DROWSINESS ═════════════════════════════════════════════ */
+      newPage();
+      fr(0, 0, W, 20, [13,25,55]);
+      sf(13, "bold", [241,245,249]);
+      doc.text("3. Drowsiness Analysis", MARGIN, 13);
+      y = 28;
+
+      if (dwAnalysis?.shifts?.length) {
+        const dw = dwAnalysis.shifts;
+        const avgPr  = Math.round(dw.reduce((s, r) => s + r.avg_prob, 0) / dw.length * 100);
+        const alerts = dw.reduce((s, r) => s + r.alert_count, 0);
+        const avgDr  = Math.round(dw.reduce((s, r) => s + r.drowsy_pct, 0) / dw.length);
+        const dwStats = [
+          { label:"Total Shifts",    val: String(dw.length),  color:[56,189,248]  },
+          { label:"Avg Drowsy Prob", val: `${avgPr}%`,         color: avgPr>=60?[239,68,68]:avgPr>=30?[245,158,11]:[34,197,94] },
+          { label:"Total Alerts",    val: String(alerts),      color: alerts>10?[239,68,68]:[249,115,22] },
+          { label:"Avg Drowsy Rate", val: `${avgDr}%`,         color:[167,139,250] },
+        ];
+        dwStats.forEach((st, i) => {
+          const bx = MARGIN + i * (bW + 3);
+          fr(bx, y, bW, 20, [13,21,38]);
+          doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, y, bW, 20);
+          sf(13, "bold", st.color);
+          doc.text(st.val, bx + bW/2, y + 11, { align: "center" });
+          sf(6.5, "normal", [100,116,139]);
+          doc.text(st.label.toUpperCase(), bx + bW/2, y + 17, { align: "center" });
+        });
+        y += 28;
+        sf(8, "bold", [100,116,139]);
+        doc.text("RECENT DROWSINESS SHIFTS (last 10)", MARGIN, y); y += 5;
+        const dwCols = [
+          { label:"Date",   w:38, fn: r => r.started_at ? new Date(r.started_at).toLocaleDateString() : "—" },
+          { label:"Route",  w:45, fn: r => r.route_name || "—" },
+          { label:"Avg %",  w:20, fn: r => `${Math.round(r.avg_prob*100)}%` },
+          { label:"Peak %", w:20, fn: r => `${Math.round(r.max_prob*100)}%` },
+          { label:"Alerts", w:18, fn: r => String(r.alert_count) },
+          { label:"Drowsy", w:19, fn: r => `${r.drowsy_pct}%` },
+        ];
+        const dwScale = CW / dwCols.reduce((s, c) => s + c.w, 0);
+        dwCols.forEach(c => { c.w *= dwScale; });
+        const DH = 7;
+        fr(MARGIN, y, CW, DH, [13,25,55]);
+        let dxC = MARGIN;
+        dwCols.forEach(c => {
+          sf(6, "bold", [148,163,184]);
+          doc.text(c.label.toUpperCase(), dxC + c.w/2, y + 4.5, { align: "center" });
+          dxC += c.w;
+        });
+        y += DH;
+        dw.slice(0, 10).forEach((r, ri) => {
+          checkY(DH);
+          fr(MARGIN, y, CW, DH, ri%2===0?[9,14,26]:[11,18,33]);
+          dxC = MARGIN;
+          dwCols.forEach(c => {
+            sf(6.5, "normal", [148,163,184]);
+            const str = c.fn(r);
+            doc.text(str, dxC + c.w/2, y + 4.5, { align: "center" });
+            dxC += c.w;
+          });
+          doc.setDrawColor(22,35,60); doc.setLineWidth(0.2);
+          doc.line(MARGIN, y + DH, MARGIN + CW, y + DH);
+          y += DH;
+        });
+        y += 4;
+      } else {
+        sf(10, "normal", [100,116,139]);
+        doc.text("No drowsiness data available for this driver.", MARGIN, y); y += 10;
+      }
+
+      /* ══ PAGE 5 — ROAD SIGN DETECTION ════════════════════════════════════ */
+      newPage();
+      fr(0, 0, W, 20, [13,25,55]);
+      sf(13, "bold", [241,245,249]);
+      doc.text("4. Road Sign Detection Analysis", MARGIN, 13);
+      y = 28;
+
+      if (rsdAnalysis && rsdAnalysis.total_detections > 0) {
+        const rsdStats = [
+          { label:"Total Detections",  val: String(rsdAnalysis.total_detections), color:[34,197,94]   },
+          { label:"Avg Confidence",    val: `${rsdAnalysis.avg_confidence}%`,     color:[56,189,248]  },
+          { label:"Avg Distance",      val: rsdAnalysis.avg_distance != null ? `${rsdAnalysis.avg_distance}m` : "—", color:[167,139,250] },
+          { label:"Shifts w/ Signs",   val: String(rsdAnalysis.by_shift?.length || 0), color:[249,115,22] },
+        ];
+        rsdStats.forEach((st, i) => {
+          const bx = MARGIN + i * (bW + 3);
+          fr(bx, y, bW, 20, [13,21,38]);
+          doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, y, bW, 20);
+          sf(13, "bold", st.color);
+          doc.text(st.val, bx + bW/2, y + 11, { align: "center" });
+          sf(6.5, "normal", [100,116,139]);
+          doc.text(st.label.toUpperCase(), bx + bW/2, y + 17, { align: "center" });
+        });
+        y += 28;
+
+        if (rsdAnalysis.sign_types?.length) {
+          sf(8, "bold", [100,116,139]);
+          doc.text("TOP DETECTED SIGN TYPES", MARGIN, y); y += 5;
+          const topN    = rsdAnalysis.sign_types.slice(0, 8);
+          const maxCnt  = topN[0]?.count || 1;
+          topN.forEach(st => {
+            checkY(12);
+            const barLen = (st.count / maxCnt) * (CW - 50);
+            fr(MARGIN, y, barLen + 2, 7, [13,48,94]);
+            sf(7, "normal", [148,163,184]);
+            doc.text(st.class_name, MARGIN + 2, y + 5.2);
+            sf(7, "bold", [56,189,248]);
+            doc.text(`${st.count}`, MARGIN + CW - 10, y + 5.2, { align: "right" });
+            y += 9;
+          });
+          y += 4;
+        }
+
+        if (rsdAnalysis.status_breakdown) {
+          sf(7, "bold", [100,116,139]);
+          doc.text("SIGN STATUS: " +
+            Object.entries(rsdAnalysis.status_breakdown)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("   "), MARGIN, y);
+          y += 6;
+        }
+        if (rsdAnalysis.traffic_congestion_breakdown) {
+          sf(7, "bold", [100,116,139]);
+          doc.text("TRAFFIC CONGESTION: " +
+            Object.entries(rsdAnalysis.traffic_congestion_breakdown)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("   "), MARGIN, y);
+          y += 8;
+        }
+      } else {
+        sf(10, "normal", [100,116,139]);
+        doc.text("No road sign detection data available for this driver.", MARGIN, y); y += 10;
+      }
+
+      /* ══ PAGE 6 — HAZARD ANALYSIS ════════════════════════════════════════ */
+      newPage();
+      fr(0, 0, W, 20, [13,25,55]);
+      sf(13, "bold", [241,245,249]);
+      doc.text("5. Route Hazard Risk Prediction", MARGIN, 13);
+      y = 28;
+
+      if (hazardAnalysis && hazardAnalysis.total_routes > 0) {
+        const hzStats = [
+          { label:"Total Routes",     val: String(hazardAnalysis.total_routes),     color:[245,158,11] },
+          { label:"Avg Risk Score",   val: `${hazardAnalysis.avg_risk_score}/100`,  color: hazardAnalysis.avg_risk_score>=70?[239,68,68]:hazardAnalysis.avg_risk_score>=50?[249,115,22]:[34,197,94] },
+          { label:"High Risk Routes", val: String(hazardAnalysis.high_risk_routes?.length || 0), color:[239,68,68] },
+          { label:"Most Common",      val: hazardAnalysis.most_common_route?.route?.slice(0,14) || "—", color:[56,189,248] },
+        ];
+        hzStats.forEach((st, i) => {
+          const bx = MARGIN + i * (bW + 3);
+          fr(bx, y, bW, 20, [13,21,38]);
+          doc.setDrawColor(30,55,95); doc.setLineWidth(0.4); doc.rect(bx, y, bW, 20);
+          sf(9, "bold", st.color);
+          doc.text(st.val, bx + bW/2, y + 11, { align: "center" });
+          sf(6.5, "normal", [100,116,139]);
+          doc.text(st.label.toUpperCase(), bx + bW/2, y + 17, { align: "center" });
+        });
+        y += 28;
+
+        if (hazardAnalysis.risk_distribution) {
+          sf(8, "bold", [100,116,139]);
+          doc.text("RISK DISTRIBUTION", MARGIN, y); y += 5;
+          const riskColors = { "Low Risk":[34,197,94], "Medium Risk":[245,158,11], "High Risk":[249,115,22], "Critical Risk":[239,68,68] };
+          const total3 = Object.values(hazardAnalysis.risk_distribution).reduce((s, v) => s + v, 0) || 1;
+          Object.entries(hazardAnalysis.risk_distribution).forEach(([label, count]) => {
+            checkY(10);
+            const pct = Math.round(count / total3 * 100);
+            const barLen = pct / 100 * (CW - 55);
+            const col = riskColors[label] || [100,116,139];
+            fr(MARGIN + 45, y, barLen, 6, col);
+            sf(7, "normal", [148,163,184]);
+            doc.text(`${label}:`, MARGIN, y + 5);
+            sf(7, "bold", col);
+            doc.text(`${count} (${pct}%)`, MARGIN + 45 + barLen + 3, y + 5);
+            y += 9;
+          });
+          y += 4;
+        }
+
+        if (hazardAnalysis.routes_summary?.length) {
+          sf(8, "bold", [100,116,139]);
+          doc.text("ROUTES DRIVEN (by frequency)", MARGIN, y); y += 5;
+          hazardAnalysis.routes_summary.slice(0, 8).forEach((r, ri) => {
+            checkY(10);
+            fr(MARGIN, y, CW, 8, ri%2===0?[9,14,26]:[11,18,33]);
+            sf(7, "normal", [148,163,184]);
+            const rName = r.route.length > 40 ? r.route.substring(0,39)+"…" : r.route;
+            doc.text(rName, MARGIN + 2, y + 5.5);
+            sf(7, "bold", [100,116,139]);
+            doc.text(`×${r.count}`, MARGIN + CW*0.7, y + 5.5);
+            const rc = { "Low Risk":[34,197,94], "Medium Risk":[245,158,11], "High Risk":[249,115,22], "Critical Risk":[239,68,68] };
+            sf(7, "bold", rc[r.risk_label] || [100,116,139]);
+            doc.text(r.risk_label, MARGIN + CW - 2, y + 5.5, { align: "right" });
+            y += 9;
+          });
+          y += 4;
+        }
+      } else {
+        sf(10, "normal", [100,116,139]);
+        doc.text("No route/schedule data available for hazard analysis.", MARGIN, y); y += 10;
+      }
+
+      /* ══ FOOTER on all pages ══════════════════════════════════════════════ */
+      const totalPg = doc.getNumberOfPages();
+      for (let pg = 1; pg <= totalPg; pg++) {
+        doc.setPage(pg);
+        fr(0, 287, W, 10, [8,12,22]);
+        sf(6.5, "normal", [71,85,105]);
+        doc.text("BusMate Fleet Management — Confidential Driver Safety Report", MARGIN, 293);
+        doc.text(`Page ${pg} / ${totalPg}`, W - MARGIN, 293, { align: "right" });
+      }
+
+      const safeName = (driver?.username || "driver").replace(/\s+/g, "_").toLowerCase();
+      doc.save(`full-safety-report-${safeName}-${new Date().toISOString().slice(0,10)}.pdf`);
+
+    } catch (err) {
+      console.error("Full report export error:", err);
+      alert("Failed to generate report. Please try again.");
+    } finally {
+      setReportExporting(false);
     }
   }
 
@@ -947,6 +1662,523 @@ export default function AdminDriverDetailPage() {
                   )}
                 </>
               )}
+            </div>
+
+            {/* ── BVI Time Analysis ── */}
+            <div className="dd-card" style={{marginTop:"1rem"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+                <p className="dd-card-title" style={{margin:0}}>🧠 BVI Score Time Analysis</p>
+                <div style={{display:"flex",gap:"0.5rem",alignItems:"center"}}>
+                  <button className="dd-retry-btn" onClick={loadBviAnalysis} style={{fontSize:"0.72rem"}}>↺ Refresh</button>
+                  {bviAnalysis && bviAnalysis.total_shifts > 0 && (
+                    <button
+                      className={`dd-export-pdf-btn ${bviPdfExporting ? "loading" : ""}`}
+                      onClick={exportBviPDF}
+                      disabled={bviPdfExporting}
+                      title="Export BVI analysis as PDF"
+                    >
+                      {bviPdfExporting ? (
+                        <><span className="dd-export-spin"/>Generating…</>
+                      ) : (
+                        <><IcoDownload />Export PDF</>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {bviLoading && (
+                <div className="dd-shift-loading">
+                  <div className="dd-spinner"/>
+                  <span>Loading BVI analysis…</span>
+                </div>
+              )}
+
+              {!bviLoading && bviAnalysis && bviAnalysis.total_shifts === 0 && (
+                <div style={{textAlign:"center",padding:"1.5rem",color:"#334155"}}>
+                  <div style={{fontSize:"1.8rem",marginBottom:8}}>🧠</div>
+                  <p style={{fontSize:"0.82rem",margin:0}}>No BVI data yet.</p>
+                  <p style={{fontSize:"0.72rem",margin:"4px 0 0",color:"#475569"}}>
+                    BVI scores are collected automatically during active driving shifts.
+                  </p>
+                </div>
+              )}
+
+              {!bviLoading && bviAnalysis && bviAnalysis.total_shifts > 0 && (() => {
+                const sc  = bviAnalysis.state_counts || {};
+                const tot = bviAnalysis.total_shifts || 1;
+                const bviColor = (pct) =>
+                  pct == null ? "#475569" : pct >= 60 ? "#ef4444" : pct >= 30 ? "#f59e0b" : "#22c55e";
+
+                return (
+                  <>
+                    {/* ── Summary stat row ── */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.5rem",marginBottom:"1.25rem"}}>
+                      {[
+                        {
+                          label: "Avg BVI",
+                          value: bviAnalysis.avg_bvi != null ? `${bviAnalysis.avg_bvi}%` : "—",
+                          color: bviColor(bviAnalysis.avg_bvi),
+                        },
+                        {
+                          label: "Peak Hour",
+                          value: bviAnalysis.peak_hour ? bviAnalysis.peak_hour.label : "—",
+                          color: "#f97316",
+                          sub: bviAnalysis.peak_hour ? `${bviAnalysis.peak_hour.avg_bvi}% avg` : null,
+                        },
+                        {
+                          label: "Stable Shifts",
+                          value: `${sc.stable || 0}`,
+                          color: "#22c55e",
+                          sub: `${Math.round((sc.stable||0)/tot*100)}%`,
+                        },
+                        {
+                          label: "Erratic Shifts",
+                          value: `${sc.erratic || 0}`,
+                          color: "#ef4444",
+                          sub: `${Math.round((sc.erratic||0)/tot*100)}%`,
+                        },
+                      ].map(s => (
+                        <div key={s.label} style={{background:"#071828",border:"1px solid #1e293b",borderRadius:10,padding:"0.6rem 0.75rem",textAlign:"center"}}>
+                          <div style={{fontSize:"1.1rem",fontWeight:800,color:s.color}}>{s.value}</div>
+                          {s.sub && <div style={{fontSize:"0.6rem",color:"#475569"}}>{s.sub}</div>}
+                          <div style={{fontSize:"0.62rem",color:"#64748b",marginTop:2}}>{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ── State distribution bar ── */}
+                    {tot > 0 && (
+                      <div style={{marginBottom:"1.25rem"}}>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.4rem"}}>
+                          Volatility State Distribution
+                        </p>
+                        <div style={{display:"flex",borderRadius:6,overflow:"hidden",height:12,background:"#0d1b2e"}}>
+                          {[
+                            {key:"stable",   color:"#22c55e"},
+                            {key:"unstable", color:"#f59e0b"},
+                            {key:"erratic",  color:"#ef4444"},
+                          ].map(({key, color}) => {
+                            const pct = Math.round((sc[key]||0)/tot*100);
+                            return pct > 0 ? (
+                              <div key={key} title={`${key}: ${sc[key]} shifts (${pct}%)`}
+                                style={{width:`${pct}%`,background:color,transition:"width 0.5s"}}/>
+                            ) : null;
+                          })}
+                        </div>
+                        <div style={{display:"flex",gap:"1rem",marginTop:"0.3rem",fontSize:"0.65rem",color:"#475569",justifyContent:"flex-end"}}>
+                          <span style={{color:"#22c55e"}}>■ Stable ({sc.stable||0})</span>
+                          <span style={{color:"#f59e0b"}}>■ Unstable ({sc.unstable||0})</span>
+                          <span style={{color:"#ef4444"}}>■ Erratic ({sc.erratic||0})</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── BVI Trend over recent shifts ── */}
+                    {bviAnalysis.shifts?.length > 1 && (
+                      <div style={{marginBottom:"1.25rem"}}>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          BVI Trend — Recent Shifts
+                          <span style={{fontWeight:400,textTransform:"none",letterSpacing:0,color:"#475569",marginLeft:6}}>
+                            (lower = calmer driver)
+                          </span>
+                        </p>
+                        <ResponsiveContainer width="100%" height={140}>
+                          <AreaChart
+                            data={bviAnalysis.shifts.map((s, i) => ({
+                              name:  s.date || `Shift ${i+1}`,
+                              bvi:   s.bvi_pct ?? 0,
+                              state: s.state,
+                            }))}
+                            margin={{top:4, right:4, left:-20, bottom:0}}
+                          >
+                            <defs>
+                              <linearGradient id="bviGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%"  stopColor="#a78bfa" stopOpacity={0.35}/>
+                                <stop offset="95%" stopColor="#a78bfa" stopOpacity={0.02}/>
+                              </linearGradient>
+                            </defs>
+                            <XAxis dataKey="name" tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                            <YAxis tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false} domain={[0,100]} tickFormatter={v=>`${v}%`}/>
+                            <Tooltip
+                              formatter={(v, n, p) => [`${v}% (${p.payload.state || "—"})`, "BVI"]}
+                              contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.75rem"}}
+                            />
+                            <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1}/>
+                            <ReferenceLine y={60} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1}/>
+                            <Area type="monotone" dataKey="bvi" stroke="#a78bfa" strokeWidth={1.5}
+                              fill="url(#bviGrad)" dot={{r:2,fill:"#a78bfa"}}/>
+                          </AreaChart>
+                        </ResponsiveContainer>
+                        <div style={{display:"flex",gap:"1rem",fontSize:"0.65rem",color:"#475569",marginTop:2,justifyContent:"flex-end"}}>
+                          <span style={{color:"#22c55e"}}>■ Stable (&lt;30%)</span>
+                          <span style={{color:"#f59e0b"}}>— 30% threshold</span>
+                          <span style={{color:"#ef4444"}}>— 60% threshold</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── BVI by Hour of Day ── */}
+                    {bviAnalysis.hourly?.some(h => h.count > 0) && (
+                      <div style={{marginBottom:"1.25rem"}}>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          BVI by Hour of Day
+                          <span style={{fontWeight:400,textTransform:"none",letterSpacing:0,color:"#475569",marginLeft:6}}>
+                            (when is the driver most volatile?)
+                          </span>
+                        </p>
+                        <ResponsiveContainer width="100%" height={130}>
+                          <BarChart
+                            data={bviAnalysis.hourly}
+                            barSize={10}
+                            margin={{top:4, right:4, left:-20, bottom:0}}
+                          >
+                            <XAxis dataKey="label" tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false}
+                              tickFormatter={(v,i) => i % 3 === 0 ? v : ""}/>
+                            <YAxis tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false} domain={[0,100]} tickFormatter={v=>`${v}%`}/>
+                            <Tooltip
+                              formatter={(v, n, p) => [`${v}% avg BVI · ${p.payload.count} shifts`, p.payload.label]}
+                              contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.75rem"}}
+                              labelStyle={{display:"none"}}
+                            />
+                            <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1}/>
+                            <ReferenceLine y={60} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1}/>
+                            <Bar dataKey="avg_bvi" radius={[3,3,0,0]}>
+                              {bviAnalysis.hourly.map((h, i) => (
+                                <Cell key={i} fill={h.avg_bvi >= 60 ? "#ef4444" : h.avg_bvi >= 30 ? "#f59e0b" : h.count > 0 ? "#22c55e" : "#1e293b"}/>
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* ── BVI by Day of Week ── */}
+                    {bviAnalysis.by_day?.some(d => d.count > 0) && (
+                      <div>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          BVI by Day of Week
+                        </p>
+                        <ResponsiveContainer width="100%" height={110}>
+                          <BarChart
+                            data={bviAnalysis.by_day}
+                            barSize={24}
+                            margin={{top:4, right:4, left:-20, bottom:0}}
+                          >
+                            <XAxis dataKey="day" tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false}/>
+                            <YAxis tick={{fill:"#475569",fontSize:10}} tickLine={false} axisLine={false} domain={[0,100]} tickFormatter={v=>`${v}%`}/>
+                            <Tooltip
+                              formatter={(v, n, p) => [`${v}% avg BVI · ${p.payload.count} shifts`, p.payload.day]}
+                              contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.75rem"}}
+                              labelStyle={{display:"none"}}
+                            />
+                            <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1}/>
+                            <ReferenceLine y={60} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1}/>
+                            <Bar dataKey="avg_bvi" radius={[4,4,0,0]}>
+                              {bviAnalysis.by_day.map((d, i) => (
+                                <Cell key={i} fill={d.avg_bvi >= 60 ? "#ef4444" : d.avg_bvi >= 30 ? "#f59e0b" : d.count > 0 ? "#38bdf8" : "#1e293b"}/>
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* ── Road Sign Detection Analysis ── */}
+            <div className="dd-card" style={{marginTop:"1rem"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+                <p className="dd-card-title" style={{margin:0}}>🚦 Road Sign Detection Analysis</p>
+                <button className="dd-retry-btn" onClick={loadRsdAnalysis} style={{fontSize:"0.72rem"}}>↺ Refresh</button>
+              </div>
+
+              {rsdLoading && (
+                <div className="dd-shift-loading"><div className="dd-spinner"/><span>Loading road sign data…</span></div>
+              )}
+
+              {!rsdLoading && rsdAnalysis && rsdAnalysis.total_detections === 0 && (
+                <div style={{textAlign:"center",padding:"1.5rem",color:"#334155"}}>
+                  <div style={{fontSize:"1.8rem",marginBottom:8}}>🚦</div>
+                  <p style={{fontSize:"0.82rem",margin:0}}>No road sign detection data yet.</p>
+                  <p style={{fontSize:"0.72rem",margin:"4px 0 0",color:"#475569"}}>
+                    Sign detections are captured automatically during active shifts.
+                  </p>
+                </div>
+              )}
+
+              {!rsdLoading && rsdAnalysis && rsdAnalysis.total_detections > 0 && (
+                <>
+                  {/* Summary stat row */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.5rem",marginBottom:"1.25rem"}}>
+                    {[
+                      { label:"Total Detections", value: rsdAnalysis.total_detections, color:"#22c55e" },
+                      { label:"Avg Confidence",   value: `${rsdAnalysis.avg_confidence}%`, color:"#38bdf8" },
+                      { label:"Avg Distance",      value: rsdAnalysis.avg_distance != null ? `${rsdAnalysis.avg_distance}m` : "—", color:"#a78bfa" },
+                      { label:"Shifts w/ Signs",   value: rsdAnalysis.by_shift?.length || 0, color:"#f97316" },
+                    ].map(s=>(
+                      <div key={s.label} style={{background:"#071828",border:"1px solid #1e293b",borderRadius:10,padding:"0.6rem 0.75rem",textAlign:"center"}}>
+                        <div style={{fontSize:"1.1rem",fontWeight:800,color:s.color}}>{s.value}</div>
+                        <div style={{fontSize:"0.62rem",color:"#64748b",marginTop:2}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1rem"}}>
+                    {/* Top sign types bar chart */}
+                    {rsdAnalysis.sign_types?.length > 0 && (
+                      <div>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          Top Sign Types
+                        </p>
+                        <ResponsiveContainer width="100%" height={160}>
+                          <BarChart data={rsdAnalysis.sign_types.slice(0,8)} layout="vertical"
+                            margin={{top:0,right:20,left:5,bottom:0}}>
+                            <XAxis type="number" tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false}/>
+                            <YAxis dataKey="class_name" type="category" width={90}
+                              tick={{fill:"#94a3b8",fontSize:9}} tickLine={false} axisLine={false}/>
+                            <Tooltip
+                              formatter={(v)=>[`${v} detections`,"Count"]}
+                              contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.72rem"}}
+                            />
+                            <Bar dataKey="count" radius={[0,4,4,0]}>
+                              {rsdAnalysis.sign_types.slice(0,8).map((_, i)=>(
+                                <Cell key={i} fill={["#22c55e","#38bdf8","#a78bfa","#f59e0b","#f97316","#ef4444","#06b6d4","#84cc16"][i%8]}/>
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* Status + congestion breakdown */}
+                    <div>
+                      {rsdAnalysis.status_breakdown && Object.keys(rsdAnalysis.status_breakdown).length > 0 && (
+                        <>
+                          <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.4rem"}}>
+                            Sign Status
+                          </p>
+                          <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap",marginBottom:"0.75rem"}}>
+                            {Object.entries(rsdAnalysis.status_breakdown).map(([k, v])=>{
+                              const color = k==="Normal"?"#22c55e":k==="Damaged"?"#ef4444":"#f59e0b";
+                              return (
+                                <div key={k} style={{background:"#071828",border:`1px solid ${color}33`,borderRadius:8,padding:"0.35rem 0.7rem",textAlign:"center"}}>
+                                  <div style={{fontSize:"0.95rem",fontWeight:700,color}}>{v}</div>
+                                  <div style={{fontSize:"0.6rem",color:"#64748b"}}>{k}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                      {rsdAnalysis.traffic_congestion_breakdown && Object.keys(rsdAnalysis.traffic_congestion_breakdown).length > 0 && (
+                        <>
+                          <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.4rem"}}>
+                            Traffic Congestion During Detections
+                          </p>
+                          <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap"}}>
+                            {Object.entries(rsdAnalysis.traffic_congestion_breakdown).map(([k, v])=>{
+                              const color = k==="LOW"?"#22c55e":k==="MEDIUM"?"#f59e0b":"#ef4444";
+                              return (
+                                <div key={k} style={{background:"#071828",border:`1px solid ${color}33`,borderRadius:8,padding:"0.35rem 0.7rem",textAlign:"center"}}>
+                                  <div style={{fontSize:"0.95rem",fontWeight:700,color}}>{v}</div>
+                                  <div style={{fontSize:"0.6rem",color:"#64748b"}}>{k}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Per-shift detection history */}
+                  {rsdAnalysis.by_shift?.length > 0 && (
+                    <div>
+                      <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.4rem"}}>
+                        Detection History by Shift
+                      </p>
+                      <div style={{display:"flex",flexDirection:"column",gap:"0.3rem",maxHeight:200,overflowY:"auto"}}>
+                        {rsdAnalysis.by_shift.map((sh, idx)=>(
+                          <div key={idx} style={{display:"flex",alignItems:"center",gap:"0.75rem",
+                            background:"#071828",borderRadius:8,padding:"0.35rem 0.75rem",
+                            border:"1px solid #1e293b",fontSize:"0.75rem"}}>
+                            <div style={{color:"#475569",minWidth:80,fontSize:"0.68rem"}}>
+                              {sh.date ? new Date(sh.date).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "—"}
+                            </div>
+                            <div style={{flex:1,color:"#94a3b8",fontSize:"0.68rem"}}>{sh.route_name || sh.status || "—"}</div>
+                            <div style={{fontWeight:700,color:"#22c55e"}}>{sh.detection_count} signs</div>
+                            <div style={{color:"#64748b",fontSize:"0.68rem"}}>{sh.avg_confidence}% conf</div>
+                            {sh.top_sign && <div style={{background:"#0d1b2e",borderRadius:5,padding:"0.15rem 0.45rem",color:"#38bdf8",fontSize:"0.65rem"}}>{sh.top_sign}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* ── Route Hazard Risk Analysis ── */}
+            <div className="dd-card" style={{marginTop:"1rem"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+                <p className="dd-card-title" style={{margin:0}}>🗺 Route Hazard Risk Analysis</p>
+                <button className="dd-retry-btn" onClick={loadHazardAnalysis} style={{fontSize:"0.72rem"}}>↺ Refresh</button>
+              </div>
+
+              {hazardLoading && (
+                <div className="dd-shift-loading"><div className="dd-spinner"/><span>Loading hazard data…</span></div>
+              )}
+
+              {!hazardLoading && hazardAnalysis && hazardAnalysis.total_routes === 0 && (
+                <div style={{textAlign:"center",padding:"1.5rem",color:"#334155"}}>
+                  <div style={{fontSize:"1.8rem",marginBottom:8}}>🗺</div>
+                  <p style={{fontSize:"0.82rem",margin:0}}>No route data available.</p>
+                  <p style={{fontSize:"0.72rem",margin:"4px 0 0",color:"#475569"}}>
+                    Hazard risk is derived from the driver's scheduled routes.
+                  </p>
+                </div>
+              )}
+
+              {!hazardLoading && hazardAnalysis && hazardAnalysis.total_routes > 0 && (
+                <>
+                  {/* Summary stats */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.5rem",marginBottom:"1.25rem"}}>
+                    {[
+                      { label:"Total Routes",     value: hazardAnalysis.total_routes, color:"#38bdf8" },
+                      { label:"Avg Risk Score",   value: `${hazardAnalysis.avg_risk_score}/100`,
+                        color: hazardAnalysis.avg_risk_score>=70?"#ef4444":hazardAnalysis.avg_risk_score>=50?"#f97316":hazardAnalysis.avg_risk_score>=30?"#f59e0b":"#22c55e" },
+                      { label:"High Risk Routes", value: hazardAnalysis.high_risk_routes?.length || 0, color:"#f97316" },
+                      { label:"Unique Routes",    value: hazardAnalysis.routes_summary?.length || 0, color:"#a78bfa" },
+                    ].map(s=>(
+                      <div key={s.label} style={{background:"#071828",border:"1px solid #1e293b",borderRadius:10,padding:"0.6rem 0.75rem",textAlign:"center"}}>
+                        <div style={{fontSize:"1.1rem",fontWeight:800,color:s.color}}>{s.value}</div>
+                        <div style={{fontSize:"0.62rem",color:"#64748b",marginTop:2}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Most common route callout */}
+                  {hazardAnalysis.most_common_route && (
+                    <div style={{background:"#071020",border:"1px solid #1e3a5f",borderRadius:10,padding:"0.75rem 1rem",marginBottom:"1rem"}}>
+                      <div style={{fontSize:"0.65rem",color:"#64748b",letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:4}}>
+                        Most Frequent Route
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:"0.75rem",flexWrap:"wrap"}}>
+                        <span style={{fontWeight:700,color:"#f0f6ff",fontSize:"0.9rem"}}>
+                          {hazardAnalysis.most_common_route.route}
+                        </span>
+                        <span style={{background:"#0d1b2e",borderRadius:6,padding:"0.2rem 0.5rem",fontSize:"0.7rem",color:"#94a3b8"}}>
+                          ×{hazardAnalysis.most_common_route.count} times
+                        </span>
+                        <span style={{
+                          background: `${hazardAnalysis.most_common_route.risk_color}22`,
+                          color: hazardAnalysis.most_common_route.risk_color,
+                          borderRadius:6,padding:"0.2rem 0.5rem",fontSize:"0.7rem",fontWeight:700}}>
+                          {hazardAnalysis.most_common_route.risk_label}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem",marginBottom:"1rem"}}>
+                    {/* Risk distribution chart */}
+                    {hazardAnalysis.risk_distribution && Object.keys(hazardAnalysis.risk_distribution).length > 0 && (
+                      <div>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          Risk Distribution
+                        </p>
+                        <ResponsiveContainer width="100%" height={130}>
+                          <BarChart
+                            data={Object.entries(hazardAnalysis.risk_distribution).map(([k,v])=>({label:k,count:v}))}
+                            barSize={28} margin={{top:4,right:10,left:-22,bottom:0}}>
+                            <XAxis dataKey="label" tick={{fill:"#475569",fontSize:8}} tickLine={false} axisLine={false}/>
+                            <YAxis tick={{fill:"#475569",fontSize:9}} tickLine={false} axisLine={false}/>
+                            <Tooltip
+                              formatter={(v)=>[`${v} routes`,"Count"]}
+                              contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:"0.72rem"}}
+                            />
+                            <Bar dataKey="count" radius={[4,4,0,0]}>
+                              {Object.keys(hazardAnalysis.risk_distribution).map((k,i)=>(
+                                <Cell key={i} fill={{"Low Risk":"#22c55e","Medium Risk":"#f59e0b","High Risk":"#f97316","Critical Risk":"#ef4444"}[k]||"#64748b"}/>
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* Routes summary */}
+                    {hazardAnalysis.routes_summary?.length > 0 && (
+                      <div>
+                        <p style={{fontSize:"0.72rem",color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:"0.5rem"}}>
+                          Routes by Frequency
+                        </p>
+                        <div style={{display:"flex",flexDirection:"column",gap:"0.3rem",maxHeight:145,overflowY:"auto"}}>
+                          {hazardAnalysis.routes_summary.map((r,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:"0.5rem",
+                              background:"#071828",borderRadius:7,padding:"0.3rem 0.65rem",
+                              border:"1px solid #1e293b",fontSize:"0.72rem"}}>
+                              <div style={{flex:1,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.route}</div>
+                              <span style={{color:"#475569",minWidth:28,textAlign:"right",fontSize:"0.65rem"}}>×{r.count}</span>
+                              <span style={{
+                                background:`${r.risk_color}22`,color:r.risk_color,
+                                borderRadius:5,padding:"0.1rem 0.4rem",fontSize:"0.62rem",fontWeight:700,whiteSpace:"nowrap"}}>
+                                {r.risk_label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* High risk routes warning */}
+                  {hazardAnalysis.high_risk_routes?.length > 0 && (
+                    <div style={{background:"#1a0a06",border:"1px solid #7c2d12",borderRadius:10,padding:"0.75rem 1rem"}}>
+                      <p style={{fontSize:"0.72rem",color:"#f97316",fontWeight:700,margin:"0 0 0.4rem",letterSpacing:"0.04em"}}>
+                        ⚠ High / Critical Risk Routes Detected
+                      </p>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:"0.35rem"}}>
+                        {hazardAnalysis.high_risk_routes.map((r,i)=>(
+                          <span key={i} style={{background:"#2d0f06",borderRadius:6,padding:"0.2rem 0.6rem",
+                            fontSize:"0.7rem",color: r.risk_score>=70?"#ef4444":"#f97316",
+                            border:`1px solid ${r.risk_score>=70?"#ef444455":"#f9731655"}`}}>
+                            {r.route}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* ── Overall Report Generation ── */}
+            <div className="dd-card" style={{marginTop:"1rem",background:"linear-gradient(135deg,#071828 0%,#0d1b34 100%)",border:"1px solid #1e3a5f"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"0.75rem"}}>
+                <div>
+                  <p className="dd-card-title" style={{margin:"0 0 0.2rem"}}>📋 Full Driver Safety Report</p>
+                  <p style={{margin:0,fontSize:"0.72rem",color:"#64748b"}}>
+                    Comprehensive PDF combining shift scores, BVI, drowsiness, road sign &amp; hazard analysis.
+                  </p>
+                </div>
+                <button
+                  className={`dd-export-pdf-btn ${reportExporting ? "loading" : ""}`}
+                  onClick={exportFullReport}
+                  disabled={reportExporting}
+                  style={{background:"linear-gradient(135deg,#1d4ed8,#7c3aed)",fontSize:"0.8rem",padding:"0.55rem 1.1rem"}}
+                  title="Export comprehensive safety report as PDF"
+                >
+                  {reportExporting ? (
+                    <><span className="dd-export-spin"/>Generating Report…</>
+                  ) : (
+                    <><IcoDownload /> Generate Full Report</>
+                  )}
+                </button>
+              </div>
             </div>
 
           </section>

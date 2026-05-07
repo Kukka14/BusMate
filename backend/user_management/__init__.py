@@ -1,13 +1,6 @@
-from flask import Flask
-from .routes.auth import auth_bp
-from .routes.users import users_bp
-from .routes.driver import driver_bp
-from .routes.admin import admin_bp
-
-
-def register_user_management(app: Flask):
-    """Call this from your main app.py to attach all user management routes."""
-    app.register_blueprint(auth_bp,   url_prefix="/api/auth")
-    app.register_blueprint(users_bp,  url_prefix="/api/users")
-    app.register_blueprint(driver_bp, url_prefix="/api/driver")
-    app.register_blueprint(admin_bp,  url_prefix="/api/admin")
+# user_management package
+# Route blueprints live in Emotion_Shift_Profile/routes/ and are registered
+# by app.py via `from Emotion_Shift_Profile import register_user_management`.
+# This __init__.py is intentionally kept minimal so that importing
+# user_management.database / models / utils from _seed_admin() does not
+# trigger missing-file errors.

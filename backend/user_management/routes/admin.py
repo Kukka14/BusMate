@@ -435,6 +435,154 @@ def get_driver_shift_scores(current_user, driver_id):
         return jsonify({"error": str(e)}), 500
 
 
+@admin_bp.get("/drivers/<driver_id>/bvi-analysis")
+@token_required
+@admin_required
+def get_driver_bvi_analysis(current_user, driver_id):
+    """
+    Return BVI (Behavioural Volatility Index) time-based analysis for a driver.
+    Provides per-shift trend, hourly pattern, day-of-week breakdown, and state stats.
+    """
+    try:
+        from ..database import get_db
+        from datetime import datetime as _dt
+        from collections import defaultdict
+        db = get_db()
+
+        docs = list(
+            db.shift_scores.find(
+                {"driver_id": driver_id, "status": "Completed"},
+                {
+                    "_id": 0,
+                    "metrics.avg_bvi": 1,
+                    "scored_at": 1,
+                    "shift_time": 1,
+                    "route_name": 1,
+                    "date": 1,
+                    "duration_sec": 1,
+                    "score.components.emotion": 1,
+                }
+            ).sort("scored_at", 1).limit(90)
+        )
+
+        if not docs:
+            return jsonify({
+                "total_shifts": 0,
+                "avg_bvi": None,
+                "peak_hour": None,
+                "state_counts": {"stable": 0, "unstable": 0, "erratic": 0},
+                "shifts": [],
+                "hourly": [],
+                "by_day": [],
+            }), 200
+
+        hourly_bvi = defaultdict(list)
+        dow_bvi    = defaultdict(list)
+        shifts_out = []
+
+        for d in docs:
+            avg_bvi   = (d.get("metrics") or {}).get("avg_bvi")
+            scored_at = d.get("scored_at", "")
+
+            # Fallback: estimate BVI from emotion component score
+            if avg_bvi is None:
+                emo = (d.get("score") or {}).get("components", {}).get("emotion", {})
+                emo_score = emo.get("score")
+                emo_max   = emo.get("max", 20)
+                if emo_score is not None and emo_max > 0:
+                    avg_bvi = round(1.0 - emo_score / emo_max, 3)
+
+            hour = None
+            dow  = None
+            if scored_at:
+                try:
+                    dt   = _dt.fromisoformat(scored_at.replace("Z", ""))
+                    hour = dt.hour
+                    dow  = dt.weekday()   # 0 = Monday
+                except Exception:
+                    pass
+
+            # Fallback: parse shift_time string e.g. "06:00 - 14:00"
+            if hour is None:
+                st = d.get("shift_time", "")
+                if st:
+                    try:
+                        hour = int(st.split(":")[0])
+                    except Exception:
+                        pass
+
+            if avg_bvi is not None:
+                if hour is not None:
+                    hourly_bvi[hour].append(avg_bvi)
+                if dow is not None:
+                    dow_bvi[dow].append(avg_bvi)
+
+            bvi_pct = round(avg_bvi * 100) if avg_bvi is not None else None
+            state   = (
+                "stable"   if avg_bvi is not None and avg_bvi < 0.30 else
+                "unstable" if avg_bvi is not None and avg_bvi < 0.60 else
+                "erratic"  if avg_bvi is not None else None
+            )
+
+            shifts_out.append({
+                "scored_at":    scored_at,
+                "date":         d.get("date", scored_at[:10] if scored_at else ""),
+                "shift_time":   d.get("shift_time", ""),
+                "route_name":   d.get("route_name", ""),
+                "avg_bvi":      avg_bvi,
+                "bvi_pct":      bvi_pct,
+                "state":        state,
+                "duration_sec": d.get("duration_sec", 0),
+                "hour":         hour,
+            })
+
+        # Hourly aggregation (24 buckets)
+        hourly_out = []
+        for h in range(24):
+            vals = hourly_bvi.get(h, [])
+            hourly_out.append({
+                "hour":    h,
+                "label":   f"{h:02d}:00",
+                "avg_bvi": round(sum(vals) / len(vals) * 100) if vals else 0,
+                "count":   len(vals),
+            })
+
+        # Day-of-week aggregation
+        day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        dow_out = []
+        for i, label in enumerate(day_labels):
+            vals = dow_bvi.get(i, [])
+            dow_out.append({
+                "day":     label,
+                "avg_bvi": round(sum(vals) / len(vals) * 100) if vals else 0,
+                "count":   len(vals),
+            })
+
+        all_bvi     = [s["avg_bvi"] for s in shifts_out if s["avg_bvi"] is not None]
+        avg_overall = round(sum(all_bvi) / len(all_bvi) * 100) if all_bvi else None
+
+        active_hourly = [h for h in hourly_out if h["count"] > 0]
+        peak_hour = max(active_hourly, key=lambda h: h["avg_bvi"]) if active_hourly else None
+
+        state_counts = {"stable": 0, "unstable": 0, "erratic": 0}
+        for s in shifts_out:
+            if s["state"] in state_counts:
+                state_counts[s["state"]] += 1
+
+        return jsonify({
+            "total_shifts": len(shifts_out),
+            "avg_bvi":      avg_overall,
+            "peak_hour":    peak_hour,
+            "state_counts": state_counts,
+            "shifts":       shifts_out[-30:],   # last 30 for trend chart
+            "hourly":       hourly_out,
+            "by_day":       dow_out,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @admin_bp.delete("/drivers/<driver_id>")
 @token_required
 @admin_required

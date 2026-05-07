@@ -27,6 +27,7 @@ import SchedulePage from "../pages/Schedule/SchedulePage";
 import ActiveShiftPage from "../pages/ActiveShift/ActiveShiftPage";
 import AdminDriversPage from "../pages/AdminDrivers/AdminDriversPage";
 import AdminSchedulePage from "../pages/AdminSchedule/AdminSchedulePage";
+import AdminDocsPage from "../pages/AdminDocs/AdminDocsPage";
 
 const AdminDriverDetailPage = React.lazy(() => import("../pages/AdminDriverDetail/AdminDriverDetailPage"));
 
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
   { path: "/admin/drivers",        element: <AdminDriversPage />      },
   { path: "/admin/drivers/:id",    element: <React.Suspense fallback={null}><AdminDriverDetailPage /></React.Suspense> },
   { path: "/admin/schedules",   element: <AdminSchedulePage />  },
+  { path: "/admin/docs",        element: <AdminDocsPage />      },
   { path: "/driver/dashboard",        element: <DriverDashboard />    },
   { path: "/driver/monitor",           element: <MonitorHubPage />     },
   { path: "/driver/monitor/emotion",    element: <DrivingMonitorPage /> },

@@ -20,8 +20,8 @@ const MAIN_NAV = [
 ];
 
 const SYS_NAV = [
-  { key: "settings", label: "Settings",       Icon: IcoGear },
-  { key: "docs",     label: "Documentation",  Icon: IcoDoc  },
+  { key: "settings", label: "Settings",       Icon: IcoGear, path: null            },
+  { key: "docs",     label: "Documentation",  Icon: IcoDoc,  path: "/admin/docs"  },
 ];
 
 const initials = (name = "") =>
@@ -84,11 +84,11 @@ export default function AdminSidebar({ activeKey, onItemClick }) {
       {/* System nav */}
       <p className="adm-nav-section" style={{ marginTop: "1.25rem" }}>SYSTEM</p>
       <nav className="adm-nav">
-        {SYS_NAV.map(({ key, label, Icon }) => (
+        {SYS_NAV.map(({ key, label, Icon, path }) => (
           <button
             key={key}
-            className="adm-nav-btn"
-            onClick={() => onItemClick && onItemClick(key)}
+            className={`adm-nav-btn${activeKey === key ? " active" : ""}`}
+            onClick={() => { if (onItemClick) onItemClick(key); if (path) navigate(path); }}
           >
             <Icon /><span>{label}</span>
           </button>

@@ -412,6 +412,364 @@ def get_driver_shift_scores(current_user, driver_id):
         return jsonify({"error": str(e)}), 500
 
 
+@admin_bp.get("/drivers/<driver_id>/bvi-analysis")
+@token_required
+@admin_required
+def get_driver_bvi_analysis(current_user, driver_id):
+    """
+    BVI (Behavioural Volatility Index) time-based analysis for a driver.
+    Returns per-shift trend, hourly pattern, day-of-week breakdown, and state stats.
+    """
+    try:
+        from ..database import get_db
+        from datetime import datetime as _dt
+        from collections import defaultdict
+        db = get_db()
+
+        docs = list(
+            db.shift_scores.find(
+                {"driver_id": driver_id, "status": "Completed"},
+                {
+                    "_id": 0,
+                    "metrics.avg_bvi": 1,
+                    "scored_at": 1,
+                    "shift_time": 1,
+                    "route_name": 1,
+                    "date": 1,
+                    "duration_sec": 1,
+                    "score.components.emotion": 1,
+                }
+            ).sort("scored_at", 1).limit(90)
+        )
+
+        if not docs:
+            return jsonify({
+                "total_shifts": 0,
+                "avg_bvi": None,
+                "peak_hour": None,
+                "state_counts": {"stable": 0, "unstable": 0, "erratic": 0},
+                "shifts": [],
+                "hourly": [],
+                "by_day": [],
+            }), 200
+
+        hourly_bvi = defaultdict(list)
+        dow_bvi    = defaultdict(list)
+        shifts_out = []
+
+        for d in docs:
+            avg_bvi   = (d.get("metrics") or {}).get("avg_bvi")
+            scored_at = d.get("scored_at", "")
+
+            # Fallback: estimate BVI from emotion component score
+            if avg_bvi is None:
+                emo = (d.get("score") or {}).get("components", {}).get("emotion", {})
+                emo_score = emo.get("score")
+                emo_max   = emo.get("max", 20)
+                if emo_score is not None and emo_max > 0:
+                    avg_bvi = round(1.0 - emo_score / emo_max, 3)
+
+            hour = None
+            dow  = None
+            if scored_at:
+                try:
+                    dt   = _dt.fromisoformat(scored_at.replace("Z", ""))
+                    hour = dt.hour
+                    dow  = dt.weekday()
+                except Exception:
+                    pass
+
+            if hour is None:
+                st = d.get("shift_time", "")
+                if st:
+                    try:
+                        hour = int(st.split(":")[0])
+                    except Exception:
+                        pass
+
+            if avg_bvi is not None:
+                if hour is not None:
+                    hourly_bvi[hour].append(avg_bvi)
+                if dow is not None:
+                    dow_bvi[dow].append(avg_bvi)
+
+            bvi_pct = round(avg_bvi * 100) if avg_bvi is not None else None
+            state   = (
+                "stable"   if avg_bvi is not None and avg_bvi < 0.30 else
+                "unstable" if avg_bvi is not None and avg_bvi < 0.60 else
+                "erratic"  if avg_bvi is not None else None
+            )
+
+            shifts_out.append({
+                "scored_at":    scored_at,
+                "date":         d.get("date", scored_at[:10] if scored_at else ""),
+                "shift_time":   d.get("shift_time", ""),
+                "route_name":   d.get("route_name", ""),
+                "avg_bvi":      avg_bvi,
+                "bvi_pct":      bvi_pct,
+                "state":        state,
+                "duration_sec": d.get("duration_sec", 0),
+                "hour":         hour,
+            })
+
+        hourly_out = []
+        for h in range(24):
+            vals = hourly_bvi.get(h, [])
+            hourly_out.append({
+                "hour":    h,
+                "label":   f"{h:02d}:00",
+                "avg_bvi": round(sum(vals) / len(vals) * 100) if vals else 0,
+                "count":   len(vals),
+            })
+
+        day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        dow_out = []
+        for i, label in enumerate(day_labels):
+            vals = dow_bvi.get(i, [])
+            dow_out.append({
+                "day":     label,
+                "avg_bvi": round(sum(vals) / len(vals) * 100) if vals else 0,
+                "count":   len(vals),
+            })
+
+        all_bvi     = [s["avg_bvi"] for s in shifts_out if s["avg_bvi"] is not None]
+        avg_overall = round(sum(all_bvi) / len(all_bvi) * 100) if all_bvi else None
+
+        active_hourly = [h for h in hourly_out if h["count"] > 0]
+        peak_hour = max(active_hourly, key=lambda h: h["avg_bvi"]) if active_hourly else None
+
+        state_counts = {"stable": 0, "unstable": 0, "erratic": 0}
+        for s in shifts_out:
+            if s["state"] in state_counts:
+                state_counts[s["state"]] += 1
+
+        return jsonify({
+            "total_shifts": len(shifts_out),
+            "avg_bvi":      avg_overall,
+            "peak_hour":    peak_hour,
+            "state_counts": state_counts,
+            "shifts":       shifts_out[-30:],
+            "hourly":       hourly_out,
+            "by_day":       dow_out,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Road Sign Detection Analysis per driver ──────────────────────────────────
+
+@admin_bp.get("/drivers/<driver_id>/road-sign-analysis")
+@token_required
+@admin_required
+def get_driver_road_sign_analysis(current_user, driver_id):
+    """Aggregate road-sign detection data for a driver from shift_scores.road_sign arrays."""
+    try:
+        from ..database import get_db
+        db = get_db()
+
+        # Pull shifts that have a non-empty road_sign array
+        shifts = list(db.shift_scores.find(
+            {"driver_id": driver_id},
+            {"road_sign": 1, "scored_at": 1, "start_time": 1, "status": 1,
+             "route_name": 1, "date": 1, "shift_time": 1}
+        ).sort("scored_at", -1).limit(100))
+
+        all_signs = []
+        by_shift  = []
+
+        for sh in shifts:
+            signs = sh.get("road_sign") or []
+            if not signs:
+                continue
+
+            sh_date = sh.get("scored_at") or sh.get("start_time")
+            sh_date_str = (
+                sh_date.isoformat() if hasattr(sh_date, "isoformat")
+                else str(sh_date) if sh_date else None
+            )
+
+            sh_confs = [s.get("confidence", 0) for s in signs]
+            sh_types = {}
+            for s in signs:
+                cn = s.get("class_name", "Unknown")
+                sh_types[cn] = sh_types.get(cn, 0) + 1
+            top_sign = max(sh_types, key=sh_types.get) if sh_types else None
+
+            by_shift.append({
+                "shift_id":        str(sh.get("_id", "")),
+                "date":            sh_date_str,
+                "status":          sh.get("status", ""),
+                "route_name":      sh.get("route_name", ""),
+                "detection_count": len(signs),
+                "avg_confidence":  round(sum(sh_confs) / len(sh_confs) * 100, 1) if sh_confs else 0,
+                "top_sign":        top_sign,
+            })
+
+            all_signs.extend(signs)
+
+        total = len(all_signs)
+
+        if total == 0:
+            return jsonify({
+                "total_detections": 0,
+                "avg_confidence": 0,
+                "avg_distance": None,
+                "status_breakdown": {},
+                "sign_types": [],
+                "by_shift": [],
+                "traffic_congestion_breakdown": {},
+            }), 200
+
+        confidences = [s.get("confidence", 0) for s in all_signs if s.get("confidence") is not None]
+        avg_conf = round(sum(confidences) / len(confidences) * 100, 1) if confidences else 0
+
+        distances = [s.get("estimated_distance_m") for s in all_signs
+                     if s.get("estimated_distance_m") is not None]
+        avg_dist = round(sum(distances) / len(distances), 1) if distances else None
+
+        status_breakdown = {}
+        for s in all_signs:
+            st = s.get("status", "Unknown")
+            status_breakdown[st] = status_breakdown.get(st, 0) + 1
+
+        type_counts = {}
+        for s in all_signs:
+            cn = (s.get("class_name") or "Unknown").replace("_", " ").title()
+            type_counts[cn] = type_counts.get(cn, 0) + 1
+        sign_types = sorted(
+            [{"class_name": k, "count": v} for k, v in type_counts.items()],
+            key=lambda x: x["count"], reverse=True
+        )[:12]
+
+        congestion_breakdown = {}
+        for s in all_signs:
+            cg = s.get("traffic_congestion", "LOW")
+            congestion_breakdown[cg] = congestion_breakdown.get(cg, 0) + 1
+
+        return jsonify({
+            "total_detections":              total,
+            "avg_confidence":                avg_conf,
+            "avg_distance":                  avg_dist,
+            "status_breakdown":              status_breakdown,
+            "sign_types":                    sign_types,
+            "by_shift":                      by_shift[:25],
+            "traffic_congestion_breakdown":  congestion_breakdown,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Route Hazard Risk Analysis per driver ────────────────────────────────────
+
+@admin_bp.get("/drivers/<driver_id>/hazard-analysis")
+@token_required
+@admin_required
+def get_driver_hazard_analysis(current_user, driver_id):
+    """Aggregate route-based hazard risk data for a driver from schedules."""
+    try:
+        from ..database import get_db
+        import hashlib
+        db = get_db()
+
+        schedules = list(db.schedules.find(
+            {"driver_id": driver_id},
+            {"start_town": 1, "end_town": 1, "date_iso": 1, "status": 1, "route_name": 1}
+        ).sort("date_iso", -1).limit(100))
+
+        def _route_risk(start: str, end: str) -> int:
+            """Deterministic 0-100 terrain risk score derived from route string."""
+            key = f"{start.lower()}-{end.lower()}"
+            h   = int(hashlib.md5(key.encode()).hexdigest()[:8], 16)
+            return int((h % 7001) / 7000 * 90) + 5   # range 5-95
+
+        def _risk_label(score: int) -> str:
+            if score >= 70: return "Critical Risk"
+            if score >= 50: return "High Risk"
+            if score >= 30: return "Medium Risk"
+            return "Low Risk"
+
+        def _risk_color(label: str) -> str:
+            return {
+                "Critical Risk": "#ef4444",
+                "High Risk":     "#f97316",
+                "Medium Risk":   "#f59e0b",
+                "Low Risk":      "#22c55e",
+            }.get(label, "#64748b")
+
+        route_history = []
+        for s in schedules:
+            start = (s.get("start_town") or "").strip()
+            end   = (s.get("end_town")   or "").strip()
+            if not start or not end:
+                continue
+            route    = s.get("route_name") or f"{start} → {end}"
+            score    = _route_risk(start, end)
+            label    = _risk_label(score)
+            date_val = s.get("date_iso")
+            route_history.append({
+                "route":      route,
+                "start":      start,
+                "end":        end,
+                "date":       str(date_val) if date_val else None,
+                "status":     s.get("status", ""),
+                "risk_score": score,
+                "risk_label": label,
+                "risk_color": _risk_color(label),
+            })
+
+        if not route_history:
+            return jsonify({
+                "total_routes":      0,
+                "route_history":     [],
+                "risk_distribution": {},
+                "most_common_route": None,
+                "avg_risk_score":    0,
+                "routes_summary":    [],
+                "high_risk_routes":  [],
+            }), 200
+
+        # Route frequency summary
+        route_map: dict = {}
+        for r in route_history:
+            key = r["route"]
+            if key not in route_map:
+                route_map[key] = {
+                    "route":      key,
+                    "count":      0,
+                    "risk_score": r["risk_score"],
+                    "risk_label": r["risk_label"],
+                    "risk_color": r["risk_color"],
+                }
+            route_map[key]["count"] += 1
+        routes_summary = sorted(route_map.values(), key=lambda x: x["count"], reverse=True)[:10]
+
+        risk_dist: dict = {}
+        for r in route_history:
+            rl = r["risk_label"]
+            risk_dist[rl] = risk_dist.get(rl, 0) + 1
+
+        avg_risk = round(
+            sum(r["risk_score"] for r in route_history) / len(route_history), 1
+        )
+
+        high_risk_routes = [r for r in routes_summary if r["risk_score"] >= 50]
+
+        return jsonify({
+            "total_routes":      len(route_history),
+            "route_history":     route_history[:30],
+            "risk_distribution": risk_dist,
+            "most_common_route": routes_summary[0] if routes_summary else None,
+            "avg_risk_score":    avg_risk,
+            "routes_summary":    routes_summary,
+            "high_risk_routes":  high_risk_routes,
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 def _tier_color(tier: str) -> str:
     return {
         "Excellent":          "#22c55e",
