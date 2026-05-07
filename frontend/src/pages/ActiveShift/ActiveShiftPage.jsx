@@ -1197,16 +1197,16 @@ export default function ActiveShiftPage() {
     if (!pd) return 1;
     // Slow down to step=1 in danger zones so user sees every point
     if (pt?.risk_label === "Critical Risk" || pt?.risk_label === "High Risk") return 1;
-    if (pd.length > 5000) return 8;
-    if (pd.length > 2000) return 4;
-    if (pd.length > 500) return 2;
+    if (pd.length > 5000) return 4;
+    if (pd.length > 2000) return 2;
+    if (pd.length > 500) return 1;
     return 1;
   }, []);
 
   const getDelay = useCallback((pt) => {
-    if(!pt) return 40;
+    if(!pt) return 120;
     switch(pt.risk_label) {
-      case "Critical Risk":return 500; case "High Risk":return 300; case "Medium Risk":return 60; default:return 30;
+      case "Critical Risk":return 700; case "High Risk":return 450; case "Medium Risk":return 180; default:return 120;
     }
   }, []);
 
@@ -1245,7 +1245,7 @@ export default function ActiveShiftPage() {
       // Follow camera — smoothly pan map to keep vehicle centered
       const map = hzMapInstance.current;
       if (map) {
-        map.panTo([pt.lat, pt.lon], { animate: true, duration: 0.3, noMoveStart: true });
+        map.panTo([pt.lat, pt.lon], { animate: true, duration: 0.9, noMoveStart: true });
         if (hzIdx < 3 && map.getZoom() < 13) map.setZoom(13, { animate: true });
       }
     }
