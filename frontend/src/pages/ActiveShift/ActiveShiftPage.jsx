@@ -328,6 +328,12 @@ export default function ActiveShiftPage() {
     return nonDriverCam?.deviceId || cams[1]?.deviceId || cams[0]?.deviceId || null;
   };
 
+  // ── Road Sign socket state ──────────────────────────────────────────────
+  const rsSocketRef    = useRef(null);
+  const rsSendIvRef    = useRef(null);
+  const rsInFlight     = useRef(false);
+  const rsCaptureRef   = useRef(null); // hidden canvas for frame capture
+
   // ── Emotion state ───────────────────────────────────────────────────────
   const emSocketRef = useRef(null);
   const emOverlayRef = useRef(null);
@@ -947,70 +953,86 @@ export default function ActiveShiftPage() {
   }, [shiftActive]);
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ── ROAD SIGN — Poll detection info (mount + shift state dependent) ─────
+  // ── ROAD SIGN — Socket-based frame sending (same pattern as emotion/drowsiness)
   useEffect(() => {
-    // Start polling only when shift is active
     if (!shiftActive) {
-      if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
+      // cleanup on shift end
+      clearInterval(rsSendIvRef.current);
+      rsSendIvRef.current = null;
+      if (rsSocketRef.current) { rsSocketRef.current.disconnect(); rsSocketRef.current = null; }
       return;
     }
 
-    // Reset circuit breaker when shift starts
-    rsSignFailRef.current = 0;
-    setRsSignOnline(true);
+    // Connect socket
+    const sock = io(SOCKET_URL, { transports: ["websocket"], reconnectionDelayMax: 10000 });
+    rsSocketRef.current = sock;
 
-    // Polling interval — stops itself after 5 consecutive failures (circuit breaker)
-    rsSignPollRef.current = setInterval(() => {
-      fetch("/road-sign/get_detection_info")
-        .then(r => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then(data => {
-          rsSignFailRef.current = 0;
-          setRsSignOnline(true);
+    sock.on("connect", () => {
+      setRsSignOnline(true);
+      rsSignFailRef.current = 0;
+    });
 
-          const hasSign = data?.class_name;
-          const hasVehicleMeta =
-            data?.nearest_vehicle_distance_m !== undefined ||
-            data?.vehicle_collision_risk !== undefined;
+    sock.on("disconnect", () => {
+      setRsSignOnline(false);
+    });
 
-          if (hasSign || hasVehicleMeta) {
-            setRsSignInfo(data);
-            if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
-              rsSignLastRef.current = data.class_name;
-              if (rsSignAudioEnabledRef.current) {
-                playBeep(880, 0.2, 0.35);
-                setTimeout(() => speakText(`Road sign detected: ${formatLabel(data.class_name)}`), 250);
-              }
-              setRsSignLog(prev => [
-                { class_name: data.class_name, confidence: data.confidence,
-                  status: data.status, estimated_distance_m: data.estimated_distance_m,
-                  time: new Date().toLocaleTimeString() },
-                ...prev.slice(0, 29),
-              ]);
-            } else if (!hasSign) {
-              rsSignLastRef.current = null;
-            }
-          } else {
-            setRsSignInfo(null);
-            rsSignLastRef.current = null;
+    sock.on("connect_error", () => {
+      rsSignFailRef.current += 1;
+      if (rsSignFailRef.current >= 3) setRsSignOnline(false);
+    });
+
+    // Handle detection results
+    sock.on("road_sign_result", (data) => {
+      rsInFlight.current = false;
+      const hasSign = data?.class_name;
+      const hasVehicleMeta =
+        data?.nearest_vehicle_distance_m !== undefined ||
+        data?.vehicle_collision_risk !== undefined;
+
+      if (hasSign || hasVehicleMeta) {
+        setRsSignInfo(data);
+        if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
+          rsSignLastRef.current = data.class_name;
+          if (rsSignAudioEnabledRef.current) {
+            playBeep(880, 0.2, 0.35);
+            setTimeout(() => speakText(`Road sign detected: ${formatLabel(data.class_name)}`), 250);
           }
-        })
-        .catch(() => {
-          rsSignFailRef.current += 1;
-          if (rsSignFailRef.current >= 5) {
-            // Backend unreachable — stop polling to prevent terminal spam
-            clearInterval(rsSignPollRef.current);
-            rsSignPollRef.current = null;
-            setRsSignInfo(null);
-            setRsSignOnline(false);
-          }
-        });
+          setRsSignLog(prev => [
+            { class_name: data.class_name, confidence: data.confidence,
+              status: data.status, estimated_distance_m: data.estimated_distance_m,
+              time: new Date().toLocaleTimeString() },
+            ...prev.slice(0, 29),
+          ]);
+        } else if (!hasSign) {
+          rsSignLastRef.current = null;
+        }
+      } else {
+        setRsSignInfo(null);
+        rsSignLastRef.current = null;
+      }
+    });
+
+    // Send frames every 400ms from road-facing camera
+    const canvas = rsCaptureRef.current || document.createElement("canvas");
+    rsCaptureRef.current = canvas;
+
+    rsSendIvRef.current = setInterval(() => {
+      if (rsInFlight.current) return;
+      const video = videoRefRoadSignDisplay.current;
+      if (!video || !video.srcObject || video.readyState < 2) return;
+      canvas.width  = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, 320, 240);
+      const b64 = canvas.toDataURL("image/jpeg", 0.7);
+      rsInFlight.current = true;
+      sock.emit("road_sign_frame", { image: b64 });
     }, 400);
 
     return () => {
-      if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
+      clearInterval(rsSendIvRef.current);
+      rsSendIvRef.current = null;
+      if (rsSocketRef.current) { rsSocketRef.current.disconnect(); rsSocketRef.current = null; }
     };
   }, [shiftActive]);
 
@@ -2401,8 +2423,9 @@ export default function ActiveShiftPage() {
               {/* ── EMOTION ── */}
               {(()=>{
                 const isDistract = cheating;
-                const cardCls = `hud-ac${isDistract?" hud-ac--danger":""}`;
-                const scoreCol = isDistract?"#ef4444":emoColor;
+                const ea = getEmotionAlert();
+                const alertColor = ea.tone==="safe"?"#22c55e":ea.tone==="warn"?"#f59e0b":ea.tone==="danger"?"#ef4444":"#475569";
+                const cardCls = `hud-ac${isDistract?" hud-ac--danger":ea.tone==="danger"?" hud-ac--warn":""}`;
                 return (
                   <div className={cardCls}>
                     <div className="hud-ac-header">
@@ -2415,13 +2438,16 @@ export default function ActiveShiftPage() {
                       )}
                     </div>
                     <div className="hud-ac-score-row">
-                      <div className="hud-ac-score" style={{color: scoreCol, fontSize:"1.4rem"}}>
-                        {emotion?emotion.toUpperCase():"NO FACE"}
+                      <div className="hud-ac-score" style={{color: alertColor, fontSize:"1.5rem", fontWeight:800, letterSpacing:"0.05em"}}>
+                        {ea.label.toUpperCase()}
                       </div>
                     </div>
                     <div className="hud-ac-sub-row">
+                      <span style={{color:"#64748b",fontSize:"0.68rem"}}>{ea.message}</span>
+                    </div>
+                    <div className="hud-ac-sub-row" style={{marginTop:2}}>
                       <span style={{color:"#64748b"}}>BVI</span>
-                      <span style={{color: bviColor(bviScore), fontWeight:700}}>
+                      <span style={{color: alertColor, fontWeight:700}}>
                         {bviScore?.toFixed(3)??"—"}
                       </span>
                       {isDistract && (

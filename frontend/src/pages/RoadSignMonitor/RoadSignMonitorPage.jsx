@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import Sidebar from "../../components/common/Sidebar";
 import { getSignInstruction, PRIORITY_COLORS } from "../../utils/roadSignInstructions";
 import "./RoadSignMonitor.css";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API        = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 // ── Audio helpers ──────────────────────────────────────────────────────────────
 function playBeep(freq = 880, duration = 0.2, vol = 0.35) {
@@ -94,8 +96,17 @@ export default function RoadSignMonitorPage() {
   const [captureErr,       setCaptureErr]       = useState("");
   const [sessionId,        setSessionId]        = useState("");
   const [sessionStarting,  setSessionStarting]  = useState(false);
-  const [alertBanner,      setAlertBanner]      = useState(null); // { text, color }
+  const [alertBanner,      setAlertBanner]      = useState(null);
+  const [devices,          setDevices]          = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [camError,         setCamError]         = useState("");
 
+  const videoRef        = useRef(null);
+  const captureCanvasRef = useRef(null);
+  const streamRef       = useRef(null);
+  const socketRef       = useRef(null);
+  const sendIvRef       = useRef(null);
+  const inFlightRef     = useRef(false);
   const audioRef        = useRef(true);
   const sessionActiveRef = useRef(false);
   const lastSpokenRef   = useRef(null);
@@ -106,52 +117,99 @@ export default function RoadSignMonitorPage() {
   useEffect(() => { sessionActiveRef.current = Boolean(sessionId); }, [sessionId]);
   useEffect(() => { if (!token) navigate("/login"); }, [token, navigate]);
 
-  // ── Poll detection every 400 ms ────────────────────────────────────────────
+  // ── Enumerate cameras ────────────────────────────────────────────────────
   useEffect(() => {
-    pollRef.current = setInterval(() => {
-      fetch(`${API}/get_detection_info`)
-        .then(r => r.json())
-        .then(data => {
-          if (!sessionActiveRef.current) { setInfo(null); lastSpokenRef.current = null; return; }
+    async function loadDevices() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const cams = list.filter(d => d.kind === "videoinput");
+        setDevices(cams);
+        if (cams.length > 0) setSelectedDeviceId(cams[0].deviceId);
+      } catch { setCamError("Camera permission denied."); }
+    }
+    loadDevices();
+  }, []);
 
-          const hasSign        = typeof data?.class_name === "string" && data.class_name.trim();
-          const hasVehicleMeta = data?.nearest_vehicle_distance_m !== undefined || data?.vehicle_collision_risk !== undefined;
-          setInfo(hasSign || hasVehicleMeta ? data : null);
+  // ── Open camera when device selected ────────────────────────────────────
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    let active = true;
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    navigator.mediaDevices
+      .getUserMedia({ video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      .then(s => {
+        if (!active) { s.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+        setCamError("");
+      })
+      .catch(() => setCamError("Cannot open selected camera."));
+    return () => {
+      active = false;
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+  }, [selectedDeviceId]);
 
-          if (hasSign && data.status === "Normal") {
-            if (lastSpokenRef.current !== data.class_name) {
-              lastSpokenRef.current = data.class_name;
-              const instr = getSignInstruction(data.class_name);
+  // ── Socket.IO — connect once ─────────────────────────────────────────────
+  useEffect(() => {
+    const sock = io(SOCKET_URL, { transports: ["websocket"], reconnectionDelayMax: 10000 });
+    socketRef.current = sock;
 
-              // banner
-              const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
-              setAlertBanner({ text: `${instr?.icon ?? "🔍"} ${formatLabel(data.class_name)}`, color: pc?.border ?? "#f59e0b" });
-              clearTimeout(bannerTimerRef.current);
-              bannerTimerRef.current = setTimeout(() => setAlertBanner(null), 4000);
+    sock.on("road_sign_result", data => {
+      inFlightRef.current = false;
+      if (!sessionActiveRef.current) { setInfo(null); lastSpokenRef.current = null; return; }
 
-              if (audioRef.current) {
-                playBeep(880, 0.2, 0.35);
-                setTimeout(() => speakText(`Road sign: ${data.class_name.replace(/_/g, " ")}`), 250);
-              }
+      const hasSign        = typeof data?.class_name === "string" && data.class_name.trim();
+      const hasVehicleMeta = data?.nearest_vehicle_distance_m !== undefined || data?.vehicle_collision_risk !== undefined;
+      setInfo(hasSign || hasVehicleMeta ? data : null);
 
-              setLog(prev => [{
-                name:       data.class_name,
-                icon:       instr?.icon ?? "🔍",
-                confidence: data.confidence,
-                dist:       data.estimated_distance_m,
-                time:       new Date().toLocaleTimeString(),
-              }, ...prev.slice(0, 29)]);
-            }
-          } else if (!hasSign) {
-            lastSpokenRef.current = null;
+      if (hasSign && data.status === "Normal") {
+        if (lastSpokenRef.current !== data.class_name) {
+          lastSpokenRef.current = data.class_name;
+          const instr = getSignInstruction(data.class_name);
+          const pc = instr ? PRIORITY_COLORS[instr.priority] : null;
+          setAlertBanner({ text: `${instr?.icon ?? "🔍"} ${formatLabel(data.class_name)}`, color: pc?.border ?? "#f59e0b" });
+          clearTimeout(bannerTimerRef.current);
+          bannerTimerRef.current = setTimeout(() => setAlertBanner(null), 4000);
+          if (audioRef.current) {
+            playBeep(880, 0.2, 0.35);
+            setTimeout(() => speakText(`Road sign: ${data.class_name.replace(/_/g, " ")}`), 250);
           }
-        })
-        .catch(() => {});
+          setLog(prev => [{
+            name: data.class_name, icon: instr?.icon ?? "🔍",
+            confidence: data.confidence, dist: data.estimated_distance_m,
+            time: new Date().toLocaleTimeString(),
+          }, ...prev.slice(0, 29)]);
+        }
+      } else if (!hasSign) {
+        lastSpokenRef.current = null;
+      }
+    });
+
+    // Frame send loop — only when session active
+    const canvas = document.createElement("canvas");
+    captureCanvasRef.current = canvas;
+    sendIvRef.current = setInterval(() => {
+      if (!sessionActiveRef.current || inFlightRef.current) return;
+      const video = videoRef.current;
+      if (!video || !video.srcObject || video.readyState < 2) return;
+      canvas.width = 320; canvas.height = 240;
+      canvas.getContext("2d").drawImage(video, 0, 0, 320, 240);
+      inFlightRef.current = true;
+      sock.emit("road_sign_frame", { image: canvas.toDataURL("image/jpeg", 0.7) });
     }, 400);
 
     return () => {
-      clearInterval(pollRef.current);
-      fetch(`${API}/stop_camera`).catch(() => {});
+      clearInterval(sendIvRef.current);
+      sock.disconnect();
+    };
+  }, []);
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
       fetch(`${API}/stop_webcam_session`, { method: "POST" }).catch(() => {});
     };
   }, []);
@@ -259,12 +317,32 @@ export default function RoadSignMonitorPage() {
                 <span className="rsm-card-title">📷 Live Feed</span>
                 <span className="rsm-live-badge">● LIVE</span>
               </div>
-              <div className="rsm-stream-wrap">
-                <img
-                  src={`${API}/video_feed?t=${sessionId || "idle"}`}
-                  alt="Road sign live detection stream"
+
+              {/* Camera selector */}
+              {devices.length > 1 && (
+                <div style={{padding:"0 0 0.5rem 0"}}>
+                  <select
+                    value={selectedDeviceId}
+                    onChange={e => setSelectedDeviceId(e.target.value)}
+                    style={{width:"100%",background:"#0f1c2e",color:"#e2e8f0",border:"1px solid #1e3a5f",
+                      borderRadius:6,padding:"6px 10px",fontSize:"0.8rem",cursor:"pointer"}}
+                  >
+                    {devices.map((d, i) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || `Camera ${i + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {camError && <div style={{color:"#ef4444",fontSize:"0.75rem",marginBottom:"0.5rem"}}>{camError}</div>}
+
+              <div className="rsm-stream-wrap" style={{position:"relative"}}>
+                <video
+                  ref={videoRef}
+                  autoPlay playsInline muted
                   className="rsm-stream-img"
-                  onError={e => { e.target.style.opacity = "0.3"; }}
+                  style={{width:"100%",borderRadius:"0.5rem",display:"block"}}
                 />
                 {hasSign && (
                   <div className="rsm-stream-overlay">

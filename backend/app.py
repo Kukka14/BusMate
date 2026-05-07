@@ -3157,6 +3157,67 @@ def on_drowsiness_frame(data):
         emit("drowsiness_result", {"ok": False, "error": str(exc)})
 
 
+# ── Road Sign — socket-based frame analysis ───────────────────────────────────
+@socketio.on("road_sign_frame")
+def on_road_sign_frame(data):
+    """Receive a base64 frame from the browser, run road sign + vehicle detection,
+    emit road_sign_result back to the same client."""
+    if not _rs_ready:
+        emit("road_sign_result", {"ok": False, "error": "models not loaded"})
+        return
+
+    img_data = data.get("image", "")
+    img = decode_base64_image(img_data)
+    if img is None:
+        emit("road_sign_result", {"ok": False, "error": "invalid image"})
+        return
+
+    # Vehicle detection (uses the annotated copy, we discard the visual overlay)
+    ann = img.copy()
+    try:
+        vehicle_items, vehicle_risk, nearest_dist, collision_high = _rs_draw_vehicle_detections(img, ann)
+        vehicle_count = len(vehicle_items)
+        avg_count, traffic_congestion = _rs_update_traffic_congestion(
+            _rs_webcam_vehicle_count_hist, vehicle_count
+        )
+    except Exception:
+        vehicle_items, vehicle_risk, nearest_dist, collision_high = [], "LOW", None, False
+        vehicle_count, avg_count, traffic_congestion = 0, 0.0, "LOW"
+
+    # Road sign detection
+    sign_result = rs_process_frame(img)
+
+    if sign_result:
+        result = {
+            "ok": True,
+            "class_name":              sign_result.get("class_name"),
+            "confidence":              sign_result.get("confidence"),
+            "status":                  sign_result.get("status"),
+            "estimated_distance_m":    sign_result.get("estimated_distance_m"),
+            "vehicle_count":           vehicle_count,
+            "avg_vehicle_count":       avg_count,
+            "traffic_congestion":      traffic_congestion,
+            "vehicle_collision_risk":  vehicle_risk,
+            "nearest_vehicle_distance_m": nearest_dist,
+            "collision_high_risk":     collision_high,
+        }
+        # Keep _rs_latest_info in sync so /get_detection_info also works
+        global _rs_latest_info
+        _rs_latest_info = result
+    else:
+        result = {
+            "ok": True,
+            "vehicle_count":           vehicle_count,
+            "avg_vehicle_count":       avg_count,
+            "traffic_congestion":      traffic_congestion,
+            "vehicle_collision_risk":  vehicle_risk,
+            "nearest_vehicle_distance_m": nearest_dist,
+            "collision_high_risk":     collision_high,
+        }
+
+    emit("road_sign_result", result)
+
+
 @app.route("/analyze-drowsiness-video", methods=["POST"])
 def analyze_drowsiness_video():
     """Analyse an uploaded video file for drowsiness events.

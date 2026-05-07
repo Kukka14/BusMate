@@ -131,6 +131,10 @@ export default function DrivingMonitorPage() {
   const [videoLoading, setVideoLoading] = useState(false);
   const [videoError,   setVideoError]   = useState("");
 
+  // camera device selection
+  const [devices,          setDevices]          = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+
   // live model state
   const [connected,  setConnected]  = useState(false);
   const [result,     setResult]     = useState(null);
@@ -159,29 +163,42 @@ export default function DrivingMonitorPage() {
   // keep sessionIdRef in sync (avoids stale closure in socket handler)
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
-  // ── Webcam ──────────────────────────────────────────────────────────────
+  // ── Enumerate cameras ────────────────────────────────────────────────────
   useEffect(() => {
+    async function loadDevices() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const cams = list.filter(d => d.kind === "videoinput");
+        setDevices(cams);
+        if (cams.length > 0 && !selectedDeviceId) setSelectedDeviceId(cams[0].deviceId);
+      } catch { setCamError("Camera permission denied or not available."); }
+    }
+    loadDevices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Webcam — re-open when selected device changes ────────────────────────
+  useEffect(() => {
+    if (!selectedDeviceId) return;
     let stream;
-    let active = true; // prevents state update / stream leak after unmount
+    let active = true;
+    const constraint = { deviceId: { exact: selectedDeviceId }, width: 960, height: 720 };
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 960, height: 720, facingMode: "user" }, audio: false })
+      .getUserMedia({ video: constraint, audio: false })
       .then((s) => {
-        if (!active) {
-          // navigated away before camera finished initialising — release immediately
-          s.getTracks().forEach((t) => t.stop());
-          return;
-        }
+        if (!active) { s.getTracks().forEach(t => t.stop()); return; }
         stream = s;
         if (videoRef.current) videoRef.current.srcObject = s;
+        setCamError("");
       })
       .catch(() => setCamError("Camera permission denied or not available."));
     return () => {
       active = false;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      // clear srcObject so the browser releases the camera indicator light
+      if (stream) stream.getTracks().forEach(t => t.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
     };
-  }, []);
+  }, [selectedDeviceId]);
 
   // ── Socket.IO — connect once on mount ───────────────────────────────────
   useEffect(() => {
@@ -496,6 +513,23 @@ export default function DrivingMonitorPage() {
                     onChange={(e) => setQuality(Math.max(0.3, Math.min(0.95, Number(e.target.value) || 0.75)))}
                     className="dm-fps-input" />
                 </label>
+                {devices.length > 1 && (
+                  <label className="dm-fps-label" style={{minWidth:140}}>
+                    Camera
+                    <select
+                      value={selectedDeviceId}
+                      onChange={e => setSelectedDeviceId(e.target.value)}
+                      className="dm-fps-input"
+                      style={{width:"100%",cursor:"pointer"}}
+                    >
+                      {devices.map(d => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label || `Camera ${devices.indexOf(d) + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
               <button
                 className={`dm-session-btn ${sessionId ? "stop" : "start"}`}

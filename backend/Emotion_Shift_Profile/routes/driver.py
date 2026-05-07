@@ -624,9 +624,10 @@ def _generate_schedules(user_id):
         {"start_town": "Negombo",    "end_town": "Colombo",      "bus": "BUS-155", "route_name": "404 Coastal"},
         {"start_town": "Kandy",      "end_town": "Nuwara Eliya", "bus": "BUS-301", "route_name": "505 Hill Country"},
         {"start_town": "Colombo",    "end_town": "Galle",        "bus": "BUS-204", "route_name": "606 Southern Exp"},
+        {"start_town": "Malabe",     "end_town": "Athurugiriya", "bus": "BUS-312", "route_name": "707 Suburb Link"},
     ]
 
-    # Fixed layout: 3 past (completed) + today + 4 upcoming
+    # Fixed layout: 3 past (completed) + today + 5 upcoming
     layout = [
         (-3, "Completed", "06:00 – 14:00"),
         (-2, "Completed", "10:00 – 18:00"),
@@ -636,6 +637,7 @@ def _generate_schedules(user_id):
         ( 2, "Upcoming",  "06:00 – 14:00"),
         ( 3, "Upcoming",  "14:00 – 22:00"),
         ( 4, "Upcoming",  "06:00 – 14:00"),
+        ( 5, "Upcoming",  "08:00 – 16:00"),
     ]
 
     schedules = []
