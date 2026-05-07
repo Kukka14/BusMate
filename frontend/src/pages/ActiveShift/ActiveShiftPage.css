@@ -981,6 +981,59 @@
 .hud-scene-seg { display: flex; align-items: center; gap: 6px; font-size: 0.64rem; color: #94a3b8; }
 .hud-scene-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
+/* ── Fusion Output Card ── */
+.hud-ac--fusion {
+  border-top: 2px solid #f59e0b44;
+}
+.hud-fusion-levels {
+  display: flex;
+  gap: 4px;
+  margin-top: 0.35rem;
+  flex-wrap: wrap;
+}
+.hud-fusion-chip {
+  flex: 1;
+  text-align: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border: 1px solid #1e293b;
+  text-transform: uppercase;
+  transition: all 0.3s;
+}
+.hud-fusion-chip--active {
+  font-weight: 800;
+}
+.hud-fusion-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hud-fusion-input-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.hud-fusion-bar-wrap {
+  flex: 1;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hud-fusion-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+  min-width: 2px;
+}
+
+/* ── Scene Mini card (left col) ── */
+.hud-ac--scene-mini .hud-scene-img-wrap { display: none; }
+
 /* ── HUD ESC Hint ── */
 .hud-esc-hint {
   text-align: center;

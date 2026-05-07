@@ -2373,6 +2373,75 @@ export default function ActiveShiftPage() {
                 )}
               </div>
 
+              {/* ── SCENE ANALYSE (left col) ── */}
+              {(()=>{
+                const hCol = hazardColor(rsHazardLevel);
+                return (
+                  <div className="hud-ac hud-ac--scene-mini" style={{marginTop:"0.4rem"}}>
+                    <div className="hud-ac-header">
+                      <span className="hud-ac-icon">🎬</span>
+                      <span className="hud-ac-title">Scene Analyse</span>
+                      {rsHazardLevel && (
+                        <span className="hud-ac-badge" style={{color:hCol,borderColor:hCol+"55",background:hCol+"11"}}>
+                          {rsHazardLevel}
+                        </span>
+                      )}
+                    </div>
+                    {activeSceneFrame ? (
+                      <>
+                        <div className="hud-ac-score-row">
+                          <div className="hud-ac-score" style={{color:hCol,fontSize:"1.3rem"}}>
+                            {activeSceneFrame.hazard?.score!=null?activeSceneFrame.hazard.score.toFixed(1):"—"}
+                          </div>
+                          <div className="hud-ac-score-label">scene score</div>
+                        </div>
+                        <div className="hud-scene-segs" style={{marginTop:"0.2rem"}}>
+                          {activeSceneFrame.segments?.slice(0,3).map(seg=>(
+                            <div key={seg.id} className="hud-scene-seg">
+                              <span className="hud-scene-dot" style={{background:seg.color}}/>
+                              <span className="hud-scene-seg-label">{seg.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="hud-ac-idle">Analysing…</div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── MAP RISK (left col) ── */}
+              {(()=>{
+                const mapRisk = hzPoint ? Math.min(100, Math.max(0, hzPoint.risk * 100)) : null;
+                const mapLabel = hzPoint?.risk_label || "—";
+                const mCol = hzPoint?.risk >= 0.7 ? "#ef4444" : hzPoint?.risk >= 0.4 ? "#f59e0b" : "#22c55e";
+                return (
+                  <div className="hud-ac" style={{marginTop:"0.4rem"}}>
+                    <div className="hud-ac-header">
+                      <span className="hud-ac-icon">🗺️</span>
+                      <span className="hud-ac-title">Map Risk</span>
+                      {hzPoint && (
+                        <span className="hud-ac-badge" style={{color:mCol,borderColor:mCol+"55",background:mCol+"11"}}>
+                          {mapLabel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="hud-ac-score-row">
+                      <div className="hud-ac-score" style={{color:mCol,fontSize:"1.3rem"}}>
+                        {mapRisk!=null?mapRisk.toFixed(1):"—"}
+                      </div>
+                      <div className="hud-ac-score-label">terrain score</div>
+                    </div>
+                    {hzPoint?.road_name && (
+                      <div style={{fontSize:"0.62rem",color:"#64748b",marginTop:"0.2rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        📍 {hzPoint.road_name}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="hud-esc-hint" style={{marginTop:"auto"}}>Press <kbd>ESC</kbd> to exit</div>
             </div>
 
@@ -2504,45 +2573,70 @@ export default function ActiveShiftPage() {
                 );
               })()}
 
-              {/* ── ROAD SCENE ── */}
+              {/* ── FUSION OUTPUT ── */}
               {(()=>{
-                const isHighHazard = rsHazardLevel==="High" || rsHazardLevel==="Critical";
-                const cardCls = `hud-ac${isHighHazard?" hud-ac--warn":""}`;
-                const hCol = hazardColor(rsHazardLevel);
+                const sceneScore = activeSceneFrame?.hazard?.score ?? null;
+                const mapScore   = hzPoint ? Math.min(100, Math.max(0, hzPoint.risk * 100)) : null;
+                const fusionScore = (sceneScore != null && mapScore != null)
+                  ? Math.min(100, Math.max(0, sceneScore * 0.56 + mapScore * 0.44))
+                  : sceneScore != null ? sceneScore
+                  : mapScore != null  ? mapScore
+                  : null;
+                const fusionLevel = fusionScore == null ? "—"
+                  : fusionScore >= 70 ? "Critical"
+                  : fusionScore >= 40 ? "High"
+                  : fusionScore >= 20 ? "Medium"
+                  : "Low";
+                const LEVELS = ["Low","Medium","High","Critical"];
+                const levelColors = { Low:"#22c55e", Medium:"#f59e0b", High:"#ef4444", Critical:"#dc2626" };
+                const fCol = levelColors[fusionLevel] || "#475569";
+                const isHighFusion = fusionLevel === "High" || fusionLevel === "Critical";
+                const cardCls = `hud-ac hud-ac--fusion${isHighFusion?" hud-ac--warn":""}`;
                 return (
                   <div className={cardCls}>
                     <div className="hud-ac-header">
-                      <span className="hud-ac-icon">🎬</span>
-                      <span className="hud-ac-title">Road Scene</span>
-                      {rsHazardLevel && (
-                        <span className="hud-ac-badge" style={{color:hCol,borderColor:hCol+"55",background:hCol+"11"}}>
-                          {rsHazardLevel}
+                      <span className="hud-ac-icon">🧠</span>
+                      <span className="hud-ac-title">Fusion Output</span>
+                      {fusionLevel !== "—" && (
+                        <span className="hud-ac-badge" style={{color:fCol,borderColor:fCol+"55",background:fCol+"11"}}>
+                          {fusionLevel}
                         </span>
                       )}
                     </div>
-                    {activeSceneFrame ? (
-                      <>
-                        <div className="hud-ac-score-row">
-                          <div className="hud-ac-score" style={{color:hCol,fontSize:"1.6rem"}}>
-                            {activeSceneFrame.hazard?.score!=null?activeSceneFrame.hazard.score.toFixed(1):"—"}
-                          </div>
-                          <div className="hud-ac-score-label">hazard score</div>
+                    <div className="hud-ac-score-row">
+                      <div className="hud-ac-score" style={{color:fCol,fontSize:"2rem",fontWeight:800}}>
+                        {fusionScore!=null?fusionScore.toFixed(1):"—"}
+                      </div>
+                      <div className="hud-ac-score-label">final risk</div>
+                    </div>
+                    <div className="hud-fusion-levels">
+                      {LEVELS.map(lvl=>(
+                        <div key={lvl} className={`hud-fusion-chip${fusionLevel===lvl?" hud-fusion-chip--active":""}`}
+                          style={{
+                            color: fusionLevel===lvl ? levelColors[lvl] : "#475569",
+                            borderColor: fusionLevel===lvl ? levelColors[lvl]+"88" : "#1e293b",
+                            background: fusionLevel===lvl ? levelColors[lvl]+"18" : "transparent",
+                          }}>
+                          {lvl}
                         </div>
-                        <div className="hud-scene-img-wrap" style={{marginTop:"0.3rem"}}>
-                          <img src={activeSceneFrame.overlay} alt="scene" className="hud-scene-img"/>
+                      ))}
+                    </div>
+                    <div className="hud-fusion-inputs" style={{marginTop:"0.35rem"}}>
+                      <div className="hud-fusion-input-row">
+                        <span style={{color:"#64748b",fontSize:"0.62rem"}}>Scene</span>
+                        <div className="hud-fusion-bar-wrap">
+                          <div className="hud-fusion-bar" style={{width:`${sceneScore??0}%`,background:"#3b82f6"}}/>
                         </div>
-                        <div className="hud-scene-segs" style={{marginTop:"0.3rem"}}>
-                          {activeSceneFrame.segments?.slice(0,4).map(seg=>(
-                            <div key={seg.id} className="hud-scene-seg">
-                              <span className="hud-scene-dot" style={{background:seg.color}}/>
-                              <span className="hud-scene-seg-label">{seg.label}</span>
-                            </div>
-                          ))}
+                        <span style={{color:"#94a3b8",fontSize:"0.62rem",minWidth:"2.2rem",textAlign:"right"}}>{sceneScore!=null?sceneScore.toFixed(0):"—"}</span>
+                      </div>
+                      <div className="hud-fusion-input-row">
+                        <span style={{color:"#64748b",fontSize:"0.62rem"}}>Route</span>
+                        <div className="hud-fusion-bar-wrap">
+                          <div className="hud-fusion-bar" style={{width:`${mapScore??0}%`,background:"#10b981"}}/>
                         </div>
-                      </>
-                    ) : (
-                      <div className="hud-ac-idle">Analysing road scene…</div>
-                    )}
+                        <span style={{color:"#94a3b8",fontSize:"0.62rem",minWidth:"2.2rem",textAlign:"right"}}>{mapScore!=null?mapScore.toFixed(0):"—"}</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
