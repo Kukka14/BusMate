@@ -888,45 +888,82 @@
   overflow-y: auto;
 }
 
-/* ── Analysis card ── */
-.hud-analysis-card {
-  background: #0d1624; border: 1px solid #1e2d44;
-  border-radius: 8px; padding: 0.5rem 0.6rem;
+/* ── Alert-focused Analysis Card (hud-ac) ── */
+.hud-ac {
+  background: #080f1c;
+  border: 1px solid #1e2d44;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
   flex-shrink: 0;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
-.hud-analysis-head {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 0.7rem; font-weight: 700; color: #f1f5f9;
-  border-bottom: 1px solid #1e2d44; padding-bottom: 0.25rem; margin-bottom: 0.3rem;
+.hud-ac--warn {
+  border-color: #f59e0b66;
+  box-shadow: 0 0 12px rgba(245,158,11,0.12);
 }
-.hud-verdict-pill {
-  font-size: 0.58rem; font-weight: 700; border: 1px solid;
-  padding: 1px 6px; border-radius: 10px; text-transform: uppercase;
+.hud-ac--danger {
+  border-color: #ef444466;
+  box-shadow: 0 0 18px rgba(239,68,68,0.18);
+  animation: hud-danger-pulse 1s ease infinite;
 }
-.hud-analysis-rows { display: flex; flex-direction: column; gap: 0.1rem; margin-bottom: 0.35rem; }
-.hud-analysis-row {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 0.68rem; padding: 0.1rem 0;
+@keyframes hud-danger-pulse {
+  0%,100% { box-shadow: 0 0 18px rgba(239,68,68,0.18); }
+  50%      { box-shadow: 0 0 32px rgba(239,68,68,0.40); }
 }
-.hud-analysis-row span:first-child { color: #64748b; }
-.hud-analysis-row span:last-child  { color: #e2e8f0; }
 
-/* ── Feature chips grid ── */
-.hud-feats-grid {
-  display: grid; grid-template-columns: repeat(3,1fr); gap: 0.25rem;
+/* Header row */
+.hud-ac-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #1e2d44;
 }
-.hud-feat-chip {
-  background: #071828; border: 1px solid #1e293b;
-  border-radius: 5px; padding: 0.22rem 0.3rem;
-  display: flex; flex-direction: column; gap: 1px;
+.hud-ac-icon  { font-size: 0.9rem; }
+.hud-ac-title { font-size: 0.68rem; font-weight: 700; color: #cbd5e1; flex: 1; letter-spacing: 0.04em; text-transform: uppercase; }
+.hud-ac-badge {
+  font-size: 0.58rem; font-weight: 700;
+  padding: 2px 7px; border-radius: 8px; border: 1px solid;
+  text-transform: uppercase; letter-spacing: 0.04em;
 }
-.hud-feat-chip.warn {
-  background: #7f1d1d22; border-color: #ef444433;
+
+/* Big score */
+.hud-ac-score-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-bottom: 0.35rem;
 }
-.hud-feat-label { font-size: 0.52rem; color: #64748b; font-weight: 600; letter-spacing: 0.04em; }
-.hud-feat-chip.warn .hud-feat-label { color: #f87171; }
-.hud-feat-val { font-size: 0.68rem; font-weight: 700; color: #e2e8f0; }
-.hud-feat-chip.warn .hud-feat-val { color: #ef4444; }
+.hud-ac-score {
+  font-size: 2rem; font-weight: 800; line-height: 1;
+  letter-spacing: -0.02em;
+}
+.hud-ac-score-label {
+  font-size: 0.6rem; color: #475569; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+/* Sub row (BVI etc) */
+.hud-ac-sub-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.68rem; padding-top: 0.25rem;
+  border-top: 1px solid #1e2d4444;
+}
+
+/* Streak dots */
+.hud-ac-streak {
+  display: flex; align-items: center; gap: 4px; margin-top: 0.1rem;
+}
+.hud-streak-dot {
+  width: 14px; height: 6px; border-radius: 3px;
+  transition: background 0.2s;
+}
+.hud-streak-label {
+  font-size: 0.58rem; color: #475569; margin-left: 4px;
+}
+
+/* Idle placeholder */
+.hud-ac-idle {
+  text-align: center; color: #334155;
+  font-size: 0.68rem; padding: 0.5rem 0;
+}
 
 /* ── Scene image ── */
 .hud-scene-img-wrap {
