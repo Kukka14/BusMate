@@ -295,6 +295,8 @@ export default function ActiveShiftPage() {
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [driverDeviceId, setDriverDeviceId] = useState(null);
   const [roadDeviceId, setRoadDeviceId] = useState(null);
+  const [driverStreamReady, setDriverStreamReady] = useState(false);
+  const [roadStreamReady, setRoadStreamReady] = useState(false);
 
   const isLaptopCamera = (device) => {
     const label = (device?.label || "").toLowerCase();
@@ -331,6 +333,7 @@ export default function ActiveShiftPage() {
   const emOverlayRef = useRef(null);
   const emSendIvRef = useRef(null);
   const emRafRef    = useRef(null);
+  const emInFlight  = useRef(false);
   const [emConnected, setEmConnected] = useState(false);
   const [emResult, setEmResult]       = useState(null);
   const [emSessionId, setEmSessionId] = useState(null);
@@ -387,12 +390,14 @@ export default function ActiveShiftPage() {
   const [hzFinished, setHzFinished]   = useState(false);
 
   // ── Road Sign state ─────────────────────────────────────────────────────
-  const [rsSignInfo, setRsSignInfo]         = useState(null); // {class_name, confidence, status, estimated_distance_m}
-  const rsSignPollRef = useRef(null);
-  const rsSignLastRef = useRef(null);
+  const [rsSignInfo, setRsSignInfo]         = useState(null);
+  const rsSignPollRef   = useRef(null);
+  const rsSignLastRef   = useRef(null);
+  const rsSignFailRef   = useRef(0);          // consecutive failure counter
   const rsSignAudioEnabledRef = useRef(true);
   const [rsSignLog, setRsSignLog]           = useState([]);
   const [rsSignAudioEnabled, setRsSignAudioEnabled] = useState(true);
+  const [rsSignOnline, setRsSignOnline]     = useState(true);
 
 
   // ── Auth guard ──────────────────────────────────────────────────────────
@@ -596,6 +601,7 @@ export default function ActiveShiftPage() {
       streamRef.current = null;
     }
     if (videoRef.current) videoRef.current.srcObject = null;
+    setDriverStreamReady(false);
 
     async function openDriverCamera() {
       try {
@@ -607,6 +613,7 @@ export default function ActiveShiftPage() {
         if (videoRefEmotionDisplay.current) videoRefEmotionDisplay.current.srcObject = s;
         if (videoRefDrowsinessDisplay.current) videoRefDrowsinessDisplay.current.srcObject = s;
         setCamError("");
+        setDriverStreamReady(true);
       } catch {
         setCamError("Driver camera not available or permission denied.");
       }
@@ -624,6 +631,7 @@ export default function ActiveShiftPage() {
       streamRef2.current = null;
     }
     if (videoRef2.current) videoRef2.current.srcObject = null;
+    setRoadStreamReady(false);
 
     async function openRoadCamera() {
       try {
@@ -635,6 +643,7 @@ export default function ActiveShiftPage() {
         if (videoRefRoadSignDisplay.current) videoRefRoadSignDisplay.current.srcObject = s2;
         if (videoRefRoadSceneDisplay.current) videoRefRoadSceneDisplay.current.srcObject = s2;
         setCam2Error("");
+        setRoadStreamReady(true);
       } catch {
         // Fallback: try any remaining external camera other than the driver selection.
         try {
@@ -648,6 +657,7 @@ export default function ActiveShiftPage() {
             if (videoRefRoadSignDisplay.current) videoRefRoadSignDisplay.current.srcObject = s2;
             if (videoRefRoadSceneDisplay.current) videoRefRoadSceneDisplay.current.srcObject = s2;
             setCam2Error("");
+            setRoadStreamReady(true);
             return;
           }
         } catch {
@@ -721,7 +731,7 @@ export default function ActiveShiftPage() {
         videoRefDrowsinessDisplay.current.srcObject = streamRef.current;
       }
     }
-  }, [streamRef.current]);
+  }, [driverStreamReady]);
 
   // Propagate road stream to display refs
   useEffect(() => {
@@ -733,7 +743,7 @@ export default function ActiveShiftPage() {
         videoRefRoadSceneDisplay.current.srcObject = streamRef2.current;
       }
     }
-  }, [streamRef2.current]);
+  }, [roadStreamReady]);
 
   // Ensure all video elements play when stream is assigned
   useEffect(() => {
@@ -754,17 +764,18 @@ export default function ActiveShiftPage() {
     playVideos();
     const timer = setInterval(playVideos, 1000);
     return () => clearInterval(timer);
-  }, [shiftActive]);
+  }, [shiftActive, driverStreamReady, roadStreamReady]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── EMOTION Socket ─────────────────────────────────────────────────────
   useEffect(() => {
-    const socket = io(SOCKET_URL, {transports:["polling","websocket"]});
+    const socket = io(SOCKET_URL, {transports:["websocket"], reconnectionDelayMax: 10000});
     emSocketRef.current = socket;
     socket.on("connect",    ()=>{setEmConnected(true); console.log("[Emotion] Socket connected");});
     socket.on("disconnect", ()=>{setEmConnected(false); console.log("[Emotion] Socket disconnected");});
     socket.on("prediction", payload => {
       console.log("[Emotion] Received prediction:", payload);
+      emInFlight.current = false;
       if (payload?.ok===false) { console.warn("[Emotion] Error response:", payload.error); return; }
       setEmResult(payload);
       setEmFrames(c=>c+1);
@@ -779,12 +790,12 @@ export default function ActiveShiftPage() {
       }
     });
     socket.on("error", (err) => console.error("[Emotion] Socket error:", err));
-    return () => { if(emSendIvRef.current) clearInterval(emSendIvRef.current); socket.disconnect(); };
+    return () => { if(emSendIvRef.current) clearInterval(emSendIvRef.current); emInFlight.current = false; socket.disconnect(); };
   }, []);
 
   // Emotion frame send loop — only when shift active
   useEffect(() => {
-    if (!shiftActive) { if(emSendIvRef.current) clearInterval(emSendIvRef.current); return; }
+    if (!shiftActive) { if(emSendIvRef.current) clearInterval(emSendIvRef.current); emInFlight.current = false; return; }
     emSendIvRef.current = setInterval(()=>{
       const v=videoRef.current, c=captureRef.current, s=emSocketRef.current;
       if(!v||!c||!s||!s.connected||v.readyState<2) {
@@ -792,18 +803,23 @@ export default function ActiveShiftPage() {
         if (v && v.readyState < 2) console.log("[Emotion] Video not ready, skipping frame");
         return;
       }
+      if (emInFlight.current) {
+        console.log("[Emotion] Frame already in flight, skipping");
+        return;
+      }
       const ctx=c.getContext("2d"); c.width=320; c.height=240;
       ctx.drawImage(v,0,0,320,240);
+      emInFlight.current = true;
       s.emit("frame",{driver_id:driverId,image:c.toDataURL("image/jpeg",0.70),client_ts:Date.now()});
       console.log("[Emotion] Frame sent to server");
-    }, 300);
-    return () => clearInterval(emSendIvRef.current);
+    }, 400);
+    return () => { clearInterval(emSendIvRef.current); emInFlight.current = false; };
   }, [shiftActive, driverId]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // ── DROWSINESS Socket ──────────────────────────────────────────────────
   useEffect(() => {
-    const socket = io(SOCKET_URL, {transports:["polling","websocket"]});
+    const socket = io(SOCKET_URL, {transports:["websocket"], reconnectionDelayMax: 10000});
     dwSocketRef.current = socket;
     socket.on("connect",    ()=>{setDwConnected(true); console.log("[Drowsiness] Socket connected");});
     socket.on("disconnect", ()=>{setDwConnected(false); console.log("[Drowsiness] Socket disconnected");});
@@ -939,7 +955,11 @@ export default function ActiveShiftPage() {
       return;
     }
 
-    // Polling interval runs every 400ms while shift is active
+    // Reset circuit breaker when shift starts
+    rsSignFailRef.current = 0;
+    setRsSignOnline(true);
+
+    // Polling interval — stops itself after 5 consecutive failures (circuit breaker)
     rsSignPollRef.current = setInterval(() => {
       fetch("/road-sign/get_detection_info")
         .then(r => {
@@ -947,58 +967,47 @@ export default function ActiveShiftPage() {
           return r.json();
         })
         .then(data => {
-          console.log("[Road Sign Poll] Response:", data);
-          
-          // Check if detection has data
+          rsSignFailRef.current = 0;
+          setRsSignOnline(true);
+
           const hasSign = data?.class_name;
           const hasVehicleMeta =
             data?.nearest_vehicle_distance_m !== undefined ||
             data?.vehicle_collision_risk !== undefined;
 
-          // Only update display if there's actual detection data
           if (hasSign || hasVehicleMeta) {
             setRsSignInfo(data);
-
-            // Audio alert + logging when sign detected (status = Normal)
-            if (hasSign && data.status === "Normal") {
-              // Only trigger alert when sign name changes (prevent duplicate alerts)
-              if (rsSignLastRef.current !== data.class_name) {
-                rsSignLastRef.current = data.class_name;
-
-                // Play audio alert if enabled
-                if (rsSignAudioEnabledRef.current) {
-                  const name = formatLabel(data.class_name);
-                  playBeep(880, 0.2, 0.35);
-                  setTimeout(() => speakText(`Road sign detected: ${name}`), 250);
-                }
-
-                // Add to detection log
-                setRsSignLog(prev => [
-                  {
-                    class_name: data.class_name,
-                    confidence: data.confidence,
-                    status: data.status,
-                    estimated_distance_m: data.estimated_distance_m,
-                    time: new Date().toLocaleTimeString(),
-                  },
-                  ...prev.slice(0, 29), // keep last 30 entries
-                ]);
+            if (hasSign && data.status === "Normal" && rsSignLastRef.current !== data.class_name) {
+              rsSignLastRef.current = data.class_name;
+              if (rsSignAudioEnabledRef.current) {
+                playBeep(880, 0.2, 0.35);
+                setTimeout(() => speakText(`Road sign detected: ${formatLabel(data.class_name)}`), 250);
               }
+              setRsSignLog(prev => [
+                { class_name: data.class_name, confidence: data.confidence,
+                  status: data.status, estimated_distance_m: data.estimated_distance_m,
+                  time: new Date().toLocaleTimeString() },
+                ...prev.slice(0, 29),
+              ]);
             } else if (!hasSign) {
-              // Reset so next appearance triggers alert
               rsSignLastRef.current = null;
             }
           } else {
-            // No detection — keep showing null to keep "Scanning" badge
             setRsSignInfo(null);
             rsSignLastRef.current = null;
           }
         })
-        .catch(err => {
-          console.warn("[Road Sign Poll] Fetch error:", err.message);
-          setRsSignInfo(null);
+        .catch(() => {
+          rsSignFailRef.current += 1;
+          if (rsSignFailRef.current >= 5) {
+            // Backend unreachable — stop polling to prevent terminal spam
+            clearInterval(rsSignPollRef.current);
+            rsSignPollRef.current = null;
+            setRsSignInfo(null);
+            setRsSignOnline(false);
+          }
         });
-    }, 400); // Poll every 400ms
+    }, 400);
 
     return () => {
       if (rsSignPollRef.current) clearInterval(rsSignPollRef.current);
@@ -1709,15 +1718,16 @@ export default function ActiveShiftPage() {
               </div>
             </div>
 
-            {/* ── Road Sign — All-in-one Card ──────────────────────────── */}
+            {/* ── Road Sign Card ────────────────────────────────────────── */}
             {(() => {
-              const rsInstr    = rsHasSign ? getSignInstruction(rsSignInfo.class_name) : null;
-              const rsPc       = rsInstr ? PRIORITY_COLORS[rsInstr.priority] : null;
-              const rsRiskCol  = {"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.vehicle_collision_risk] ?? "#64748b";
-              const rsCongCol  = {"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.traffic_congestion] ?? "#64748b";
+              const rsInstr   = rsHasSign ? getSignInstruction(rsSignInfo.class_name) : null;
+              const rsPc      = rsInstr ? PRIORITY_COLORS[rsInstr.priority] : null;
+              const rsRiskCol = {"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.vehicle_collision_risk] ?? "#64748b";
+              const statusBadge = !rsSignOnline ? "red" : rsHasSign ? "green" : rsHasVehicleMeta ? "blue" : "gray";
+              const statusLabel = !rsSignOnline ? "Offline" : rsHasSign ? "Detected" : rsHasVehicleMeta ? "Tracking" : "Scanning";
               return (
                 <div className="as-panel as-camera-panel" style={{padding:"0.75rem", ...(rsPc ? {borderColor:rsPc.border} : {})}}>
-                  {/* card head */}
+                  {/* header */}
                   <div className="as-panel-head" style={{marginBottom:"0.5rem"}}>
                     <span className="as-panel-title" style={{fontSize:"0.9rem"}}>🚦 Road Sign</span>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -1727,34 +1737,35 @@ export default function ActiveShiftPage() {
                         title={rsSignAudioEnabled?"Mute":"Enable audio"}>
                         {rsSignAudioEnabled?"🔊":"🔇"}
                       </button>
-                      <span className={`as-badge ${rsHasSign?"green":rsHasVehicleMeta?"blue":"gray"}`} style={{fontSize:"0.7rem"}}>
-                        {rsHasSign?"Detected":rsHasVehicleMeta?"Tracking":"Scanning"}
-                      </span>
+                      <span className={`as-badge ${statusBadge}`} style={{fontSize:"0.7rem"}}>{statusLabel}</span>
                     </div>
                   </div>
 
-                  {/* hidden camera stream for backend capture */}
-                  <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted style={{display:"none"}}/>
-
-                  {/* MJPEG stream */}
-                  <div style={{position:"relative",background:"#060913",borderRadius:"0.5rem",overflow:"hidden",aspectRatio:"16/9",marginBottom:"0.5rem"}}>
-                    <img src={`${API}/video_feed`} alt="Road sign YOLO feed"
-                      style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}
-                      onError={e=>{e.target.style.opacity="0.3";}}/>
+                  {/* live road camera */}
+                  <div className="as-cam-wrap" style={{position:"relative",marginBottom:"0.5rem"}}>
+                    <video ref={videoRefRoadSignDisplay} autoPlay playsInline muted className="as-cam-video"
+                      style={{borderRadius:"0.5rem"}}/>
                     {rsHasSign && (
-                      <div style={{position:"absolute",top:6,right:6,display:"flex",gap:5,alignItems:"center",
+                      <div style={{position:"absolute",top:6,left:6,display:"flex",gap:5,alignItems:"center",
                         background:"rgba(0,0,0,0.75)",padding:"3px 9px",borderRadius:6}}>
                         <span style={{fontSize:"0.6rem",color:"#22c55e",fontWeight:700}}>● LIVE</span>
                         <span style={{fontSize:"0.72rem",color:"#f1f5f9",fontWeight:600}}>{formatLabel(rsSignInfo.class_name)}</span>
                         <span style={{fontSize:"0.68rem",color:"#94a3b8"}}>{Math.round((rsSignInfo.confidence??0)*100)}%</span>
                       </div>
                     )}
+                    {!rsSignOnline && (
+                      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",
+                        justifyContent:"center",background:"rgba(0,0,0,0.55)",borderRadius:"0.5rem",gap:6}}>
+                        <span style={{fontSize:"1.4rem"}}>🔌</span>
+                        <span style={{fontSize:"0.75rem",color:"#ef4444",fontWeight:700}}>Detection Backend Offline</span>
+                        <span style={{fontSize:"0.65rem",color:"#64748b"}}>Start the road sign server to enable</span>
+                      </div>
+                    )}
                   </div>
 
-                  {/* sign + vehicle info */}
+                  {/* detection result or idle state */}
                   {rsHasSign ? (
                     <div style={{display:"flex",flexDirection:"column",gap:"0.4rem"}}>
-                      {/* sign name */}
                       <div style={{display:"flex",alignItems:"flex-start",gap:"0.55rem",padding:"0.45rem 0.6rem",
                         background:"rgba(7,24,40,0.7)",borderRadius:9,border:`1px solid ${rsPc?.border??"#1e293b"}`}}>
                         <span style={{fontSize:"1.35rem"}}>{rsInstr?.icon??"🔍"}</span>
@@ -1769,8 +1780,6 @@ export default function ActiveShiftPage() {
                           </span>
                         )}
                       </div>
-
-                      {/* confidence bar */}
                       <div>
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:"0.6rem",color:"#64748b",marginBottom:3}}>
                           <span>Confidence</span>
@@ -1783,16 +1792,14 @@ export default function ActiveShiftPage() {
                             background:(rsSignInfo.confidence??0)>0.7?"#22c55e":(rsSignInfo.confidence??0)>0.45?"#f59e0b":"#ef4444"}}/>
                         </div>
                       </div>
-
-                      {/* 6-metric grid */}
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.3rem"}}>
                         {[
-                          {label:"Sign Dist.",     val:formatDistance(rsSignInfo.estimated_distance_m),                    color:"#38bdf8"},
-                          {label:"Status",         val:rsSignInfo.status??"—",                                              color:rsSignInfo.status==="Normal"?"#22c55e":"#f59e0b"},
-                          {label:"Collision Risk", val:rsSignInfo.vehicle_collision_risk??"—",                              color:rsRiskCol},
-                          {label:"Vehicle Dist.",  val:formatDistance(rsSignInfo.nearest_vehicle_distance_m),              color:rsRiskCol},
+                          {label:"Sign Dist.",     val:formatDistance(rsSignInfo.estimated_distance_m), color:"#38bdf8"},
+                          {label:"Status",         val:rsSignInfo.status??"—",                          color:rsSignInfo.status==="Normal"?"#22c55e":"#f59e0b"},
+                          {label:"Collision Risk", val:rsSignInfo.vehicle_collision_risk??"—",           color:rsRiskCol},
+                          {label:"Vehicle Dist.",  val:formatDistance(rsSignInfo.nearest_vehicle_distance_m), color:rsRiskCol},
                           {label:"Vehicles",       val:rsSignInfo.vehicle_count!=null?`${rsSignInfo.vehicle_count}`:rsHasVehicleMeta?"0":"—"},
-                          {label:"Traffic",        val:rsSignInfo.traffic_congestion??"—",                                  color:rsCongCol},
+                          {label:"Traffic",        val:rsSignInfo.traffic_congestion??"—",               color:{"HIGH":"#ef4444","MEDIUM":"#f59e0b","LOW":"#22c55e"}[rsSignInfo?.traffic_congestion]??"#64748b"},
                         ].map(({label,val,color})=>(
                           <div key={label} style={{background:"rgba(7,24,40,0.6)",borderRadius:7,padding:"0.3rem 0.5rem",border:"1px solid #1e293b"}}>
                             <div style={{fontSize:"0.57rem",color:"#64748b",fontWeight:600,letterSpacing:"0.04em",textTransform:"uppercase"}}>{label}</div>
@@ -1800,8 +1807,6 @@ export default function ActiveShiftPage() {
                           </div>
                         ))}
                       </div>
-
-                      {/* recent log */}
                       {rsSignLog.length > 0 && (
                         <div style={{background:"rgba(7,24,40,0.5)",borderRadius:8,padding:"0.4rem 0.55rem",border:"1px solid #1e293b"}}>
                           <div style={{fontSize:"0.58rem",color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>Recent</div>
@@ -1817,10 +1822,12 @@ export default function ActiveShiftPage() {
                     </div>
                   ) : (
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-                      gap:"0.3rem",padding:"1rem 0.75rem",color:"#475569",textAlign:"center"}}>
-                      <span style={{fontSize:"1.5rem"}}>👁</span>
-                      <p style={{margin:0,fontSize:"0.8rem",color:"#64748b"}}>Scanning for road signs…</p>
-                      {rsHasVehicleMeta && (
+                      gap:"0.3rem",padding:"0.75rem",color:"#475569",textAlign:"center"}}>
+                      {rsSignOnline
+                        ? <><span style={{fontSize:"1.4rem"}}>👁</span><p style={{margin:0,fontSize:"0.78rem",color:"#64748b"}}>Scanning for road signs…</p></>
+                        : <p style={{margin:0,fontSize:"0.75rem",color:"#475569"}}>Camera feed active — detection paused</p>
+                      }
+                      {rsHasVehicleMeta && rsSignOnline && (
                         <div style={{display:"flex",gap:10,marginTop:4}}>
                           <span style={{fontSize:"0.7rem",color:rsRiskCol,fontWeight:700}}>🚗 {rsSignInfo?.vehicle_collision_risk??"—"} RISK</span>
                           <span style={{fontSize:"0.7rem",color:"#64748b"}}>{rsSignInfo?.vehicle_count??0} vehicles</span>
